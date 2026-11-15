@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.FileManagement;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
@@ -127,6 +128,21 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         }
 
         return result;
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<Model3DPickerDto>> ListPickerModelsAsync(CancellationToken ct)
+    {
+        IReadOnlyList<Model3DPickerProjection> models = await _model3dFiles.ListValidPickerAsync(ct);
+
+        return models
+            .Select(model => new Model3DPickerDto(
+                model.Id,
+                model.Name,
+                model.FileName,
+                _fileManagementService.GetModelFileFormatString(model.FileFormat),
+                model.UploadedAt))
+            .ToList();
     }
 
     /// <summary>
@@ -348,6 +364,140 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         {
             _logger.LogError("Failed to delete model: {Id}: {Message}", id, LogSanitizer.Sanitize(ex.Message));
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Deletes several 3D models and reports one outcome per distinct requested ID.
+    /// </summary>
+    /// <param name="ids">Model identifiers. Duplicates are collapsed, preserving first-seen order.</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>One <see cref="BulkDeleteItemResult"/> per distinct ID, in request order.</returns>
+    /// <remarks>
+    /// <para>Valid models are loaded with one chunked set-based query; missing or invalid IDs report
+    /// <see cref="BulkDeleteItemStatus.NotFound"/>, matching <see cref="DeleteModelAsync"/>.</para>
+    /// <para>Each model then keeps the single-delete semantics: its stored model file and thumbnail are
+    /// removed first (paths outside the models directory are skipped, as before), then its record is
+    /// removed and saved. Records are committed one at a time because the physical deletes cannot
+    /// participate in a database transaction: a batched commit failure after several files were removed
+    /// would retain every record while their files were already gone. Per-item commits keep each
+    /// outcome attributable.</para>
+    /// <para>A storage failure before the model file is removed reports <see cref="BulkDeleteItemReasons.StorageFailed"/>.
+    /// Once a stored file was removed, a later failure reports
+    /// <see cref="BulkDeleteItemReasons.FilesRemovedRecordRetained"/>. After a save failure the record is
+    /// re-read to report what actually happened; if that is not possible the outcome is
+    /// <see cref="BulkDeleteItemStatus.Unknown"/>.</para>
+    /// <para>Caller cancellation propagates: a cancelled save is not reconciled into an outcome, and no further
+    /// model's stored files are touched.</para>
+    /// </remarks>
+    public async Task<IReadOnlyList<BulkDeleteItemResult>> DeleteModelsAsync(IEnumerable<Guid> ids, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        List<Guid> requestedIds = ids.Distinct().ToList();
+        if (requestedIds.Count == 0)
+        {
+            return [];
+        }
+
+        Dictionary<Guid, Model3D> modelsById;
+        try
+        {
+            modelsById = (await _model3dFiles.GetValidByIdsAsync(requestedIds, ct)).ToDictionary(m => m.Id);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError("Failed to load models for bulk deletion: {Message}", LogSanitizer.Sanitize(ex.Message));
+            return requestedIds.ConvertAll(id => new BulkDeleteItemResult(id, BulkDeleteItemStatus.Failed, BulkDeleteItemReasons.DatabaseFailed));
+        }
+
+        List<BulkDeleteItemResult> results = new(requestedIds.Count);
+        foreach (Guid id in requestedIds)
+        {
+            results.Add(modelsById.TryGetValue(id, out Model3D? model)
+                ? await DeleteLoadedModelAsync(model, ct)
+                : new BulkDeleteItemResult(id, BulkDeleteItemStatus.NotFound));
+        }
+
+        _logger.LogInformation(
+            "Bulk model deletion complete: {RemovedCount}/{RequestedCount} record(s) removed",
+            results.Count(r => r.RecordRemoved),
+            requestedIds.Count);
+        return results;
+    }
+
+    private async Task<BulkDeleteItemResult> DeleteLoadedModelAsync(Model3D model, CancellationToken ct)
+    {
+        Guid id = model.Id;
+        bool storedFileRemoved = false;
+        ct.ThrowIfCancellationRequested();
+        try
+        {
+            string fullModelPath = Path.Join(_modelsPath, model.FileName);
+            if (_fileManagementService.IsSafePath(fullModelPath, _modelsPath) && System.IO.File.Exists(fullModelPath))
+            {
+                System.IO.File.Delete(fullModelPath);
+                storedFileRemoved = true;
+            }
+
+            string? thumbnailFileName = model.ThumbnailFileName;
+            if (thumbnailFileName != null)
+            {
+                string fullThumbnailPath = Path.Join(_modelsPath, thumbnailFileName);
+                if (_fileManagementService.IsSafePath(fullThumbnailPath, _modelsPath) && System.IO.File.Exists(fullThumbnailPath))
+                {
+                    System.IO.File.Delete(fullThumbnailPath);
+                    storedFileRemoved = true;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError("Failed to delete stored files for model {Id}: {Message}", id, LogSanitizer.Sanitize(ex.Message));
+            return new BulkDeleteItemResult(
+                id,
+                BulkDeleteItemStatus.Failed,
+                storedFileRemoved ? BulkDeleteItemReasons.FilesRemovedRecordRetained : BulkDeleteItemReasons.StorageFailed);
+        }
+
+        try
+        {
+            await _model3dFiles.RemoveAsync(model, ct);
+            await _model3dFiles.SaveChangesAsync(ct);
+            _logger.LogInformation("Model deleted: {Id}", id);
+            return new BulkDeleteItemResult(id, BulkDeleteItemStatus.Deleted);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError("Failed to delete model record {Id}: {Message}", id, LogSanitizer.Sanitize(ex.Message));
+            return await ReconcileFailedModelRemovalAsync(id, storedFileRemoved);
+        }
+    }
+
+    /// <summary>
+    /// Re-reads a model after a failed save so the reported outcome reflects the database, and clears the
+    /// failed Deleted entry so a later save in the same request cannot replay it.
+    /// </summary>
+    private async Task<BulkDeleteItemResult> ReconcileFailedModelRemovalAsync(Guid id, bool storedFileRemoved)
+    {
+        try
+        {
+            Model3D? persisted = await _model3dFiles.GetByIdForReconciliationAsync(id, CancellationToken.None);
+            if (persisted is null)
+            {
+                return new BulkDeleteItemResult(id, BulkDeleteItemStatus.Deleted);
+            }
+
+            return new BulkDeleteItemResult(
+                id,
+                BulkDeleteItemStatus.Failed,
+                storedFileRemoved ? BulkDeleteItemReasons.FilesRemovedRecordRetained : BulkDeleteItemReasons.DatabaseFailed);
+        }
+        catch (Exception ex)
+        {
+            // Deliberately broad: this read runs with CancellationToken.None after the save already failed, so any
+            // failure here (provider, timeout, disposed context) leaves the outcome unknown rather than failed.
+            _logger.LogError("Could not determine deletion outcome for model {Id}: {Message}", id, LogSanitizer.Sanitize(ex.Message));
+            return new BulkDeleteItemResult(id, BulkDeleteItemStatus.Unknown, BulkDeleteItemReasons.CommitOutcomeUnknown);
         }
     }
 

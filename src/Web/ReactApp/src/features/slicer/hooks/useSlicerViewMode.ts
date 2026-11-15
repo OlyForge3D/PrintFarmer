@@ -20,14 +20,12 @@ export function useSlicerViewMode(): [SlicerViewMode, () => void] {
 
   // Toggle and persist
   const toggleMode = useCallback(() => {
-    setMode((prev) => {
-      const next = prev === 'simple' ? 'advanced' : 'simple';
-      localStorage.setItem(STORAGE_KEY, next);
-      // Dispatch a custom event so other mounted instances of this hook sync
-      window.dispatchEvent(new CustomEvent('slicer-viewmode-change', { detail: next }));
-      return next;
-    });
-  }, []);
+    const next = mode === 'simple' ? 'advanced' : 'simple';
+    setMode(next);
+    localStorage.setItem(STORAGE_KEY, next);
+    // Keep side effects out of the replayable React state updater.
+    window.dispatchEvent(new CustomEvent('slicer-viewmode-change', { detail: next }));
+  }, [mode]);
 
   // Listen for changes from OTHER components using this hook
   useEffect(() => {

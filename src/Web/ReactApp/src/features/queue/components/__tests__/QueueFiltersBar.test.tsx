@@ -3,7 +3,9 @@ import { describe, it, expect, vi } from "vitest";
 import { TableFiltersBar } from "../QueueFiltersBar";
 
 describe("TableFiltersBar Component", () => {
-  it("should render all filter fields", () => {
+  const openFilters = () => fireEvent.click(screen.getByRole("button", { name: /^Filters/ }));
+
+  it("should keep filter fields collapsed until the shared Filters disclosure is opened", () => {
     const mockHandlers = {
       onStatusChange: vi.fn(),
       onModelChange: vi.fn(),
@@ -14,6 +16,13 @@ describe("TableFiltersBar Component", () => {
 
     render(<TableFiltersBar {...mockHandlers} />);
 
+    const filterButton = screen.getByRole("button", { name: "Filters" });
+    expect(filterButton).toHaveAttribute("aria-expanded", "false");
+    const panelId = filterButton.getAttribute("aria-controls");
+    expect(panelId).toBeTruthy();
+    expect(document.getElementById(panelId!)).toHaveAttribute("hidden");
+
+    openFilters();
     expect(screen.getByLabelText("Filter by status")).toBeInTheDocument();
     expect(screen.getByLabelText("Filter by printer model")).toBeInTheDocument();
     expect(screen.getByLabelText("Filter by material")).toBeInTheDocument();
@@ -31,6 +40,7 @@ describe("TableFiltersBar Component", () => {
     };
 
     render(<TableFiltersBar {...mockHandlers} />);
+    openFilters();
 
     const statusSelect = screen.getByDisplayValue("Active Jobs") as HTMLSelectElement;
     fireEvent.change(statusSelect, { target: { value: "Queued" } });
@@ -49,6 +59,7 @@ describe("TableFiltersBar Component", () => {
     };
 
     render(<TableFiltersBar {...mockHandlers} />);
+    openFilters();
 
     const modelInput = screen.getByPlaceholderText("Printer model...") as HTMLInputElement;
     fireEvent.change(modelInput, { target: { value: "Prusa CORE One" } });
@@ -67,6 +78,7 @@ describe("TableFiltersBar Component", () => {
     };
 
     render(<TableFiltersBar {...mockHandlers} />);
+    openFilters();
 
     const materialSelect = screen.getByDisplayValue("All Materials") as HTMLSelectElement;
     fireEvent.change(materialSelect, { target: { value: "PLA" } });
@@ -92,7 +104,7 @@ describe("TableFiltersBar Component", () => {
     expect(onRefresh).toHaveBeenCalled();
   });
 
-  it("should clear all filters when clear button is clicked", () => {
+  it("resets filters without resetting the independent sort control", () => {
     const onStatusChange = vi.fn();
     const onModelChange = vi.fn();
     const onMaterialChange = vi.fn();
@@ -106,20 +118,21 @@ describe("TableFiltersBar Component", () => {
     };
 
     render(<TableFiltersBar {...mockHandlers} />);
+    openFilters();
 
-    // Set a filter first so the clear button appears
+    fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "deadline" } });
+
     const statusSelect = screen.getByDisplayValue("Active Jobs") as HTMLSelectElement;
     fireEvent.change(statusSelect, { target: { value: "Queued" } });
 
-    // Click clear button (Reset all filters)
-    const clearButton = screen.getByTitle("Reset all filters");
-    fireEvent.click(clearButton);
+    fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
 
-    // Verify all handlers were called with null
     expect(onStatusChange).toHaveBeenCalledWith(null);
     expect(onModelChange).toHaveBeenCalledWith(null);
     expect(onMaterialChange).toHaveBeenCalledWith(null);
-    expect(onSortChange).toHaveBeenCalledWith("priority");
+    expect(onSortChange).toHaveBeenCalledOnce();
+    expect(onSortChange).toHaveBeenCalledWith("deadline");
+    expect(screen.getByLabelText("Sort by")).toHaveValue("deadline");
   });
 
   it("should disable refresh button when loading", () => {
@@ -147,6 +160,7 @@ describe("TableFiltersBar Component", () => {
     };
 
     render(<TableFiltersBar {...mockHandlers} />);
+    openFilters();
 
     const statusSelect = screen.getByDisplayValue("Active Jobs") as HTMLSelectElement;
     const options = statusSelect.querySelectorAll("option");
@@ -174,6 +188,7 @@ describe("TableFiltersBar Component", () => {
     };
 
     render(<TableFiltersBar {...mockHandlers} />);
+    openFilters();
 
     const materialSelect = screen.getByDisplayValue("All Materials") as HTMLSelectElement;
     const options = materialSelect.querySelectorAll("option");
@@ -196,7 +211,7 @@ describe("TableFiltersBar Component", () => {
 
     render(<TableFiltersBar {...mockHandlers} />);
 
-    const sortSelect = screen.getByLabelText("Sort queue jobs") as HTMLSelectElement;
+    const sortSelect = screen.getByLabelText("Sort by") as HTMLSelectElement;
     fireEvent.change(sortSelect, { target: { value: "deadline" } });
 
     expect(onSortChange).toHaveBeenCalledWith("deadline");

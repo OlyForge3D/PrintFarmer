@@ -79,11 +79,11 @@ current worker release.
 
 - Every OrcaSlicer plugin registers itself under a `(name, version)` key in `ISlicerRegistry`. `SlicerPluginDiscovery` de-duplicates on that tuple so a repeated version is a no-op.
 - Slice jobs carry an optional `slicerEngineVersion` (persisted on `SliceJob` — see the `AddSliceJobSlicerEngineVersion` migrations for PostgreSQL and SQL Server). `SliceJobController.SubmitAsync` validates the version against the registry and returns HTTP 400 with the list of registered versions if it's unknown.
-- The controller **server-derives** `RequiredCapabilitiesJson`:
+- For legacy selections, the controller **server-derives** `RequiredCapabilitiesJson`:
   - Pinned to a version → `["orcaslicer:<version>"]` only. No generic `orcaslicer` capability.
   - Unpinned → `["orcaslicer"]` only.
   This is deliberate: `EfSliceJobRepository.ClaimNextJobAsync` uses OR-match, so a mixed capability set would let a wrong-version worker claim a pinned job.
-- Workers advertise their supported capabilities via `WorkerCapabilityProvider`, which emits `["orcaslicer","orcaslicer:<Worker:EngineVersion>","stl-processing","gcode-generation"]`. Both `SlicerRegistrationClient` (initial registration payload) and `QueueConsumerService` (per-poll capability list) use the same provider so they never drift.
+- Workers advertise their supported capabilities via `WorkerCapabilityProvider`, including `orcaslicer`, `orcaslicer:<Worker:EngineVersion>`, `orcaslicer:native-profile-selections-v1`, `orcaslicer:<Worker:EngineVersion>:native-profile-selections-v1`, `stl-processing`, and `gcode-generation`. Both `SlicerRegistrationClient` and `QueueConsumerService` use the same provider.
 - `GET /api/slicers/engines` returns `[{ engine, versions[], latest }]` for the React version picker.
 
 ### Deploying a second (previous) worker
@@ -92,7 +92,44 @@ current worker release.
 2. The bundled compose template `scripts/docker/compose-templates/docker-compose.orcaslicer-worker-previous.yml` configures the previous engine and its service name. Enable it in generated stacks with `ENABLE_ORCA_WORKER_PREVIOUS=yes` when running `scripts/docker/compose-generator.sh` (default is off, so single-engine installs are unchanged).
 3. The Dockerfile (`scripts/docker/dockerfiles/Dockerfile.multistage`) restores and publishes both `Farm.Slicers.OrcaSlicer.v2_4_0` and `Farm.Slicers.OrcaSlicer.v2_3_1` plugins into the shared plugin drop that the host loads via `Slicer:PluginsPath`.
 
+### Bed surfaces and filament temperatures
+
+The web slicer and Quick Slice preserve the profile's bed surface unless the
+operator explicitly chooses another **Bed Type**. That choice is submitted as
+`overrides.curr_bed_type` and included in the native process configuration; it
+does not rewrite the filament's temperature arrays.
+
+Bed summaries read the selected surface's native first-layer and other-layer
+keys, not the legacy hot-plate summary. Zero stays zero, missing/unsupported
+values appear as **Unknown**, and each extruder's profile values remain separate.
+These are profile values, not proof of the generated heating commands:
+OrcaSlicer's active-filament selection, `bed_temperature_formula`, and custom
+start G-code still determine what reaches the printer.
+
+The filament editor honors the selected machine's resolved
+`support_multi_bed_types`. When false and the active `curr_bed_type` is known,
+only that surface's temperature pair is visible (not necessarily
+`hot_plate_temp`). When true, all surface pairs are available; Bambu machines
+retain multi-bed behavior. Missing machine/plate context is reported honestly
+and leaves all pairs visible. Hiding a surface never deletes its values or
+changes profile inheritance; saving an edit preserves other surfaces and the
+remaining native vector entries.
+
+This matches OrcaSlicer v2.4.0's
+[filament visibility rule](https://github.com/SoftFever/OrcaSlicer/blob/6d9eb1792f50d11ea12d60526b6ace58666354fd/src/slic3r/GUI/Tab.cpp)
+and [native surface-key lookup](https://github.com/SoftFever/OrcaSlicer/blob/6d9eb1792f50d11ea12d60526b6ace58666354fd/src/libslic3r/PrintConfig.hpp).
+It does not establish the cause of an existing failed physical print without
+that job's profiles, effective surface and generated start G-code.
+
 ### Runtime custom profile overlay
+
+In the web slicer's machine and filament editors, **Save** updates an existing
+user profile in place. **Save as** creates a separately named copy. Saving a
+system profile always asks for a custom name and creates a user copy; it never
+changes the system source. Both actions are available even without edits.
+Copies retain native settings and the source's printer associations.
+Selections retain the user profile's ID even when its display name matches a
+system profile, including when restoring the last selection.
 
 The worker scans one composed root at `/app/profiles`. Its container entrypoint
 creates symbolic links for both immutable stock entries from
@@ -359,6 +396,30 @@ Wait for `GET /api/slicers/engines` to report `2.3.1` as
 11. UI receives notification, refreshes job status
 12. User downloads G-code
 ```
+
+The web slicer submits `profileSelections` for OrcaSlicer jobs: `machine`,
+`process`, and an extruder-ordered `filaments` array. Every entry carries
+`source` (`system` or `user`) and `name`; `user` entries also require
+`customProfileId`. The API authorizes user IDs against the authenticated user,
+public visibility or administrator access, rather than trusting request
+`userId`. A missing, renamed, inaccessible, wrong-type or ambiguous profile
+returns `invalid_profile_selection`; an unavailable stock library returns 503.
+Neither falls back to a same-named profile from the other source. Legacy clients
+that omit `profileSelections` retain the existing resolution contract.
+
+Explicit per-extruder selections persist ordered native filament documents and
+SHA-256 digests in `SliceJob.ExtruderFilamentProfilesJson`. The claim transports
+that same snapshot list to the worker, which verifies every digest before writing
+`filament_0.json`, `filament_1.json`, and subsequent files in order.
+`--load-filaments` receives those paths joined by semicolons. The completion digest
+hashes the ordered documents separated by a NUL byte. Malformed or empty explicit
+lists fail instead of falling back to name-based lookup; legacy jobs without the
+list retain the single native filament path or legacy named-profile behavior.
+Explicit selections require only the matching composite capability:
+`orcaslicer:native-profile-selections-v1` when unpinned, or
+`orcaslicer:<version>:native-profile-selections-v1` when pinned. Do not mix in
+generic capabilities: OR-any matching would allow an unsupported worker to claim
+the job.
 
 ---
 

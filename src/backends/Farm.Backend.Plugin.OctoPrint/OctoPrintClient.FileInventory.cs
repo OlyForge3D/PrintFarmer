@@ -6,12 +6,20 @@ namespace Farm.Backend.Plugin.OctoPrint;
 
 public partial class OctoPrintClient : ISupportsFileInventory
 {
+    private readonly TimeProvider _inventoryTimeProvider = TimeProvider.System;
+
+    internal OctoPrintClient(HttpClient httpClient, TimeProvider inventoryTimeProvider)
+        : this(httpClient)
+    {
+        _inventoryTimeProvider = inventoryTimeProvider;
+    }
+
     /// <summary>Reads authenticated native local storage recursively, retaining provider paths.</summary>
     public async Task<PrinterFileInventoryResult> GetFileInventoryAsync(
         string baseUrl, PrinterCredential? credential = null,
         PrinterFileInventoryOptions? options = null, CancellationToken ct = default)
     {
-        using PrinterFileInventorySession scan = new(options, ct);
+        using PrinterFileInventorySession scan = new(options, _inventoryTimeProvider, ct);
         try
         {
             using JsonDocument document = await scan.ReadAsync(async token =>

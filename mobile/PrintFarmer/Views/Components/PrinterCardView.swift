@@ -15,7 +15,7 @@ struct PrinterCardView: View {
         PrinterCardPresentation(
             printer: printer, isPendingReady: isPendingReady,
             attentionCount: attentionCount, failureReason: failureReason,
-            printTimeLeftSeconds: media.printTimeLeftSeconds
+            printTimeLeftSeconds: media.printTimeLeftSeconds(for: requestID)
         )
     }
 

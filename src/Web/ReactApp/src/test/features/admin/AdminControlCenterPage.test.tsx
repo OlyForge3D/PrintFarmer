@@ -15,7 +15,7 @@ vi.mock('react-router', async (importOriginal) => {
   return {
     ...actual,
     Link: ({ state, ...props }: React.ComponentProps<typeof actual.Link>) => (
-      <actual.Link {...props} state={state} data-route-state={state ? JSON.stringify(state) : undefined} />
+      <actual.Link {...props} state={state} data-route-state={state ? JSON.stringify(state) : undefined} /> // eslint-disable-line local/pf-no-unguarded-console -- Serialized router state is asserted by this test fixture.
     ),
   };
 });
@@ -201,7 +201,7 @@ describe('AdminControlCenterPage', () => {
     });
 
     const headings = screen.getAllByRole('heading');
-    expect(headings.findIndex((heading) => heading.textContent === 'Needs attention')).toBeLessThan(
+    expect(headings.findIndex((heading) => heading.textContent === 'Operational issues')).toBeLessThan(
       headings.findIndex((heading) => heading.textContent === 'System health checks'),
     );
     expect(screen.getByText(/Checked at/i)).toBeInTheDocument();
@@ -293,12 +293,16 @@ describe('AdminControlCenterPage', () => {
     );
   });
 
-  it('does not hardcode the four subsystems — renders whatever arrives (e.g. spoolman)', async () => {
+  it.each([
+    ['spoolman', 'Spoolman', 'Healthy', 'Connected'],
+    ['printguard', 'PrintGuard Failure Detection', 'Healthy', 'PrintGuard hub ready and read API accessible; classification not tested'],
+    ['printguard', 'PrintGuard Failure Detection', 'Degraded', 'PrintGuard configuration invalid: configure a service URL'],
+  ] as const)('renders optional %s (%s) with %s status and detail', async (key, name, status, detail) => {
     mockedApiGet.mockResolvedValue({
       data: makeOverview({
         subsystems: [
           { key: 'api', name: 'API', status: 'Healthy', detail: 'Responding' },
-          { key: 'spoolman', name: 'Spoolman', status: 'Healthy', detail: 'Connected' },
+          { key, name, status, detail },
         ],
       }),
     });
@@ -311,8 +315,10 @@ describe('AdminControlCenterPage', () => {
 
     const tiles = screen.getAllByTestId('admin-hub-subsystem');
     expect(tiles).toHaveLength(2);
-    expect(tiles[1].getAttribute('data-subsystem-key')).toBe('spoolman');
-    expect(within(tiles[1]).getByText('Spoolman')).toBeInTheDocument();
+    expect(tiles[1].getAttribute('data-subsystem-key')).toBe(key);
+    expect(tiles[1].getAttribute('data-subsystem-status')).toBe(status);
+    expect(within(tiles[1]).getByText(name)).toBeInTheDocument();
+    expect(within(tiles[1]).getByText(detail)).toBeInTheDocument();
   });
 
   it('degrades unknown subsystem statuses to the Unknown treatment without crashing', async () => {
@@ -433,7 +439,8 @@ describe('AdminControlCenterPage', () => {
     const row = screen.getByTestId('admin-hub-attention-item');
     expect(within(row).getByText("Printer 'printer-02' is unreachable")).toBeInTheDocument();
     // Text label paired with icon/colour.
-    expect(within(row).getByText('Warning')).toBeInTheDocument();
+    expect(screen.getByText('1 Warning')).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByText('Unexpected offline printers'));
 
     const actionLink = within(row).getByRole('link', { name: /Open Printers/i });
     expect(actionLink).toHaveAttribute('href', '/printers');
@@ -683,7 +690,7 @@ describe('AdminControlCenterPage', () => {
 
     const row = screen.getByTestId('admin-hub-attention-item');
     expect(row.getAttribute('data-attention-severity')).toBe('CosmicRay');
-    expect(within(row).getByText('CosmicRay')).toBeInTheDocument();
+    expect(screen.getByText('1 CosmicRay')).toBeInTheDocument();
     expect(within(row).getByText('A brand-new severity')).toBeInTheDocument();
   });
 
@@ -714,7 +721,7 @@ describe('AdminControlCenterPage', () => {
     expect(mockedApiGet).toHaveBeenCalledTimes(2);
   });
 
-  it('renders permitted operational cards and one settings entry from the registry', async () => {
+  it('renders permitted operational cards and twelve focused settings categories', async () => {
     mockedApiGet.mockResolvedValue({ data: makeOverview() });
 
     renderHub();
@@ -725,22 +732,39 @@ describe('AdminControlCenterPage', () => {
 
     const cards = screen.getAllByTestId('admin-hub-destination');
     // 8 operational (including Printed Parts, #2588) + 3 standalone
-    // configuration (Catalog, Locations, Power Monitors) + 1 Farm & Admin
-    // Settings entry point.
-    expect(cards.length).toBe(12);
+    // configuration (Catalog, Locations, Power Monitors) + 12 categories.
+    expect(cards.length).toBe(23);
     // Every card links somewhere absolute.
     for (const card of cards) {
       expect(card.getAttribute('href')).toMatch(/^\//);
     }
-    expect(screen.getByRole('link', { name: /Farm & Admin Settings/i })).toHaveAttribute(
-      'href',
-      '/admin/settings?scope=system',
-    );
+    const settingsCards = within(screen.getByTestId('admin-hub-settings')).getAllByRole('link');
+    expect(settingsCards.map(card => card.getAttribute('data-destination-id'))).toEqual([
+      'settings-identity',
+      'settings-system', 'settings-failure-detection', 'settings-costs', 'settings-planning',
+      'settings-operator-features', 'settings-slicing', 'settings-hardware', 'settings-integrations',
+      'settings-quotas', 'settings-users', 'settings-data',
+    ]);
+    expect(settingsCards.map(card => card.getAttribute('href'))).toEqual([
+      '/admin/settings?scope=system&tab=identity&sub=details',
+      '/admin/settings?scope=system&tab=system',
+      '/admin/settings?scope=system&tab=failure-detection',
+      '/admin/settings?scope=system&tab=costs',
+      '/admin/settings?scope=system&tab=planning',
+      '/admin/settings?scope=system&tab=operator-features',
+      '/admin/settings?scope=system&tab=slicing&sub=defaults',
+      '/admin/settings?scope=system&tab=hardware&sub=nfc',
+      '/admin/settings?scope=system&tab=integrations&sub=connections',
+      '/admin/settings?scope=system&tab=quotas',
+      '/admin/settings?scope=system&tab=users&sub=accounts',
+      '/admin/settings?scope=system&tab=data&sub=tags',
+    ]);
+    expect(screen.queryByRole('link', { name: /Farm & Admin Settings/i })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Workers & Jobs/i })).toHaveAttribute(
       'href',
       '/admin/workers?workerTab=jobs',
     );
-    expect(screen.getByRole('link', { name: /Power Monitors/i })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /^Power Monitors/i })).toHaveAttribute(
       'href',
       '/admin/power-monitors',
     );
@@ -1174,9 +1198,9 @@ describe('AdminControlCenterPage', () => {
     });
     const cards = screen.getAllByTestId('admin-hub-destination');
     expect(cards.length).toBe(1);
-    expect(screen.getByRole('link', { name: /Farm & Admin Settings/i })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /Hardware/i })).toHaveAttribute(
       'href',
-      '/admin/settings?scope=system',
+      '/admin/settings?scope=system&tab=hardware&sub=printer-groups',
     );
   });
 
@@ -1231,7 +1255,7 @@ describe('AdminControlCenterPage', () => {
     // `data-catalog` configuration destination is surfaced directly so the hub
     // is not a dead end, and no dead-end settings card is offered.
     expect(
-      screen.queryByRole('link', { name: /Farm & Admin Settings/i }),
+      screen.queryByTestId('admin-hub-settings'),
     ).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Catalog/i })).toHaveAttribute('href', '/catalog');
     expect(
@@ -1283,7 +1307,7 @@ describe('AdminControlCenterPage', () => {
 
     // No dead-end settings card, and no false "nothing here" claim.
     expect(
-      screen.queryByRole('link', { name: /Farm & Admin Settings/i }),
+      screen.queryByTestId('admin-hub-settings'),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('heading', { name: 'No operational tools available' }),

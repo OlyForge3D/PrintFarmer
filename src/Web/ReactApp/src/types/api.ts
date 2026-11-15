@@ -80,6 +80,9 @@ export interface PrinterFileCatalogEntry {
   displayName: string;
   sizeBytes?: number | null;
   modifiedValue?: string | null;
+  metadata?: PrinterPrintMetadata | null;
+  /** Successful native-detail fetch, including a response with no metadata. */
+  detailsFetchedAtUtc?: string | null;
   observationRevision: number;
   configurationGeneration: number;
   availability: PrinterFileAvailability;
@@ -91,6 +94,20 @@ export interface PrinterFileCatalogEntry {
     capturedAtUtc: string;
     verification: PrinterFileVerification;
   }>;
+  /** Background metadata outcome; absent on servers without the enrichment pipeline. */
+  metadataState?: PrinterFileEnrichmentState | null;
+  /** Background thumbnail outcome, independent of the metadata outcome. */
+  thumbnailState?: PrinterFileEnrichmentState | null;
+  /** Stable reason code for the metadata outcome, such as `transfer_failed`. */
+  metadataReason?: string | null;
+  /** Stable reason code for the thumbnail outcome, such as `cache_full`. */
+  thumbnailReason?: string | null;
+  /** Opaque stored-image version; changes whenever the local thumbnail bytes change. */
+  thumbnailVersion?: string | null;
+  /** Versioned local-only thumbnail route; present only when a validated image exists. */
+  thumbnailUrl?: string | null;
+  /** True when a stored image exists but is due for refresh or no longer current. */
+  thumbnailIsStale?: boolean;
 }
 
 export interface PrinterFileScanStatus {
@@ -132,9 +149,90 @@ export interface PrinterFileCatalogPage {
   printers: PrinterFileCatalogSource[];
   scans: PrinterFileScanStatus[];
   automaticDiscoveryEnabled: boolean;
+  /** Shared deployment I/O budget; older servers omit this (clients use two workers). */
+  maxConcurrentIo?: number;
 }
 
 export type PrinterFilePreviewState = 'Available' | 'Unavailable' | 'Unsupported' | 'Deferred';
+
+/**
+ * Background enrichment outcome for one on-printer file. `Pending`/`Deferred` mean the capture
+ * has not run yet (not an error); `Absent`/`Unsupported`/`Failed` are settled outcomes.
+ */
+export type PrinterFileEnrichmentState =
+  | 'Pending' | 'Ready' | 'Partial' | 'Absent' | 'Unsupported' | 'Deferred' | 'Failed';
+
+/** One explicitly identified source tool slot. Null measurements mean unknown, never zero. */
+export interface PrinterFilamentTool {
+  /** Zero-based source tool slot; unique within one metadata record. */
+  index: number;
+  /** Native tool identifier, when the source supplied one. */
+  sourceId?: string | null;
+  material?: string | null;
+  /** Literal `#RRGGBB` / `#RRGGBBAA` when known; never a guessed default. */
+  color?: string | null;
+  filamentUsedG?: number | null;
+}
+
+/** Optional native measurements; per-tool arrays retain provider order. Cost has no assumed currency. */
+export interface PrinterPrintMetadata {
+  bedTemperatureC?: number | null;
+  bedTemperaturePerToolC?: number[] | null;
+  nozzleTemperatureC?: number | null;
+  nozzleTemperaturePerToolC?: number[] | null;
+  brimWidthMm?: number | null;
+  estimatedPrintTimeNormalMode?: string | null;
+  estimatedPrintTimeSeconds?: number | null;
+  fadedLayers?: number | null;
+  filamentCost?: number | null;
+  filamentCostPerTool?: number[] | null;
+  filamentUsedCm3?: number | null;
+  filamentUsedPerToolCm3?: number[] | null;
+  filamentUsedG?: number | null;
+  filamentUsedPerToolG?: number[] | null;
+  filamentUsedMm?: number | null;
+  filamentUsedPerToolMm?: number[] | null;
+  filamentType?: string | null;
+  filamentTypePerTool?: string[] | null;
+  fillDensity?: string | null;
+  initialExposureTimeSeconds?: number | null;
+  layerHeightMm?: number | null;
+  materialName?: string | null;
+  exposureTimeSeconds?: number | null;
+  maxExposureTimeSeconds?: number | null;
+  maxInitialExposureTimeSeconds?: number | null;
+  minExposureTimeSeconds?: number | null;
+  minInitialExposureTimeSeconds?: number | null;
+  nozzleDiameterMm?: number | null;
+  nozzleDiameterPerToolMm?: number[] | null;
+  normalPercentPresent?: boolean | null;
+  normalLeftPresent?: boolean | null;
+  quietPercentPresent?: boolean | null;
+  quietLeftPresent?: boolean | null;
+  layerInfoPresent?: boolean | null;
+  maxLayerZMm?: number | null;
+  printTimeSeconds?: number | null;
+  printerModel?: string | null;
+  supportMaterial?: string | null;
+  ironing?: number | null;
+  requiredResinMl?: number | null;
+  profile?: string | null;
+  /** Source-reported total layer count, never estimated from layer height. */
+  layerCount?: number | null;
+  /** Infill density as a percentage from 0 through 100. */
+  infillPercentage?: number | null;
+  infillPattern?: string | null;
+  /** `false` is an explicit "disabled"; null means the source did not say. */
+  supportEnabled?: boolean | null;
+  supportType?: string | null;
+  supportStyle?: string | null;
+  slicerName?: string | null;
+  slicerVersion?: string | null;
+  /** Explicitly identified tools; ordered by `index`, never aligned by list position. */
+  tools?: PrinterFilamentTool[] | null;
+  /** True only when `filamentUsedG` was summed from a complete set of tool weights. */
+  filamentUsedGIsDerived?: boolean | null;
+}
 
 /** GET /printer-files/locations/{id}/preview?observationRevision=n */
 export interface PrinterFilePreview {
@@ -144,10 +242,26 @@ export interface PrinterFilePreview {
   reasonCode?: string | null;
   capturedAtUtc?: string | null;
   hasImage: boolean;
-  /** Server-relative hint only; the client fetches thumbnails through apiClient. */
+  /**
+   * Server-relative, local-only route (`…/thumbnail?observationRevision=n&version=v`); a hint
+   * only, since the client fetches thumbnail bytes through apiClient.
+   */
   thumbnailUrl?: string | null;
   printTimeSeconds?: number | null;
   layerHeightMm?: number | null;
+  sizeBytes?: number | null;
+  metadata?: PrinterPrintMetadata | null;
+  // Enrichment status fields: absent on servers without the background enrichment pipeline.
+  metadataState?: PrinterFileEnrichmentState | null;
+  thumbnailState?: PrinterFileEnrichmentState | null;
+  metadataReason?: string | null;
+  thumbnailReason?: string | null;
+  extractorVersion?: number | null;
+  nextAttemptAtUtc?: string | null;
+  /** Opaque stored-image version; a change means the previous image no longer applies. */
+  thumbnailVersion?: string | null;
+  /** An older snapshot is being served while a background refresh is pending. */
+  isStale?: boolean | null;
 }
 
 // PrintJobStatusDto for Moonraker print job status
@@ -236,6 +350,8 @@ export interface PrinterMetadata {
   notes?: string;
   /** Whether Obico AI failure detection is enabled for this printer. */
   obicoEnabled?: boolean;
+  /** Whether PrintGuard failure detection is enabled for this printer. */
+  printGuardEnabled?: boolean;
   /** Whether this printer inherits dispatch settings from its model. */
   useModelDispatchDefaults?: boolean;
   /** True when the printer's linked catalog model has been updated since the last template sync. */
@@ -468,7 +584,7 @@ export interface PrinterJobInfo {
 export interface PrinterOperationalState {
   /** Whether printer is in maintenance mode */
   inMaintenance?: boolean;
-  /** Whether printer is enabled for operations */
+  /** Whether printer is in service for visibility, monitoring, and dispatch */
   isEnabled?: boolean;
 }
 
@@ -519,16 +635,6 @@ export interface LocationTreeNode {
   printerCount: number;
   totalPrinterCount: number;
   children: LocationTreeNode[];
-}
-
-/**
- * Breadcrumb item matching backend LocationBreadcrumbDto.
- */
-export interface LocationBreadcrumbItem {
-  id: string;
-  name: string;
-  /** Client-only field for UI rendering; not returned by the API. */
-  depth?: number;
 }
 
 /** Request DTO for creating a location. Matches backend CreateLocationDto. */
@@ -1019,6 +1125,8 @@ export interface UpdatePrinterDto {
   cameraSnapshotUrl?: string;
   /** Optional Obico ML monitoring opt-in. When true, the app auto-assigns a healthy server. */
   obicoEnabled?: boolean;
+  /** Whether PrintGuard failure detection is enabled for this printer. */
+  printGuardEnabled?: boolean;
   /** Whether this printer inherits dispatch settings from its model. */
   useModelDispatchDefaults?: boolean;
   // Printer capabilities
@@ -1656,6 +1764,8 @@ export interface PrinterDetails {
   obicoServerName?: string | null;
   /** Whether Obico AI failure detection is enabled for this printer. */
   obicoEnabled?: boolean;
+  /** Whether PrintGuard failure detection is enabled for this printer. */
+  printGuardEnabled?: boolean;
   /** Power consumption in watts. Overrides the model's default wattage. */
   wattage?: number;
   /** Per-printer machine hourly rate override for cost tracking. */
@@ -2190,6 +2300,7 @@ export interface UnifiedFilesQueryRequest {
   page: number;
   pageSize: number;
   search?: string;
+  path?: string;
   sortBy: UnifiedFileSortBy;
   sortOrder: UnifiedFileSortOrder;
   filter: UnifiedFileTypeFilter;
@@ -3268,6 +3379,44 @@ export interface CameraDto {
   lastHealthCheck?: string;
 }
 
+export type BedClearDetectorVerdict = 'Unknown' | 'Clear' | 'Occupied';
+export type BedClearGroundTruth = 'Clear' | 'Occupied';
+export type BedClearEvaluationState = 'Pending' | 'Processing' | 'Complete';
+
+export interface BedClearEvaluationDto {
+  id: string;
+  printerId: string;
+  cameraId?: string | null;
+  printJobId?: string | null;
+  bedTypeId?: string | null;
+  sourceAcknowledgementId?: string | null;
+  acknowledgedBySubject: string;
+  acknowledgedAtUtc: string;
+  capturedAtUtc?: string | null;
+  isReferenceEligible: boolean;
+  toolheadX?: number | null;
+  toolheadY?: number | null;
+  toolheadZ?: number | null;
+  state: BedClearEvaluationState;
+  verdict: BedClearDetectorVerdict;
+  score?: number | null;
+  reasonCode?: string | null;
+  groundTruth?: BedClearGroundTruth | null;
+  groundTruthBySubject?: string | null;
+  groundTruthAtUtc?: string | null;
+  isActiveReference: boolean;
+  hasImage: boolean;
+}
+
+export interface BedClearDetectorMetricsDto {
+  sampleCount: number;
+  independentlyLabeledCount: number;
+  agreementRate?: number | null;
+  independentlyLabeledOccupiedCount: number;
+  falseClearCount: number;
+  falseClearRate?: number | null;
+}
+
 export interface CameraPrinterSummary {
   id: string;
   name: string;
@@ -3776,6 +3925,43 @@ export interface SpoolmanBulkUpdateResult {
   errors: string[];
 }
 
+/** Fresh references to review before permanently deleting a Spoolman filament. */
+export interface SpoolmanFilamentDeletePreview {
+  activeSpoolCount: number;
+  archivedSpoolIds: number[];
+}
+
+/** Per-ID outcome of a local-library bulk delete (`DELETE /api/gcode-files` or `DELETE /api/3d-models`). */
+export type BulkDeleteItemStatus =
+  | 'Deleted'
+  | 'DeletedCleanupIncomplete'
+  | 'NotFound'
+  | 'Blocked'
+  | 'Failed'
+  | 'Unknown';
+
+export interface BulkDeleteItemResult {
+  id: string;
+  status: BulkDeleteItemStatus;
+  /** Stable reason code such as `ActiveJobs` or `StorageFailed`; never a path or exception text. */
+  reason?: string;
+}
+
+/** Response of `DELETE /api/gcode-files`; counts are over distinct requested IDs. */
+export interface DeleteGcodeFilesResponse {
+  deleted: number;
+  totalRequested: number;
+  results: BulkDeleteItemResult[];
+}
+
+/** Response of `DELETE /api/3d-models`; counts are over distinct requested IDs. */
+export interface DeleteModel3dFilesResponse {
+  deleted: number;
+  errors: number;
+  total: number;
+  results: BulkDeleteItemResult[];
+}
+
 /**
  * Request to bulk-delete filaments from Spoolman.
  */
@@ -3948,15 +4134,25 @@ export interface FailureDetectionPrinterStatusDto {
   lastAnalyzedAt?: string;
   lastOutcome: string;
   lastConfidence?: number;
-  lastAutoPaused?: boolean;
   lastFailureDetectedAt?: string;
+  providers?: FailureDetectionProviderStatusDto[];
+}
+
+export interface FailureDetectionProviderStatusDto {
+  provider: string;
+  state: string;
+  reason: string;
+  lastAnalyzedAt?: string;
+  lastOutcome: string;
+  lastConfidence?: number;
+  lastFailureDetectedAt?: string;
+  analysisMode: string;
 }
 
 export interface FailureDetectionMonitorStatusDto {
   monitoringEnabled: boolean;
   confidenceThreshold: number;
   scanIntervalSeconds: number;
-  autoPauseOnFailure: boolean;
   configuredPrinterCount: number;
   activelyMonitoredPrinterCount: number;
   lastAnalyzedPrinterCount: number;
@@ -4851,6 +5047,7 @@ export interface ObicoServer {
   isEnabled: boolean;
   hasApiKey: boolean;
   maxConcurrentAnalyses: number;
+  activePrintCount?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -4889,6 +5086,7 @@ export interface ObicoServerDto {
   isEnabled: boolean;
   hasApiKey: boolean;
   maxConcurrentAnalyses: number;
+  activePrintCount?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -4931,6 +5129,8 @@ export interface ObicoServerHealthResponse {
 export interface FailureDetectionEvent {
   /** Persisted incident identifier when available */
   id?: string;
+  /** Provider that reported the failure */
+  provider: string;
   /** Printer ID where failure was detected */
   printerId: string;
   /** Printer name for display */
@@ -5239,4 +5439,8 @@ export interface CustomFieldValue {
   value?: string;
   options?: string;
   isRequired: boolean;
+}
+export interface FarmIdentitySettings {
+  farmName: string;
+  timeZone: string;
 }

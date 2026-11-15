@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Card } from '@/common/components/ui/Card';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { TimePeriodFilter } from '@/common/components/ui/TimePeriodFilter';
+import { TimePeriodFilter, Toolbar } from '@/common/components/ui';
 import { ChartIcon } from '@/common/components/icons/MdiIcons';
 import {
   type DailyCost,
@@ -118,8 +118,10 @@ export const StatisticsPage: React.FC = () => {
       title="Print Statistics"
       subtitle="Track print jobs, costs, and printer utilization"
       icon={ChartIcon}
-      actions={<TimePeriodFilter value={period} onChange={setPeriod} />}
     >
+      <Toolbar aria-label="Statistics filters">
+        <TimePeriodFilter value={period} onChange={setPeriod} />
+      </Toolbar>
       <StatisticsDashboardContent days={days} startDate={startDate} endDate={endDate} />
     </PageTemplate>
   );

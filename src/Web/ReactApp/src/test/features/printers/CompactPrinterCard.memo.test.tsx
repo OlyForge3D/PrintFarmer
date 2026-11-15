@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
@@ -11,6 +11,10 @@ import type { PrinterCoverageSummaryProps } from '@/features/filament-coverage/c
 import type { TagDto } from '@/services/tagService';
 import { PrinterBackend, type MmuStatus, type Printer, type PrinterBackendCapabilitiesDto } from '@/types/api';
 import type { PrinterQueueSummaryDto } from '@/types/api';
+
+vi.mock('@/features/auth/hooks/useAuth', () => ({
+  useAuth: () => ({ hasPermission: () => true }),
+}));
 
 const progressBarRender = vi.hoisted(() => vi.fn());
 const printerTagsFromFleetMock = vi.hoisted(() =>
@@ -77,11 +81,11 @@ vi.mock('@/features/printers/hooks/usePrinterFailureDetectionStatus', () => ({
 }));
 
 vi.mock('@/features/printers/components/PrinterHistoryModal', () => ({
-  PrinterHistoryModal: () => null,
+  PrinterHistoryModal: ({ isOpen }: { isOpen: boolean }) => isOpen ? <div role="dialog" aria-label="Printer history" /> : null,
 }));
 
 vi.mock('@/features/printers/components/PrinterFilesModal', () => ({
-  PrinterFilesModal: () => null,
+  PrinterFilesModal: ({ isOpen }: { isOpen: boolean }) => isOpen ? <div role="dialog" aria-label="Printer files" /> : null,
 }));
 
 vi.mock('@/features/printers/components/PrintProgressBar', () => ({
@@ -310,9 +314,7 @@ describe('CompactPrinterCard memoization', () => {
     expect(progressBarRender).toHaveBeenCalledTimes(2);
   });
 
-  it('links Open in Browser to the printer frontend URL', async () => {
-    const user = userEvent.setup();
-
+  it('links Open in Browser from the header rather than the action group', () => {
     render(
       <CompactPrinterCard
         printer={createPrinter()}
@@ -321,10 +323,13 @@ describe('CompactPrinterCard memoization', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: 'More options' }));
-
-    expect(screen.getByRole('link', { name: /open in browser for printer printer 1 in new tab/i }))
-      .toHaveAttribute('href', 'http://printer-1.local');
+    expect(screen.queryByRole('button', { name: 'More options' })).not.toBeInTheDocument();
+    const link = screen.getByRole('link', { name: /open in browser for printer printer 1 in new tab/i });
+    expect(link).toHaveAttribute('href', 'http://printer-1.local');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(screen.getByText('Printer 1').parentElement).toContainElement(link);
+    expect(screen.getByRole('group', { name: 'Printer actions' })).not.toContainElement(link);
   });
 
   it('routes the compact Review action to printer setup when failure detection is misconfigured', async () => {
@@ -361,7 +366,7 @@ describe('CompactPrinterCard memoization', () => {
     expect(onEdit).not.toHaveBeenCalled();
   });
 
-  it('keeps the Open details sidebar action in compact mode', async () => {
+  it('opens the details sidebar from the header immediately before Open in Browser', async () => {
     const user = userEvent.setup();
     const onExpand = vi.fn();
 
@@ -373,14 +378,43 @@ describe('CompactPrinterCard memoization', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: 'Open details sidebar' }));
+    const sidebar = screen.getByRole('button', { name: 'Open details sidebar' });
+    const browser = screen.getByRole('link', { name: /open in browser for printer printer 1 in new tab/i });
+    expect(screen.getByText('Printer 1').parentElement).toContainElement(sidebar);
+    expect(screen.getByRole('group', { name: 'Printer actions' })).not.toContainElement(sidebar);
+    expect(sidebar.nextElementSibling).toBe(browser);
+    await user.click(sidebar);
 
     expect(onExpand).toHaveBeenCalledWith('printer-1');
   });
 
-  it('does not render an unsafe browser URL as a link', async () => {
+  it('exposes files, history, editing and tagging directly in the action group', async () => {
     const user = userEvent.setup();
+    const printer = createPrinter();
+    const onEdit = vi.fn();
+    render(<CompactPrinterCard printer={printer} onExpand={vi.fn()} onEdit={onEdit} />);
+    const toolbar = within(screen.getByRole('group', { name: 'Printer actions' }));
 
+    await user.click(toolbar.getByRole('button', { name: 'View printer files' }));
+    expect(screen.getByRole('dialog', { name: 'Printer files' })).toBeInTheDocument();
+    await user.click(toolbar.getByRole('button', { name: 'View print history' }));
+    expect(screen.getByRole('dialog', { name: 'Printer history' })).toBeInTheDocument();
+    await user.click(toolbar.getByRole('button', { name: 'Edit Printer' }));
+    expect(onEdit).toHaveBeenCalledWith(printer);
+    await user.click(toolbar.getByRole('button', { name: 'Manage Tags' }));
+    expect(taggingModalRenderMock).toHaveBeenLastCalledWith(expect.objectContaining({ isOpen: true }));
+  });
+
+  it.each([
+    { isOnline: false, isEnabled: true },
+    { isOnline: true, isEnabled: false },
+  ])('keeps direct file/history actions disabled when unavailable: %j', availability => {
+    render(<CompactPrinterCard printer={createPrinter(availability)} onExpand={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'View printer files' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'View print history' })).toBeDisabled();
+  });
+
+  it('does not render an unsafe browser URL as a link', () => {
     render(
       <CompactPrinterCard
         printer={createPrinter({ frontendUrl: 'javascript:alert(1)' })}
@@ -389,19 +423,16 @@ describe('CompactPrinterCard memoization', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: 'More options' }));
-
     expect(screen.queryByRole('link', { name: /open in browser/i })).not.toBeInTheDocument();
     const fallbackButton = screen.getByRole('button', {
       name: /open in browser unavailable for printer printer 1: printer browser url is unavailable/i,
     });
     expect(fallbackButton).not.toBeDisabled();
     expect(fallbackButton).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByText('Printer 1').parentElement).toContainElement(fallbackButton);
   });
 
-  it('disables Open in Browser with an explanatory tooltip for a TestEmulator internal-only host (#1546)', async () => {
-    const user = userEvent.setup();
-
+  it('disables Open in Browser with an explanatory tooltip for a TestEmulator internal-only host (#1546)', () => {
     render(
       <CompactPrinterCard
         printer={createPrinter({ frontendUrl: 'http://testemulator-11111111-1111-1111-1111-111111111111' })}
@@ -410,8 +441,6 @@ describe('CompactPrinterCard memoization', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: 'More options' }));
-
     expect(screen.queryByRole('link', { name: /open in browser/i })).not.toBeInTheDocument();
     const disabledButton = screen.getByRole('button', {
       name: /open in browser unavailable for printer printer 1: not available for simulated test printers/i,
@@ -419,6 +448,7 @@ describe('CompactPrinterCard memoization', () => {
     expect(disabledButton).not.toBeDisabled();
     expect(disabledButton).toHaveAttribute('aria-disabled', 'true');
     expect(disabledButton).toHaveAttribute('title', 'Not available for simulated test printers');
+    expect(screen.getByText('Printer 1').parentElement).toContainElement(disabledButton);
   });
 
   it('reads the shared queue-summary fleet query by printer id instead of polling its own queue', () => {
@@ -762,9 +792,7 @@ describe('CompactPrinterCard history action before capabilities hydrate', () => 
     ['Moonraker', PrinterBackend.Moonraker],
     ['OctoPrint', PrinterBackend.OctoPrint],
     ['SDCP', PrinterBackend.SDCP],
-  ])('offers History for a history-capable %s printer with no capabilities loaded', async (_name, backend) => {
-    const user = userEvent.setup();
-
+  ])('offers History for a history-capable %s printer with no capabilities loaded', (_name, backend) => {
     render(
       <CompactPrinterCard
         printer={createPrinter({ backend })}
@@ -773,17 +801,13 @@ describe('CompactPrinterCard history action before capabilities hydrate', () => 
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: 'More options' }));
-
-    expect(screen.getByRole('button', { name: 'History' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'View print history' })).toBeEnabled();
   });
 
   it.each([
     ['FlashForge', PrinterBackend.FlashForge],
     ['Unknown', PrinterBackend.Unknown],
-  ])('still hides History for a non-history %s backend before hydration', async (_name, backend) => {
-    const user = userEvent.setup();
-
+  ])('still hides History for a non-history %s backend before hydration', (_name, backend) => {
     render(
       <CompactPrinterCard
         printer={createPrinter({ backend })}
@@ -792,14 +816,10 @@ describe('CompactPrinterCard history action before capabilities hydrate', () => 
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: 'More options' }));
-
-    expect(screen.queryByRole('button', { name: 'History' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'View print history' })).not.toBeInTheDocument();
   });
 
-  it('lets the authoritative capability payload override the fallback', async () => {
-    const user = userEvent.setup();
-
+  it('lets the authoritative capability payload override the fallback', () => {
     render(
       <CompactPrinterCard
         printer={createPrinter({ backend: PrinterBackend.PrusaLink })}
@@ -809,8 +829,6 @@ describe('CompactPrinterCard history action before capabilities hydrate', () => 
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: 'More options' }));
-
-    expect(screen.queryByRole('button', { name: 'History' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'View print history' })).not.toBeInTheDocument();
   });
 });

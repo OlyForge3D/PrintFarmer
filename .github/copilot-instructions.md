@@ -104,8 +104,11 @@ API integration:
 Common commands (start at the repository root). Use Xcode 26.6 build 17F113;
 the shared resolver approves only iOS 26.5 (23F77). Install that runtime in Xcode
 Settings > Components and create an available matching simulator. It fails
-before tests if no approved destination exists. Python 3 is required; no GitHub
-Actions state is needed locally.
+before tests if no approved destination exists. Xcode 26.6 is unsupported on
+macOS 27 or later; use macOS 26.2-26.x for pinned test evidence. Python 3 is
+required; no GitHub Actions state is needed locally. A separate
+[local-only Xcode 27.2 workflow](../mobile/README.md#local-exploration-on-macos-27)
+is exploratory and cannot replace pinned CI, release, or snapshot evidence.
 
 ```bash
 cd mobile
@@ -115,11 +118,11 @@ cd mobile
   run_dir="$(mktemp -d "$PWD/build/unit-tests.XXXXXX")"
   xcodebuild -version | tee "$run_dir/xcode.log"
   git rev-parse HEAD | tee "$run_dir/commit.log"
-  xcrun simctl list runtimes -j > "$run_dir/runtimes.json"
-  xcrun simctl list devices available -j > "$run_dir/devices.json"
   simulator_udid="$(../scripts/ci/resolve-ios-simulator.sh --udid 2>"$run_dir/destination.log")" ||
     { cat "$run_dir/destination.log" >&2; exit 1; }
   cat "$run_dir/destination.log"
+  xcrun simctl list runtimes -j > "$run_dir/runtimes.json"
+  xcrun simctl list devices available -j > "$run_dir/devices.json"
   python3 scripts/run-tests.py -- test -scheme PrintFarmer \
     -destination "platform=iOS Simulator,id=$simulator_udid" \
     -only-testing:PrintFarmerTests -parallel-testing-enabled NO \
@@ -407,7 +410,8 @@ the entire original change set again.
 
 Reviewer count is determined from the full PR change by
 [Risk-Based Review Scope](#risk-based-review-scope), never from the smaller delta.
-The pure-sync carry-forward exception is separate and unchanged. Owner approval
+The pure-sync carry-forward exception remains available for code reviews only;
+the additional design-reviewer verdict must always name the exact current head. Owner approval
 precedence is defined in [Repository verdict evidence](#repository-verdict-evidence).
 
 ### Findings and Reviewer Checkpoints
@@ -448,6 +452,74 @@ using a model from a different family than the implementation agent. Model diver
 dispatch requirement, not GitHub-verdict evidence: canonical records do not contain a
 trustworthy model attestation. This changes reviewer **count**, not review **rigour** — a single
 reviewer still performs a real review and can still REJECT.
+
+**Additive UI design review.** A UI-touching squad PR also requires an
+`APPROVE` from the dedicated `design-reviewer`, in addition to the code-review
+quorum above. Code approvals alone or design approval alone never suffice.
+The shared `scripts/design/ui-paths.mjs` `isUiPath(path)` policy determines UI
+scope; evaluate both `filename` and `previous_filename` for renames. Design
+artifacts, configuration, and path-policy changes are scoped by that same
+policy, not a duplicate allowlist. Incomplete, truncated, or failed PR-file
+lookups cannot prove scope and block the gate.
+
+The design reviewer records the same visible canonical `<!-- squad-verdict -->`
+comment with `Squad-Reviewer: design-reviewer`, `Squad-Verdict: APPROVE` or
+`REQUEST_CHANGES`, and `Squad-Head-SHA` equal to the **exact live head**.
+Missing, stale, unauthenticated, or rejected design evidence blocks readiness
+and merge. Design evidence **never carries across sync**, even when code review
+can. The design reviewer must be a rostered identity and cannot review its own
+UI PR; creating a label alone is not a substitute for team/label synchronization.
+This is self-attested agent design judgment, not deterministic UI quality,
+independent approval, or separation of duties.
+
+Authenticated exact-head owner overrides retain their authority, including
+over design dissent and missing design approval; preserve those in `dissent`
+and `short` counts rather than claiming they were verified. Forks still accept
+only native administrator approval. Non-UI quorum rules and the non-squad
+`NOT_APPLICABLE`/no-unattended-merge coupling remain unchanged. The privileged
+verdict workflow loads both the gate and shared UI policy from the trusted
+default branch, never executes PR code, and uses the existing live write-access
+authentication for design comments with no bot-identity exceptions.
+
+**Deployment bootstrap.** If a new verdict workflow runs before its trusted
+default-branch module exposes `designEvidenceVersion: 1`, it validates PR-file
+completeness inline and conservatively requires additional exact-head design
+evidence for **every** in-scope non-fork PR. It never imports PR-head code,
+claims shared UI classification, or carries bootstrap reviews across sync.
+Existing code quorum and authenticated owner overrides remain; owner audit
+counts retain design dissent/shortfall. Operator premerge source-review evidence
+is still required; rendered screenshots are not invented for policy-only work.
+Once the module and shared policy land together on the trusted default branch,
+normal UI-only scope resumes without a separate permissive status.
+
+### UI visual evidence
+
+Before opening a PR (including a draft) that changes rendered UI, the author
+must start the affected app locally and capture the changed surfaces. Web
+evidence requires browser screenshots at desktop and mobile widths. Native
+iOS evidence requires simulator screenshots when a simulator is available;
+otherwise record the unavailable host/toolchain and the unverified surfaces,
+not a substitute web screenshot. A missing required web capture blocks opening
+the UI PR. Attach the screenshots to the PR and identify the full source SHA,
+route or screen, viewport or device, appearance, relevant state and observed
+limitations. Use safe local test data; omit credentials and identifying farm
+information, and do not operate real heaters or motion merely to stage a capture.
+
+Refresh evidence when a later change affects the captured UI. Before ready/merge,
+the design reviewer evaluates the supplied images alongside source, platform
+authorities and the author's validation results. Missing required evidence or
+a visible unresolved defect blocks approval. Reviewers remain source/evidence-only:
+they do not launch apps, browsers, simulators, builds or tests. Supplied screenshots
+are author evidence, not independent review, interaction proof or accessibility
+certification. Report native unavailability explicitly in the verdict.
+
+Shared UI classification also covers design policy, tooling and assets. A
+policy/tooling-only change with no rendered product change must record visual
+evidence as **not applicable**, with the reason; do not invent app screenshots
+or waive its required source design review. A changed visual asset is not
+policy-only just because the source detector cannot parse it. This is a required
+author/reviewer workflow, not a claim that the deterministic scanner or commit
+status can authenticate screenshot content.
 
 **High-risk routing:** choose the two lenses most relevant to the full change:
 Bishop owns integration/architecture (boundaries, persistence, cross-layer fit);
@@ -716,6 +788,9 @@ verifier preserves that reason verbatim, because the subcases differ materially:
 | `fork PR needs a repository administrator` | Fork PR; agent records are not read at all. |
 | `have <n>/<required>[, choose <agents>][ (stale at <agent>@<sha12>, …)]` | Too few accepted approvals. `choose` lists remaining eligible panel members, not individually required reviewers. For example, `have 1/2, choose hicks+vasquez` needs either approval. `stale at` names superseded records. |
 | `reviewer <agent> is the PR author` | The only record came from the authoring agent. |
+| `missing exact-head design-reviewer approval` | UI scope requires additional design evidence, regardless of the code quorum. |
+| `design-reviewer stale at <sha12>; exact-head approval required` | UI design evidence is stale and cannot carry across sync. |
+| `design-reviewer has no authenticated exact-head approval` | Design comments exist but do not meet live write-access authentication. |
 
 A session reading the failure therefore knows what to do instead of parking indefinitely.
 The verifier preserves this text verbatim in `blockedReason`, so it is safe to branch on —
@@ -851,6 +926,7 @@ SHA-binding exists to close. A compare-API failure (rate limit, unresolvable SHA
 etc.) fails closed — the record supersedes normally rather than being carried on
 unproven grounds.
 
+The exemption applies only to code-review records, never `design-reviewer`.
 Outside this one exemption, any head movement supersedes the recorded review. This
 rule applies equally to `REVIEWED`, `APPROVED` and `REQUEST_CHANGES`, including
 rebases and force pushes. The panel records fresh reviews naming the new head;
@@ -994,3 +1070,77 @@ Use the OrcaSlicer profile skill for profile hierarchy, alias, and empty-profile
 - Never print or commit credentials, API keys, JWT signing keys, printer passwords, or deployment secrets.
 - Read generated deployment credentials from local config only when needed for debugging, and avoid echoing secret values in final responses.
 - Keep printer credentials and tokens out of tracked configuration.
+
+## Squad Integration Precedence
+
+PrintFarmer's [Readiness and Merge Review Gate](#readiness-and-merge-review-gate),
+[Post-Rejection Revision Ownership](#post-rejection-revision-ownership), and
+`.squad/ralph-instructions.md` take precedence over generic Squad templates.
+Target `development` and apply the `squad` label to Squad PRs.
+
+<!-- squad:copilot-instructions:start -->
+# Copilot Coding Agent — Squad Instructions
+
+You are working on a project that uses **Squad**, an AI team framework. When picking up issues autonomously, follow these guidelines.
+
+## Coordinator Canary Check
+
+**IMPORTANT — run this check on EVERY session start, before doing any work:**
+
+Inspect your `agent_instructions` for the coordinator canaries. This is a **two-state payload-integrity check within a known Squad coordinator session**; it verifies whether the coordinator payload loaded fully or was visibly truncated. It is **not** proof that an agent with no canaries is safely non-Squad — wholly absent payloads and proven non-Squad agents require a host-level identity beacon before custom-agent instruction ingestion.
+
+1. If the HEAD canary `SQUAD_COORDINATOR_CANARY_HEAD_b7d2` is **absent**, the Squad coordinator payload is not observable from inside this prompt. Treat non-Squad discrimination as an **OPEN host-level concern**; do not claim this check proved the current agent is non-Squad.
+2. If the HEAD canary `SQUAD_COORDINATOR_CANARY_HEAD_b7d2` is **present** and the EOF canary `SQUAD_COORDINATOR_CANARY_a8f3` is **present**, the coordinator prompt loaded fully. Proceed with normal Squad behavior.
+3. If the HEAD canary `SQUAD_COORDINATOR_CANARY_HEAD_b7d2` is **present** but the EOF canary `SQUAD_COORDINATOR_CANARY_a8f3` is **absent**, the coordinator prompt loaded but was **truncated** before the end.
+
+**When the coordinator prompt is truncated, you MUST:**
+1. **STOP** — do not proceed with standard Squad behavior.
+2. **WARN the user** with this exact message:
+   ```
+   ⚠️ Squad coordinator (squad.agent.md) loaded but appears to be truncated before the EOF canary. Do NOT proceed with standard Squad behavior — Squad's safety rails are incomplete. Please restart your session.
+   ```
+3. Do not continue with normal Squad routing, spawning, PR, or branch-protection behavior after emitting the warning.
+
+## Team Context
+
+Before starting work on any issue:
+
+1. Read `.squad/team.md` for the team roster, member roles, and your capability profile.
+2. Read `.squad/routing.md` for work routing rules.
+3. If the issue has a `squad:{member}` label, read that member's charter at `.squad/agents/{member}/charter.md` to understand their domain expertise and coding style — work in their voice.
+
+## Capability Self-Check
+
+Before starting work, check your capability profile in `.squad/team.md` under the **Coding Agent → Capabilities** section.
+
+- **🟢 Good fit** — proceed autonomously.
+- **🟡 Needs review** — proceed, but note in the PR description that a squad member should review.
+- **🔴 Not suitable** — do NOT start work. Instead, comment on the issue:
+  ```
+  🤖 This issue doesn't match my capability profile (reason: {why}). Suggesting reassignment to a squad member.
+  ```
+
+## Branch Naming
+
+Use the squad branch convention:
+```
+squad/{issue-number}-{kebab-case-slug}
+```
+Example: `squad/42-fix-login-validation`
+
+## PR Guidelines
+
+When opening a PR:
+- Reference the issue: `Closes #{issue-number}`
+- If the issue had a `squad:{member}` label, mention the member: `Working as {member} ({role})`
+- If this is a 🟡 needs-review task, add to the PR description: `⚠️ This task was flagged as "needs review" — please have a squad member review before merging.`
+- Follow any project conventions in `.squad/decisions.md`
+
+## Decisions
+
+If you make a decision that affects other team members, write it to:
+```
+.squad/decisions/inbox/copilot-{brief-slug}.md
+```
+The Scribe will merge it into the shared decisions file.
+<!-- squad:copilot-instructions:end -->

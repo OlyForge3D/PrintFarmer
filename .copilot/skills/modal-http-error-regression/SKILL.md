@@ -32,10 +32,6 @@ Use this when a React modal shows a raw backend/API error string and you need hi
 
 ## Examples
 
-- `src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringOverlay.test.tsx`
-  - uses `usePrinterFailureDetectionStatus`
-  - mocks `apiClient.getFailureDetectionStatus()`
-  - opens the spaghetti-detection modal and verifies `API error: HTTP 405`
 - `src/tests/Farm.Web.Api.Tests/Services/FailureDetection/ObicoFailureDetectionServiceTests.cs`
   - proves `GET /p/?img=...` falls back to `POST /p/`
   - reproduces the final 405 when both contracts return `MethodNotAllowed`

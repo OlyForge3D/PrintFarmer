@@ -7,10 +7,16 @@ namespace Farm.Slicer.Module.Data.Repositories;
 /// </summary>
 public interface IMachineProfileRepository
 {
+    /// <summary>Returns requested model IDs having profiles, in sequential batches of at most 100 IDs.</summary>
+    Task<HashSet<Guid>> GetPrinterModelIdsWithProfilesAsync(IEnumerable<Guid> printerModelIds, CancellationToken ct = default);
+
     /// <summary>Gets a machine profile by its unique identifier.</summary>
     /// <param name="id">The profile identifier.</param>
     /// <param name="ct">Cancellation token.</param>
     Task<MachineProfile?> GetByIdAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>Gets non-system machine profiles owned by a specific user for a slicer engine.</summary>
+    Task<IReadOnlyList<MachineProfile>> GetOwnedNonSystemAsync(SlicerType engine, Guid userId, CancellationToken ct = default);
 
     /// <summary>Gets machine profiles for a slicer engine with optional user filtering.</summary>
     /// <param name="engine">The slicer engine type.</param>

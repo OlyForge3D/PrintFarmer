@@ -2,6 +2,43 @@
 
 ### Features
 
+- Regroup admin settings into Failure Detection, Costs & Energy, Planning,
+  Operator Features and a single System page (#3745). Move browser slicer modes
+  into Slicing, auto-tagging/custom fields into Data, and global maintenance
+  policy into Maintenance Settings. Combine NFC readers and bindings on one
+  Hardware page. Remove duplicate farm-rate editors while retaining per-record
+  overrides, persisted setting keys/API contracts and bounded legacy-link/pin migration.
+
+- Route Obico monitoring per print instead of permanently pinning printers
+  (#3693). Reserve healthy pool capacity through warmup, pauses, and API
+  restarts; release it when prints end. Unavailable monitoring never blocks
+  printing or automatically pauses printers. Apply `AddObicoPrintRouting`;
+  configured pools no longer silently overflow to the legacy global URL.
+
+- Add rich printer-file settings and durable thumbnails through one bounded,
+  confirmed-idle background pipeline for Moonraker, OctoPrint, and PrusaLink
+  (#3570, #3571). Native metadata takes precedence over bounded G-code/BGCode
+  fallback; tool colors, materials, and weights retain their source slots and
+  unknown values. Browsing and preview/image GETs perform no printer I/O.
+  The shared store defaults to 512 MiB and never evicts healthy previews to
+  admit another file. Upgrade with the `AddPrinterFileEnrichment` migration
+  for SQLite, PostgreSQL, or SQL Server; API replicas must share the database
+  and persistent Gcode volume.
+
+- Measure bounded printer-file fallback frequency and elapsed time by backend
+  through the existing OpenTelemetry/Prometheus pipeline (#3571). Acquisition,
+  fallback-start and skipped counters plus a duration histogram distinguish
+  metadata/image triggers, timeouts, cancellations and failures without
+  exporting file paths, printer IDs or credentials.
+
+- Persist PrusaLink native file details in the database, including full display
+  names, sizes, and all 41 supported print-metadata fields. Show saved details
+  independently of thumbnail availability; reuse unchanged observations during
+  scheduled scans and refetch on Force Refresh. Remove the inventory HTTP
+  request-count cap while retaining time, entry, depth, and response bounds.
+  Slow or failed optional detail reads no longer discard completed listings;
+  saved details remain available when source evidence is unchanged.
+
 - Add independent Moonraker runtime speed/flow API controls with bounded
   percentages, semantic capabilities and nullable authoritative status/SignalR
   readback. Other backends explicitly reject unsupported writes (#3474).
@@ -51,6 +88,49 @@
   unsupported CORE One L/Buddy Home and jog controls, and distinguish explicit
   endpoint rejection from unknown outcomes without duplicating safety warnings
   (#3566). Preserve API-key-only authentication for supported legacy movement.
+
+- Reject passkey login for inactive accounts without issuing access or refresh
+  tokens. Main-API bearer authentication now checks current account status so
+  previously issued tokens stop working after deactivation (#3652). Recognized
+  account-store failures are logged and fail closed without masking cancellation
+  or unrelated programming errors.
+
+- Preserve native filament setting types when saving editor changes, including
+  boolean vectors, percent suffixes and unedited extruder entries (#3643).
+
+- Preserve saved filament settings in named stock/custom profile selections by
+  unwrapping stock profile settings before creating native job snapshots.
+  Mixed saved/worker-library selections fetch missing stock settings from the
+  selected engine version without importing presets; an unavailable worker
+  returns a retryable 503 instead of queuing an incomplete snapshot (#3643).
+
+- Keep the slicer filament picker inside the viewport, flipping above low
+  triggers and scrolling profile results so newly saved presets remain selectable.
+
+- Keep the slicer profile editor's Simple/Advanced toggle stable under React
+  StrictMode while preserving synchronization between mounted editors (#3643).
+
+- Align the Prometheus exporter with the OpenTelemetry 1.18 SDK so `/metrics`
+  exports samples instead of returning an empty HTTP 200 response after a
+  serializer type-load failure (#3571).
+
+- Preserve acquired printer-file metadata and thumbnails when optional G-code
+  fallback times out. Native thumbnail acquisition now precedes fallback, and
+  the service lets the adapter report partial results before its safety timeout
+  (#3571).
+
+- Retry printer-file lease allocation conflicts as whole transactions instead
+  of failing scans on wrapped PostgreSQL serialization errors. Bulk Force
+  Refresh now uses the configured I/O capacity rather than scanning printers
+  serially, with bounded retries only when no scan started. Both refresh
+  controls are icon-only and remain inactive through refresh, cache reload,
+  and navigation between control surfaces. Background enrichment no longer
+  disables Force Refresh; requests wait safely for exclusive I/O capacity
+  instead of being blocked by a polled lease status (#3571).
+
+- Update System.Security.Cryptography.Xml and its transitive Pkcs dependency
+  from 10.0.10 to 10.0.14 across .NET projects, resolving high- and
+  moderate-severity NuGet security advisories (#3568).
 
 - iOS: remove the Heat **Go** button. Nozzle, Bed, Chamber, Heater Box and
   other settable heaters now share one row: name, current reading, a tappable

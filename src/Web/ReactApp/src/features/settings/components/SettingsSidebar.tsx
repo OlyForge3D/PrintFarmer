@@ -314,7 +314,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   return (
     <>
       <nav
-        className="hidden h-fit min-h-0 flex-col self-start rounded-md border border-pf-border bg-pf-sidebar md:flex"
+        className="hidden h-fit max-h-full min-h-0 flex-col self-start overflow-hidden rounded-md border border-pf-border bg-pf-sidebar md:flex"
         aria-label={`${activeScopeMeta?.label ?? 'Settings'} categories`}
       >
         <div className="min-h-0 flex-1 overflow-y-auto p-2">

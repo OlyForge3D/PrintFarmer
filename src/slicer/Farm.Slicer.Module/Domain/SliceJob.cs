@@ -6,7 +6,7 @@ namespace Farm.Slicer.Module.Domain;
 /// <summary>
 /// Represents a slicing job request that will be processed by a slicer worker.
 /// </summary>
-public class SliceJob
+public class SliceJob : ISliceJobStatusSource
 {
     public const int MinimumLeaseDurationSeconds = 30;
     public const int MaximumLeaseDurationSeconds = 3600;
@@ -270,6 +270,10 @@ public class SliceJob
     /// <summary>Exact native upstream-Orca filament profile JSON delivered to the worker.</summary>
     [JsonIgnore]
     public string? FilamentProfileJson { get; set; }
+
+    /// <summary>Ordered immutable native filament documents and digests for explicit extruder selections.</summary>
+    [JsonIgnore]
+    public string? ExtruderFilamentProfilesJson { get; set; }
 
     /// <summary>
     /// SHA-256 (hex) of the effective native machine profile. For named legacy selections this is

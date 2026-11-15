@@ -3,7 +3,7 @@
  * guard, page-value sanitization, and showEmpty/color filter semantics.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 // ── URL filter state — controlled per-test ───────────────────────────────────
@@ -68,10 +68,6 @@ vi.mock('@/features/filamentManagement/components/SpoolCard', () => ({
     `<div data-testid="spool-card">${spool.id}</div>`,
 }));
 
-vi.mock('@/features/filamentManagement/components/SpoolTableView', () => ({
-  SpoolTableView: () => '<div data-testid="spool-table" />',
-}));
-
 vi.mock('@/features/filamentManagement/components/SpoolCompactView', () => ({
   SpoolCompactView: () => '<div data-testid="spool-compact" />',
 }));
@@ -104,13 +100,15 @@ vi.mock('@/common/components/modals/Modal', () => ({
   Modal: ({ children }: { children: React.ReactNode }) => children,
 }));
 
-vi.mock('@/common/components/ui', () => ({
+vi.mock('@/common/components/ui', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/common/components/ui')>(),
   Button: ({ children, onClick, disabled, 'aria-label': label }: {
     children?: React.ReactNode; onClick?: () => void; disabled?: boolean; 'aria-label'?: string;
   }) => <button onClick={onClick} disabled={disabled} aria-label={label}>{children}</button>,
-  Select: ({ children, value, onChange }: {
+  Select: ({ children, value, onChange, id, 'aria-label': ariaLabel }: {
     children?: React.ReactNode; value?: string | number; onChange?: (e: React.ChangeEvent<HTMLSelectElement>) => void;
-  }) => <select value={value} onChange={onChange}>{children}</select>,
+    id?: string; 'aria-label'?: string;
+  }) => <select id={id} value={value} onChange={onChange} aria-label={ariaLabel}>{children}</select>,
   Checkbox: ({ checked, onChange }: { checked?: boolean; onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void }) =>
     <input type="checkbox" checked={checked} onChange={onChange} />,
   FileUpload: () => null,
@@ -142,6 +140,65 @@ describe('SpoolsTab — AbortController cancellation', () => {
       showEmpty: false, pageSize: 50, sortField: 'id', sortDir: 'asc', page: 0,
     });
     mockGetSpools.mockResolvedValue({ items: [], totalCount: 0 });
+  });
+
+  it('keeps Show in the filters row and bounded pagination after the table without range counts', async () => {
+    localStorage.setItem('spools-view-mode', 'table');
+    filterState.page = 1;
+    mockGetSpools.mockResolvedValue({ items: [makeSpool(1)], totalCount: 150 });
+    render(<SpoolsTab />);
+    const table = await screen.findByRole('table');
+    const filters = screen.getByRole('group', { name: 'Spool filters' });
+    const size = within(filters).getByRole('combobox', { name: 'Page size' });
+    expect(size).toHaveValue('50');
+    expect(within(size).getAllByRole('option').map(option => option.textContent)).toEqual(['10', '25', '50', '100']);
+    const pager = screen.getByRole('group', { name: 'Pagination' });
+    expect(table.compareDocumentPosition(pager) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(pager).queryByRole('combobox')).not.toBeInTheDocument();
+    expect(within(pager).getByText('Page 2 of 3')).toBeVisible();
+    expect(screen.queryByText(/Showing|on page|51.100 of 150/)).not.toBeInTheDocument();
+    fireEvent.click(within(pager).getByRole('button', { name: 'Next' }));
+    expect(filterState.setMany).toHaveBeenLastCalledWith({ page: 2 });
+    fireEvent.click(within(pager).getByRole('button', { name: 'Previous' }));
+    expect(filterState.setMany).toHaveBeenLastCalledWith({ page: 0 });
+    fireEvent.change(size, { target: { value: '25' } });
+    expect(filterState.setMany).toHaveBeenLastCalledWith({ pageSize: 25, page: 0 });
+  });
+
+  it('cycles the table header to server-default order without locally reordering the page', async () => {
+    localStorage.setItem('spools-view-mode', 'table');
+    filterState.sortDir = 'desc';
+    filterState.page = 2;
+    mockGetSpools.mockResolvedValue({ items: [makeSpool(2), makeSpool(1)], totalCount: 150 });
+    const { rerender } = render(<SpoolsTab />);
+    const header = await screen.findByRole('button', { name: 'ID' });
+    expect(header.closest('th')).toHaveAttribute('aria-sort', 'descending');
+    expect(screen.queryByRole('combobox', { name: /sort by/i })).not.toBeInTheDocument();
+    for (const label of ['Color', 'Used %', 'Archived']) {
+      expect(screen.getByRole('columnheader', { name: label })).not.toHaveAttribute('aria-sort');
+      expect(screen.queryByRole('button', { name: label })).not.toBeInTheDocument();
+    }
+    fireEvent.click(header);
+    expect(filterState.setMany).toHaveBeenLastCalledWith({ sortField: 'none', sortDir: 'asc', page: 0 });
+
+    Object.assign(filterState, { sortField: 'none', sortDir: 'asc', page: 0 });
+    rerender(<SpoolsTab />);
+    await waitFor(() => expect(mockGetSpools.mock.lastCall?.[0]).toMatchObject({ offset: 0, sort: undefined }));
+    expect(screen.getByRole('button', { name: 'ID' }).closest('th')).toHaveAttribute('aria-sort', 'none');
+    expect(screen.getAllByRole('row').slice(1).map(row => row.textContent)).toEqual([
+      expect.stringContaining('Spool 2'), expect.stringContaining('Spool 1'),
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'ID' }));
+    expect(filterState.setMany).toHaveBeenLastCalledWith({ sortField: 'id', sortDir: 'asc', page: 0 });
+  });
+
+  it('retains the table sort dropdown when a sortable column is hidden', async () => {
+    localStorage.setItem('spools-view-mode', 'table');
+    localStorage.setItem('spool-table-columns', JSON.stringify([{ id: 'vendor', visible: false }]));
+    mockGetSpools.mockResolvedValue({ items: [makeSpool(1)], totalCount: 1 });
+    render(<SpoolsTab />);
+    expect(await screen.findByRole('combobox', { name: /sort by/i })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Vendor' })).toBeInTheDocument();
   });
 
   it('passes AbortSignal to getSpools on mount', async () => {
@@ -358,5 +415,39 @@ describe('SpoolsTab — "Open Spoolman" link scheme safety (js/xss-through-dom)'
 
     await waitFor(() => expect(mockGetSpools).toHaveBeenCalled());
     expect(screen.queryByRole('link', { name: /open spoolman/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('SpoolsTab — filter disclosure reset', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    Object.assign(filterState, {
+      search: 'search term', material: 'PETG', vendor: 'Prusa', color: 'blue',
+      location: 'Shelf A', showEmpty: true, pageSize: 25,
+      sortField: 'vendor', sortDir: 'desc', page: 0, hasActiveFilters: true,
+    });
+    mockGetSpools.mockResolvedValue(pageOf([makeSpool(1)], 1));
+  });
+
+  it('resets only filters while preserving search, sort, and page size', async () => {
+    render(<SpoolsTab />);
+    await waitFor(() => expect(mockGetSpools).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: /filters/i }));
+    fireEvent.click(screen.getByRole('button', { name: /reset filters/i }));
+
+    expect(filterState.setMany).toHaveBeenCalledTimes(1);
+    expect(filterState.setMany).toHaveBeenCalledWith({
+      material: '',
+      vendor: '',
+      color: '',
+      location: '',
+      showEmpty: false,
+      page: 0,
+    });
+    expect(screen.getByPlaceholderText(/name, vendor, material/i)).toHaveValue('search term');
+    expect(screen.getByRole('combobox', { name: /sort by/i })).toHaveValue('vendor');
+    expect(filterState.pageSize).toBe(25);
   });
 });

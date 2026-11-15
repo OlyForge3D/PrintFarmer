@@ -2,10 +2,10 @@ import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { FileBrowser } from '@/features/fileBrowser/components/FileBrowser';
-import { type ColumnDef, type FileItem, type FileQueryState, type GcodeFileItem, type UseFileBrowserConfig } from '@/features/fileBrowser/types';
+import { type ColumnDef, type FileBrowserFilterActions, type FileItem, type FileQueryState, type GcodeFileItem, type UseFileBrowserConfig } from '@/features/fileBrowser/types';
 import { apiClient } from '@/services/api';
 import { Button, Checkbox, TagChip } from '@/common/components/ui';
-import { UploadIcon, DownloadIcon, DeleteIcon, TagIcon, FilterIcon, PlayIcon, NozzleIcon, BedIcon, ClipboardListIcon } from '@/common/components/icons/MdiIcons';
+import { UploadIcon, DownloadIcon, DeleteIcon, TagIcon, PlayIcon, NozzleIcon, BedIcon, ClipboardListIcon } from '@/common/components/icons/MdiIcons';
 import { GcodeUploadModal } from '@/common/components/modals/GcodeUploadModal';
 import { QueueGcodeModal } from '@/features/gcode/components/QueueGcodeModal';
 import { GcodeFileCard } from '@/features/gcode/components/GcodeFileCard';
@@ -36,9 +36,10 @@ const formatBytes = (bytes?: number) => {
 };
 
 const gcodeColumns: ColumnDef[] = [
-  { key: 'fileName', label: 'Name', sortable: true },
+  { key: 'fileName', label: 'Name', sortable: true, sortKey: 'name' },
   {
     key: 'fileSize',
+    sortKey: 'size',
     label: 'Size',
     sortable: true,
     align: 'right',
@@ -46,6 +47,7 @@ const gcodeColumns: ColumnDef[] = [
   },
   {
     key: 'uploadedAt',
+    sortKey: 'date',
     label: 'Modified',
     sortable: true,
     render: (file) => (file.uploadedAt ? new Date(file.uploadedAt).toLocaleString() : '—'),
@@ -67,7 +69,6 @@ const gcodeColumns: ColumnDef[] = [
   {
     key: 'requiredMaterial',
     label: 'Material',
-    sortable: true,
     render: (file) => {
       const gcodeMeta = file.meta?.gcode;
       return gcodeMeta?.requiredMaterial || gcodeMeta?.extractedMaterial || '—';
@@ -76,7 +77,6 @@ const gcodeColumns: ColumnDef[] = [
   {
     key: 'extractedNozzleDiameter',
     label: 'Nozzle',
-    sortable: true,
     align: 'right',
     render: (file) => {
       const nozzle = file.meta?.gcode?.extractedNozzleDiameter;
@@ -114,13 +114,11 @@ const gcodeColumns: ColumnDef[] = [
   {
     key: 'extractedPrinterModelName',
     label: 'Printer Model',
-    sortable: true,
     render: (file) => file.meta?.gcode?.extractedPrinterModelName || '—',
   },
   {
     key: 'totalLayers',
     label: 'Layers',
-    sortable: true,
     align: 'right',
     render: (file) => {
       const layers = file.meta?.gcode?.totalLayers;
@@ -180,7 +178,7 @@ interface GcodeFileBrowserProps {
   onShowTagModal?: () => void;
   onShowSingleTagModal?: (file: GcodeFile) => void;
   onShowAddToProjectModal?: () => void;
-  onToggleTagFilterPanel?: () => void;
+  filterActions?: FileBrowserFilterActions;
   onAvailablePrinterModelsChange?: (models: Array<{ id: string | null; name: string }>) => void;
 }
 
@@ -195,14 +193,14 @@ export const GcodeFileBrowser = ({
   onShowTagModal,
   onShowSingleTagModal,
   onShowAddToProjectModal,
-  onToggleTagFilterPanel,
+  filterActions,
   onAvailablePrinterModelsChange,
 }: GcodeFileBrowserProps) => {
   const { hasPermission } = useAuth();
   const queryClient = useQueryClient();
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [localSelection, setLocalSelection] = useState<string[]>([]);
-  
+
   // Only use local state if viewMode prop is not provided (uncontrolled mode)
   const [localViewMode, setLocalViewMode] = useState<'grid' | 'explorer'>('grid');
 
@@ -250,7 +248,7 @@ export const GcodeFileBrowser = ({
     if (!deleteConfirm.file) return;
     const file = deleteConfirm.file;
     setDeleteConfirm({ isOpen: false, file: null });
-    
+
     try {
       await apiClient.deleteGcodeFile(file.id);
       toast.success('File deleted');
@@ -281,10 +279,10 @@ export const GcodeFileBrowser = ({
   const handleBulkDeleteConfirm = useCallback(async () => {
     setBulkDeleteConfirm(false);
     const idsToDelete = [...selection];
-    
+
     let successCount = 0;
     let failCount = 0;
-    
+
     for (const id of idsToDelete) {
       try {
         await apiClient.deleteGcodeFile(id);
@@ -294,11 +292,11 @@ export const GcodeFileBrowser = ({
         failCount++;
       }
     }
-    
+
     // Clear selection and refresh
     handleSelectionChange([]);
     queryClient.invalidateQueries({ queryKey: ['file-browser'] });
-    
+
     // Show result toast
     if (successCount > 0 && failCount === 0) {
       toast.success(`Deleted ${successCount} file${successCount > 1 ? 's' : ''}`);
@@ -410,7 +408,7 @@ export const GcodeFileBrowser = ({
     },
     []
   );
-  
+
   // Use prop if provided (controlled), otherwise use local state (uncontrolled)
   const currentViewMode = viewMode ?? localViewMode;
 
@@ -438,7 +436,7 @@ export const GcodeFileBrowser = ({
     },
     [handleDownload, handleDeleteClick],
   );
-  
+
   // Handle view mode changes
   const handleViewModeChange = useCallback((mode: 'grid' | 'explorer') => {
     if (viewMode === undefined) {
@@ -464,7 +462,7 @@ export const GcodeFileBrowser = ({
       // Extract viewMode from params to determine which endpoint to use
       const { viewMode: paramViewMode, ...apiParams } = params;
       const isExplorerMode = paramViewMode === 'explorer';
-      
+
       // Debug logging with timestamp
       if (typeof window !== 'undefined' && (window as { PrintFarmerDebug?: { gcodeFileBrowser?: boolean } }).PrintFarmerDebug?.gcodeFileBrowser) {
         console.log('[GcodeFileBrowser] Fetcher called at', new Date().toISOString(), 'with:', {
@@ -476,23 +474,23 @@ export const GcodeFileBrowser = ({
           allParams: params
         });
       }
-      
+
       // If already aborted, don't even start
       if (signal?.aborted) {
         throw new Error('Query was cancelled');
       }
-      
+
       // Use new efficient query endpoint for both modes
       if (typeof window !== 'undefined' && (window as { PrintFarmerDebug?: { gcodeFileBrowser?: boolean } }).PrintFarmerDebug?.gcodeFileBrowser) {
         console.log('[GcodeFileBrowser] Calling /gcode-files/query', isExplorerMode ? '(explorer mode)' : '(grid mode)');
       }
       const response: GetGcodeFilesResponse = await apiClient.getGcodeFilesQuery(apiParams as never);
-      
+
       // Extract availablePrinterModels from response and notify parent
       if (response.availablePrinterModels) {
         onAvailablePrinterModelsChange?.(response.availablePrinterModels);
       }
-      
+
       // Log what we got back from API
       if (typeof window !== 'undefined' && (window as { PrintFarmerDebug?: { gcodeFileBrowser?: boolean } }).PrintFarmerDebug?.gcodeFileBrowser) {
         console.log('[GcodeFileBrowser] API response:', {
@@ -510,18 +508,18 @@ export const GcodeFileBrowser = ({
         if (signal?.aborted) {
           throw new Error('Query was cancelled before folders fetch');
         }
-        
+
         if (typeof window !== 'undefined' && (window as { PrintFarmerDebug?: { gcodeFileBrowser?: boolean } }).PrintFarmerDebug?.gcodeFileBrowser) {
           console.log('[GcodeFileBrowser] Calling /gcode-files/folders (explorer mode)');
         }
         const folderEntries = await apiClient.getGcodeFilesFolders();
-        
+
         // Create a map of all folders for quick lookup
         const folderMap = new Map<string, { path: string; name: string; children: Array<{ path: string; name: string }> }>();
-        
+
         // Always include root folder
         folderMap.set('/', { path: '/', name: '/', children: [] });
-        
+
         folderEntries.forEach((folder) => {
           if (!folderMap.has(folder.path)) {
             const folderName = folder.path === '/' ? '/' : folder.path.split('/').filter(Boolean).pop() || folder.path;
@@ -532,11 +530,11 @@ export const GcodeFileBrowser = ({
         // Build parent-child relationships
         folderMap.forEach((folderNode, folderPath) => {
           if (folderPath === '/') return; // Skip root processing
-          
+
           // Find parent folder by removing the last segment
           const parts = folderPath.split('/').filter(Boolean);
           const parentPath = parts.length === 1 ? '/' : '/' + parts.slice(0, -1).join('/');
-          
+
           const parentNode = folderMap.get(parentPath);
           if (parentNode) {
             parentNode.children.push(folderNode);
@@ -579,12 +577,12 @@ export const GcodeFileBrowser = ({
             tagIds: selectedTags.length > 0 ? selectedTags : undefined,
             printerModels: selectedPrinterModels.length > 0 ? selectedPrinterModels : undefined,
           };
-          
+
           // Only include path for explorer mode (grid mode omits it for "all files")
           if (currentViewMode === 'explorer') {
             params.path = query.path;
           }
-          
+
           if (typeof window !== 'undefined' && (window as { PrintFarmerDebug?: { gcodeFileBrowser?: boolean } }).PrintFarmerDebug?.gcodeFileBrowser) {
             console.log('[GcodeFileBrowser] mapQueryParams called, returning:', params);
           }
@@ -642,17 +640,6 @@ export const GcodeFileBrowser = ({
           iconCenter={<UploadIcon className="h-4 w-4" />}
           onClick={() => setShowUploadModal(true)}
           data-tour="gcode-upload"
-        />
-      )}
-      {onToggleTagFilterPanel && (
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          onClick={onToggleTagFilterPanel}
-          title="Filter by tags"
-          iconCenter={<FilterIcon className="h-4 w-4" />}
-          data-tour="gcode-filters"
         />
       )}
       {selection.length > 0 && onShowTagModal && (
@@ -746,6 +733,7 @@ export const GcodeFileBrowser = ({
         config={config as any}
         sortOptions={sortOptions}
         columns={gcodeColumns}
+        filterActions={filterActions}
         extraToolbarActions={extraToolbarActions}
         viewMode={viewMode}
         onViewModeChange={onViewModeChange}

@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Badge, Button, Card, Spinner, Tabs } from '@/common/components/ui';
+import { HeaderActions } from '@/common/components/ui';
 import {
   AlertIcon,
   EditIcon,
@@ -172,20 +173,21 @@ export const LocationDashboardPage: React.FC = () => {
       icon={LocationIcon}
       parent={adminHubParent}
       actions={isFarmAdmin ? (
-        <div className="flex flex-wrap items-center gap-2">
+        <HeaderActions>
           <Button
             type="button"
             variant={manageMode ? 'secondary' : 'subtle'}
+            control
             onClick={() => setManageMode((value) => !value)}
             iconLeft={<EditIcon />}
             aria-pressed={manageMode}
           >
             Manage
           </Button>
-          <Button type="button" variant="primary" onClick={handleAddLocation} iconLeft={<PlusIcon />}>
+          <Button type="button" variant="primary" control onClick={handleAddLocation} iconLeft={<PlusIcon />}>
             Add location
           </Button>
-        </div>
+        </HeaderActions>
       ) : undefined}
     >
       <div className="flex flex-col gap-6 lg:flex-row">

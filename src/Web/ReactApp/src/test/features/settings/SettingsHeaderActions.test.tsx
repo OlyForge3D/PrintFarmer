@@ -29,10 +29,6 @@ vi.mock('@/features/admin/pages/SettingsPage', () => ({
   SettingsPage: () => <div data-testid="legacy-settings-page">Legacy Settings Page</div>,
 }));
 
-vi.mock('@/features/settings/components/FarmSettingsSection', () => ({
-  FarmSettingsSection: () => <div data-testid="farm-settings-section">Farm Settings Section</div>,
-}));
-
 vi.mock('@/features/auth/hooks/useAuth', () => {
   const user = {
     id: '1',
@@ -75,7 +71,7 @@ function renderShell(initialRoute = '/settings') {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialRoute]}>
         <GlobalCommandPaletteProvider>
-          <SettingsShell />
+          <SettingsShell routeScope={initialRoute.startsWith('/admin/settings') ? 'system' : 'user'} />
         </GlobalCommandPaletteProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -117,6 +113,15 @@ describe('settings shell header actions (#1010)', () => {
     expect(launcher.textContent).toMatch(/(⌘K|Ctrl K)/);
   });
 
+  it('advertises the palette shortcut in admin search without a duplicate launcher', () => {
+    renderShell('/admin/settings?scope=system&tab=general&sub=farm');
+
+    const search = screen.getByRole('combobox', { name: 'Search all settings' });
+    expect(pageHeaderOf(search)).toBeTruthy();
+    expect(search).toHaveAttribute('placeholder', expect.stringMatching(/^Search all settings \((⌘K|Ctrl K)\)$/));
+    expect(screen.queryByRole('button', { name: /search settings/i })).not.toBeInTheDocument();
+  });
+
   it('has no sticky toolbar left anywhere in the shell', () => {
     const { container } = renderShell();
 
@@ -135,13 +140,11 @@ describe('settings shell header actions (#1010)', () => {
     expect(header?.className).not.toContain('lg:mr-72');
   });
 
-  it('lets the actions row wrap rather than overflow on narrow viewports', () => {
+  it('groups the launcher in the shared settings header actions', () => {
     renderShell();
 
     const launcher = screen.getByRole('button', { name: /search settings/i });
-    const actionsRow = launcher.closest('.flex-wrap');
-
-    expect(actionsRow).not.toBeNull();
+    expect(screen.getByRole('group', { name: 'Settings actions' })).toContainElement(launcher);
   });
 });
 

@@ -11,6 +11,27 @@ namespace Farm.Web.Api.Tests.Security;
 
 public sealed class SensitiveSerializationTests
 {
+    [Theory]
+    [InlineData("https://embedded-user:embedded-password@printer.internal:8443/mainsail?token=private#secret", "https://printer.internal:8443/mainsail")]
+    [InlineData("http://printer.internal", "http://printer.internal")]
+    [InlineData(null, null)]
+    [InlineData("/printers/123", null)]
+    [InlineData("file:///private/printer", null)]
+    [InlineData("javascript:alert(1)", null)]
+    public void Serialize_PrinterDetail_ExposesOnlySanitizedNativeFrontendUrl(string? address, string? expected)
+    {
+        var printer = new PrinterDto(
+            Guid.NewGuid(), "printer", Notes: null, IsOnline: true, State: "idle",
+            ApiKey: "private-key", Password: "private-password", FrontendUrl: address);
+        string json = JsonSerializer.Serialize(printer, JsonSerializerOptions.Web);
+        using JsonDocument document = JsonDocument.Parse(json);
+
+        document.RootElement.GetProperty("frontendUrl").GetString().Should().Be(expected);
+        document.RootElement.EnumerateObject().Count(property => property.Name == "frontendUrl").Should().Be(1);
+        json.Should().NotContain("clientFrontendUrl");
+        AssertSensitiveValuesAreAbsent(json, "embedded-user", "embedded-password", "private-key", "private-password", "token=", "#secret");
+    }
+
     [Fact]
     public void Serialize_Printer_DoesNotExposeCredentialsOrNetworkSecrets()
     {

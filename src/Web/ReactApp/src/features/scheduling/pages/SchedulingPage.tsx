@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { CalendarIcon, PlusIcon, PauseIcon, PlayIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
-import { Button, Card, Badge, Spinner, DataTable } from '@/common/components/ui';
+import { Button, Card, Badge, DataTable, HeaderActions, Spinner } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { useScheduledJobs, usePauseSchedule, useResumeSchedule, useCancelSchedule } from '@/common/hooks/useApi';
 import { MonthCalendar } from '../components/MonthCalendar';
@@ -71,18 +71,21 @@ export function SchedulingPage() {
       key: 'jobName',
       header: 'Job Name',
       sortable: true,
+      sortValue: (job: ScheduledJob) => job.jobName,
       render: (job: ScheduledJob) => job.jobName,
     },
     {
       key: 'printerName',
       header: 'Printer',
       sortable: true,
+      sortValue: (job: ScheduledJob) => job.printerName,
       render: (job: ScheduledJob) => job.printerName,
     },
     {
       key: 'scheduledStartTimeUtc',
       header: 'Scheduled Time',
       sortable: true,
+      sortValue: (job: ScheduledJob) => Date.parse(job.scheduledStartTimeUtc),
       render: (job: ScheduledJob) =>
         formatScheduleWallTime(job.scheduledLocalTime, job.timeZone),
     },
@@ -90,6 +93,9 @@ export function SchedulingPage() {
       key: 'recurrencePattern',
       header: 'Recurrence',
       sortable: true,
+      sort: (a: ScheduledJob, b: ScheduledJob) =>
+        (a.recurrencePattern ?? 'Once').localeCompare(b.recurrencePattern ?? 'Once')
+        || a.recurrenceInterval - b.recurrenceInterval,
       render: (job: ScheduledJob) =>
         job.recurrencePattern
           ? `${job.recurrencePattern} × ${job.recurrenceInterval}`
@@ -99,6 +105,7 @@ export function SchedulingPage() {
       key: 'status',
       header: 'Status',
       sortable: true,
+      sortValue: (job: ScheduledJob) => job.status,
       render: (job: ScheduledJob) => (
         <Badge variant={getStatusBadgeVariant(job.status)}>
           {job.status}
@@ -181,13 +188,16 @@ export function SchedulingPage() {
       subtitle="Schedule print jobs and manage recurring tasks"
       icon={CalendarIcon}
       actions={
-        <Button
-          variant="primary"
-          iconLeft={<PlusIcon />}
-          onClick={() => setIsScheduleModalOpen(true)}
-        >
-          Schedule Job
-        </Button>
+        <HeaderActions className="justify-end mb-0">
+          <Button
+            variant="primary"
+            control
+            iconLeft={<PlusIcon />}
+            onClick={() => setIsScheduleModalOpen(true)}
+          >
+            Schedule Job
+          </Button>
+        </HeaderActions>
       }
     >
       <div className="space-y-6">

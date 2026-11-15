@@ -141,7 +141,7 @@ export const KNOWN_ENUMS: Record<string, Array<{ value: string; label: string; i
   ],
   bed_type: [
     { value: 'Default Plate', label: 'Default Plate' },
-    { value: 'SuperTack Plate', label: 'SuperTack Plate' },
+    { value: 'Supertack Plate', label: 'SuperTack Plate' },
     { value: 'Cool Plate', label: 'Cool Plate' },
     { value: 'Engineering Plate', label: 'Engineering Plate' },
     { value: 'High Temp Plate', label: 'High Temp Plate' },

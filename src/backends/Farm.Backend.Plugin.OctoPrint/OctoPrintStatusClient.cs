@@ -158,7 +158,8 @@ public class OctoPrintStatusClient : IPrinterStatusClient, IManagedSpoolProvider
                     FrontendPort: printer.FrontendPort,
                     SpoolInfo: spoolInfo,
                     BackendUrl: printer.BackendUrl,
-                    FrontendUrl: printer.FrontendUrl)
+                    FrontendUrl: printer.FrontendUrl,
+                    PrintGuardEnabled: printer.PrintGuardEnabled)
                 : throw new InvalidOperationException($"Failed to retrieve status for printer {printer.Id}");
         }
         catch (Exception ex)

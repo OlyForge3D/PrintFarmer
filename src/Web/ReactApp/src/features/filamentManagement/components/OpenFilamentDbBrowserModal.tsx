@@ -5,6 +5,8 @@ import { SearchIcon, DownloadIcon, ChevronLeftIcon } from '@/common/components/i
 import { useOfdBrands, useOfdBrandMaterials, useOfdFilaments, useImportFromOfd } from '@/common/hooks/useApi';
 import type { OfdBrand, OfdMaterialSummary, OfdFlattenedEntry } from '@/types/api';
 import { toast } from 'sonner';
+import { TableHeaderCell } from '@/common/components/ui/Table';
+import { useTableSort } from '@/common/hooks/useTableSort';
 
 interface OpenFilamentDbBrowserModalProps {
   isOpen: boolean;
@@ -77,6 +79,16 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
       return true;
     });
   }, [filaments, nameFilter, colorFilter, weightFilter, diameterFilter, traitFilter]);
+  const { headerProps, sortDataByValues, setSortState } = useTableSort<'name' | 'color' | 'weight' | 'diameter' | 'nozzle' | 'bed' | 'traits'>();
+  const sortedFilaments = sortDataByValues(filteredFilaments, {
+    name: filament => filament.filamentName,
+    color: filament => filament.colorName || null,
+    weight: filament => filament.weight,
+    diameter: filament => filament.diameter,
+    nozzle: filament => filament.minPrintTemp ?? filament.maxPrintTemp,
+    bed: filament => filament.minBedTemp ?? filament.maxBedTemp,
+    traits: filament => [filament.matte && 'Matte', filament.translucent && 'Translucent', filament.glow && 'Glow'].filter(Boolean).join(', ') || null,
+  });
 
   const filteredBrands = useMemo(() => {
     if (!brands) return [];
@@ -104,13 +116,14 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
       setWeightFilter('');
       setDiameterFilter('');
       setTraitFilter('');
+      setSortState({ column: null, direction: null });
       setStep('materials');
     } else if (step === 'materials') {
       setSelectedBrand(null);
       setSearch('');
       setStep('brands');
     }
-  }, [step]);
+  }, [step, setSortState]);
 
   const toggleSelection = useCallback((entry: OfdFlattenedEntry) => {
     setSelectedIds(prev => {
@@ -188,8 +201,9 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
     setWeightFilter('');
     setDiameterFilter('');
     setTraitFilter('');
+    setSortState({ column: null, direction: null });
     onClose();
-  }, [onClose]);
+  }, [onClose, setSortState]);
 
   const stepTitle = step === 'brands'
     ? 'Open Filament Database — Select Brand'
@@ -387,13 +401,13 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
                           aria-label={allCurrentSelected ? 'Deselect all filaments' : 'Select all filaments'}
                         />
                       </th>
-                      <th className="px-3 py-2 text-left text-pf-text-secondary font-medium">Name</th>
-                      <th className="px-3 py-2 text-left text-pf-text-secondary font-medium">Color</th>
-                      <th className="px-3 py-2 text-right text-pf-text-secondary font-medium">Weight</th>
-                      <th className="px-3 py-2 text-right text-pf-text-secondary font-medium">Diameter</th>
-                      <th className="px-3 py-2 text-right text-pf-text-secondary font-medium">Nozzle</th>
-                      <th className="px-3 py-2 text-right text-pf-text-secondary font-medium">Bed</th>
-                      <th className="px-3 py-2 text-left text-pf-text-secondary font-medium">Traits</th>
+                      <TableHeaderCell {...headerProps('name')} className="px-3 py-2 text-left text-pf-text-secondary font-medium">Name</TableHeaderCell>
+                      <TableHeaderCell {...headerProps('color')} className="px-3 py-2 text-left text-pf-text-secondary font-medium">Color</TableHeaderCell>
+                      <TableHeaderCell {...headerProps('weight')} className="px-3 py-2 text-right text-pf-text-secondary font-medium">Weight</TableHeaderCell>
+                      <TableHeaderCell {...headerProps('diameter')} className="px-3 py-2 text-right text-pf-text-secondary font-medium">Diameter</TableHeaderCell>
+                      <TableHeaderCell {...headerProps('nozzle')} className="px-3 py-2 text-right text-pf-text-secondary font-medium">Nozzle</TableHeaderCell>
+                      <TableHeaderCell {...headerProps('bed')} className="px-3 py-2 text-right text-pf-text-secondary font-medium">Bed</TableHeaderCell>
+                      <TableHeaderCell {...headerProps('traits')} className="px-3 py-2 text-left text-pf-text-secondary font-medium">Traits</TableHeaderCell>
                     </tr>
                   </thead>
                   <tbody>
@@ -406,7 +420,7 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
                         </td>
                       </tr>
                     ) : (
-                      filteredFilaments.map(f => (
+                      sortedFilaments.map(f => (
                         <OfdFilamentRow
                           key={f.entryId}
                           entry={f}

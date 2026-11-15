@@ -62,6 +62,28 @@ public interface IPrusaLinkApiClient
         PrinterFileInventoryOptions? options = null, CancellationToken ct = default) =>
         Task.FromResult(PrinterFileInventoryResult.Unsupported());
 
+    /// <summary>Bounded native file preview; custom clients without this capability fail closed.</summary>
+    Task<PrinterFilePreviewContent> GetFilePreviewAsync(
+        string baseUrl, PrinterFileInventoryEntry observation, PrinterCredential? credential, CancellationToken ct) =>
+        Task.FromException<PrinterFilePreviewContent>(new PrinterFileCopyException("preview_unsupported"));
+
+    /// <summary>Bounded background enrichment; custom clients without this capability report Unsupported.</summary>
+    Task<PrinterFileEnrichmentContent> EnrichFileAsync(
+        string baseUrl, PrinterFileInventoryEntry observation, PrinterCredential? credential,
+        bool captureThumbnail, CancellationToken ct) =>
+        Task.FromResult(new PrinterFileEnrichmentContent(
+            Metadata: null,
+            MetadataState: PrinterFileEnrichmentState.Unsupported,
+            ThumbnailState: PrinterFileEnrichmentState.Unsupported,
+            MetadataReason: "unsupported",
+            ThumbnailReason: "unsupported"));
+
+    /// <summary>Copies the exact, confirmed native file path through bounded authenticated transport.</summary>
+    Task<PrinterFileCopyBytes> CopyFileToAsync(
+        string baseUrl, string storageRoot, string relativePath, PrinterCredential? credential,
+        System.IO.Stream destination, long maximumBytes, CancellationToken ct) =>
+        Task.FromException<PrinterFileCopyBytes>(new PrinterFileCopyException("copy_unsupported"));
+
     // ========== PRIMARY METHODS (PrinterCredential?) ==========
 
     /// <summary>Checks for the legacy printhead endpoint using only a read request.</summary>

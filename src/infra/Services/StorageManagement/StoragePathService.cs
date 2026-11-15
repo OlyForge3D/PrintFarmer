@@ -123,6 +123,23 @@ public class StoragePathService(
         return Path.Join(_pathProvider.GetContentRootPath(), "snapshots");
     }
 
+    public string GetPrinterFileThumbnailDirectory()
+    {
+        string? envPath = Environment.GetEnvironmentVariable("PRINTER_FILE_THUMBNAIL_PATH");
+        if (!string.IsNullOrWhiteSpace(envPath))
+        {
+            return envPath;
+        }
+
+        string? configPath = _configuration.GetValue<string>("STORAGE_PATHS:PRINTER_FILE_THUMBNAILS");
+        if (!string.IsNullOrWhiteSpace(configPath))
+        {
+            return configPath;
+        }
+
+        return Path.Join(_pathProvider.GetContentRootPath(), "printer-file-thumbnails");
+    }
+
     public async Task EnsureDirectoriesExistAsync()
     {
         try
@@ -133,7 +150,8 @@ public class StoragePathService(
                 GetThumbnailDirectory(),
                 GetModelUploadDirectory(),
                 GetSlicerProfilesDirectory(),
-                GetSnapshotStorageDirectory()
+                GetSnapshotStorageDirectory(),
+                GetPrinterFileThumbnailDirectory()
             };
 
             foreach (string? dir in directories.Where(dir => !Directory.Exists(dir)))

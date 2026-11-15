@@ -17,7 +17,8 @@ public interface ISupportsPrinterFilePreview
 
 /// <summary>Absent provider metadata remains null; it is never inferred from file size or name.</summary>
 public sealed record PrinterFilePreviewContent(
-    double? PrintTimeSeconds, double? LayerHeightMm, byte[]? Image = null, string? ContentType = null);
+    double? PrintTimeSeconds, double? LayerHeightMm, byte[]? Image = null, string? ContentType = null,
+    long? SizeBytes = null, PrinterPrintMetadata? Metadata = null);
 
 /// <summary>Shared bounded transport and observation validation for lightweight preview adapters.</summary>
 public static class PrinterFilePreviewTransport
@@ -34,6 +35,24 @@ public static class PrinterFilePreviewTransport
             .ConfigureAwait(false);
         return buffer.ToArray();
     }
+
+    /// <summary>
+    /// Bounded read for adapters whose redirect-disabled transport performs its own authentication
+    /// handshake. The sender must use the supplied token and must not follow redirects.
+    /// </summary>
+    public static async Task<byte[]> ReadAsync(
+        Func<CancellationToken, Task<HttpResponseMessage>> send, int maximumBytes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(send);
+        using HttpResponseMessage response = await send(ct).ConfigureAwait(false);
+        using MemoryStream buffer = new();
+        await PrinterFileCopyTransport.CopyResponseAsync(response, buffer, maximumBytes, ct).ConfigureAwait(false);
+        return buffer.ToArray();
+    }
+
+    /// <summary>Returns the MIME type of a supported raster signature, or null for anything else.</summary>
+    public static string? DetectImageContentType(byte[] image) =>
+        new[] { "image/png", "image/jpeg", "image/webp" }.FirstOrDefault(type => IsValidImage(image, type));
 
     /// <summary>Rejects changed or missing provider identity rather than mislabeling a capture.</summary>
     public static void ValidateObservation(PrinterFileInventoryEntry expected, PrinterFileInventoryEntry actual)

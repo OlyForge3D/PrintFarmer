@@ -94,7 +94,8 @@ public class HistorySeedingBackgroundService(
             "Imports print job history from connected printers",
             "Job Queue",
             "pf-icon-history",
-            settings.IntervalMinutes * 60);
+            settings.IntervalMinutes * 60,
+            GetType());
         _serviceMonitor.ReportStarted(ServiceId);
 
         if (!settings.Enabled)
@@ -197,7 +198,8 @@ public class ActiveExternalJobSyncBackgroundService(
             "Syncs active external jobs from connected printers",
             "Job Queue",
             "pf-icon-history",
-            settings.ActiveSyncIntervalSeconds);
+            settings.ActiveSyncIntervalSeconds,
+            GetType());
         _serviceMonitor.ReportStarted(ServiceId);
 
         if (!settings.ActiveSyncEnabled)

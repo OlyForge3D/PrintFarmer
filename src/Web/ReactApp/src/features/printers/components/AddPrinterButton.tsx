@@ -26,8 +26,9 @@ export function AddPrinterButton({ onSuccess }: AddPrinterButtonProps) {
     <>
       <Button
         variant="primary"
+        control
         onClick={handleAddPrinter}
-        className="inline-flex items-center"
+        className="inline-flex items-center rounded-[2px]"
       >
         Add Printer
       </Button>

@@ -6,7 +6,7 @@
  */
 
 import { Badge, Button } from '@/common/components/ui';
-import { AlertIcon, PackageIcon, ExternalLinkIcon } from '@/common/components/icons/MdiIcons';
+import { AlertIcon, PackageIcon, ExternalLinkIcon, ArrowRightIcon } from '@/common/components/icons/MdiIcons';
 import { useLowStockComponents } from '../hooks/useMaintenanceComponents';
 import type { MaintenanceComponentDto } from '@/types/maintenance';
 
@@ -92,7 +92,7 @@ export function LowStockAlert({ maxItems = 5, onViewAll }: LowStockAlertProps) {
           )}
           {onViewAll && (
             <Button variant="ghost" size="sm" onClick={onViewAll} className="text-xs">
-              View All Parts →
+              View All Parts <ArrowRightIcon className="inline h-4 w-4" />
             </Button>
           )}
         </div>

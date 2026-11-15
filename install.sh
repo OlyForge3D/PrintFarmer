@@ -1231,6 +1231,7 @@ services:
       - Security__DevModeBypassAuth=\${DEVMODE_BYPASS_AUTH:-false}
       - GCODE_STORAGE_PATH=/app/gcode
       - MODEL_UPLOAD_PATH=/app/models
+      - PRINTER_FILE_THUMBNAIL_PATH=/data/printer-file-thumbnails
       - DATAPROTECTION_KEYS_PATH=/app/data-protection-keys
       - PFARM__Spoolman__BaseUrl=\${PFARM__Spoolman__BaseUrl:-}
       - PFARM__NetworkDiscovery__EnableDiscovery=\${PFARM__NetworkDiscovery__EnableDiscovery:-true}
@@ -1419,6 +1420,7 @@ ${compose_api_depends}
       - Security__DevModeBypassAuth=\${DEVMODE_BYPASS_AUTH:-false}
       - GCODE_STORAGE_PATH=/app/gcode
       - MODEL_UPLOAD_PATH=/app/models
+      - PRINTER_FILE_THUMBNAIL_PATH=/data/printer-file-thumbnails
       - DATAPROTECTION_KEYS_PATH=/app/data-protection-keys
       - PFARM__Spoolman__BaseUrl=\${PFARM__Spoolman__BaseUrl:-}
       - PFARM__NetworkDiscovery__EnableDiscovery=\${PFARM__NetworkDiscovery__EnableDiscovery:-true}

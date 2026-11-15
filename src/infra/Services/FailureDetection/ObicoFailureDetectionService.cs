@@ -2,6 +2,7 @@
 using System.Text.Json;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Network;
+using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Logging;
 
@@ -11,25 +12,80 @@ namespace Farm.Infrastructure.Services.FailureDetection;
 /// Service for AI-powered print failure detection using Obico-compatible ML APIs.
 /// Prefers the upstream self-hosted snapshot URL contract and falls back to the legacy multipart upload contract.
 /// </summary>
-public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
+public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService, IFailureDetectionProvider
 {
     private static readonly string[] DetectionConfidencePropertyNames = ["confidence", "score", "probability", "p"];
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ObicoFailureDetectionService> _logger;
     private readonly ISettingsService _settingsService;
-    private readonly IEgressGuard _egressGuard;
+    private readonly ICameraSnapshotCaptureService _snapshotCaptureService;
 
     public ObicoFailureDetectionService(
         IHttpClientFactory httpClientFactory,
         ISettingsService settingsService,
         ILogger<ObicoFailureDetectionService> logger,
-        IEgressGuard egressGuard)
+        ICameraSnapshotCaptureService snapshotCaptureService)
     {
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _egressGuard = egressGuard ?? throw new ArgumentNullException(nameof(egressGuard));
+        _snapshotCaptureService = snapshotCaptureService ?? throw new ArgumentNullException(nameof(snapshotCaptureService));
+    }
+
+    /// <inheritdoc/>
+    public string ProviderName => "Obico";
+
+    /// <inheritdoc/>
+    public async Task<FailureDetectionProviderResult> AnalyzeAsync(
+        FailureDetectionProviderRequest request,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        FailureDetectionResult result;
+        bool usedCapturedImage = false;
+        if (request.ImageData is not null)
+        {
+            (FailureDetectionResult uploadResult, bool legacyUploadRouteUnavailable) = await AnalyzeImageWithLegacyUploadAsync(
+                request.ImageData,
+                request.Endpoint,
+                request.ApiToken,
+                treatLegacyUploadMismatchAsCompatibilityError: false,
+                snapshotReachabilityFallbackTriggered: false,
+                ct);
+            result = uploadResult;
+            if (legacyUploadRouteUnavailable && !string.IsNullOrWhiteSpace(request.SnapshotUrl))
+            {
+                result = await AnalyzeImageFromUrlAsync(
+                    request.SnapshotUrl,
+                    request.Endpoint,
+                    request.ApiToken,
+                    ct);
+            }
+            else
+            {
+                usedCapturedImage = true;
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(request.SnapshotUrl))
+        {
+            result = await AnalyzeImageFromUrlAsync(
+                request.SnapshotUrl,
+                request.Endpoint,
+                request.ApiToken,
+                ct);
+        }
+        else
+        {
+            result = FailureDetectionResult.Error("Obico requires a camera snapshot URL or captured image.");
+        }
+
+        return new FailureDetectionProviderResult(
+            result.Confidence,
+            result.ErrorMessage is null ? result.IsFailureDetected : null,
+            result.AnalyzedAt,
+            result.ErrorMessage,
+            usedCapturedImage);
     }
 
     /// <inheritdoc/>
@@ -63,14 +119,32 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
         bool snapshotReachabilityFallbackTriggered,
         CancellationToken ct)
     {
+        var uploadOutcome = await AnalyzeImageWithLegacyUploadAsync(
+            imageData,
+            obicoServerUrl,
+            apiKey,
+            treatLegacyUploadMismatchAsCompatibilityError,
+            snapshotReachabilityFallbackTriggered,
+            ct);
+        return uploadOutcome.result;
+    }
+
+    private async Task<(FailureDetectionResult result, bool legacyUploadRouteUnavailable)> AnalyzeImageWithLegacyUploadAsync(
+        byte[] imageData,
+        string obicoServerUrl,
+        string? apiKey,
+        bool treatLegacyUploadMismatchAsCompatibilityError,
+        bool snapshotReachabilityFallbackTriggered,
+        CancellationToken ct)
+    {
         if (imageData == null || imageData.Length == 0)
         {
-            return FailureDetectionResult.Error("Image data is empty");
+            return (FailureDetectionResult.Error("Image data is empty"), false);
         }
 
         if (string.IsNullOrWhiteSpace(obicoServerUrl))
         {
-            return FailureDetectionResult.Error("Obico server URL is not configured");
+            return (FailureDetectionResult.Error("Obico server URL is not configured"), false);
         }
 
         try
@@ -94,27 +168,33 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
                 treatLegacyUploadMismatchAsCompatibilityError: treatLegacyUploadMismatchAsCompatibilityError,
                 snapshotReachabilityFallbackTriggered: snapshotReachabilityFallbackTriggered,
                 ct: ct);
-            return parsedResponse.result;
+            bool legacyUploadRouteUnavailable = !response.IsSuccessStatusCode
+                && ObicoSnapshotFallbackDetector.ShouldFallbackToLegacyUpload(response.StatusCode);
+            return (parsedResponse.result, legacyUploadRouteUnavailable);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (HttpRequestException ex)
         {
             _logger.LogError(ex, "[ObicoFailureDetection] HTTP request failed");
-            return FailureDetectionResult.Error($"HTTP error: {ex.Message}");
+            return (FailureDetectionResult.Error($"HTTP error: {ex.Message}"), false);
         }
         catch (TaskCanceledException)
         {
             _logger.LogWarning("[ObicoFailureDetection] Request timeout");
-            return FailureDetectionResult.Error(CreatePredictionTimeoutMessage(isSnapshotUrlRequest: false));
+            return (FailureDetectionResult.Error(CreatePredictionTimeoutMessage(isSnapshotUrlRequest: false)), false);
         }
         catch (JsonException ex)
         {
             _logger.LogError(ex, "[ObicoFailureDetection] Failed to parse API response");
-            return FailureDetectionResult.Error("Invalid JSON response");
+            return (FailureDetectionResult.Error("Invalid JSON response"), false);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[ObicoFailureDetection] Unexpected error during analysis");
-            return FailureDetectionResult.Error($"Unexpected error: {ex.GetType().Name}");
+            return (FailureDetectionResult.Error($"Unexpected error: {ex.GetType().Name}"), false);
         }
     }
 
@@ -186,6 +266,10 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
             _logger.LogError(ex, "[ObicoFailureDetection] HTTP request failed for snapshot URL analysis");
             return (true, false, FailureDetectionResult.Error($"HTTP error: {ex.Message}"));
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (TaskCanceledException)
         {
             _logger.LogWarning("[ObicoFailureDetection] Snapshot URL analysis request timeout");
@@ -211,68 +295,27 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
         string obicoServerUrl,
         string? apiKey,
         bool snapshotReachabilityFallbackTriggered,
-        CancellationToken ct)
+        CancellationToken ct,
+        CancellationToken? snapshotFetchCancellationToken = null)
     {
-        try
+        CancellationToken snapshotFetchToken = snapshotFetchCancellationToken ?? ct;
+        CameraSnapshotCaptureResult capture = await _snapshotCaptureService.CaptureAsync(
+            snapshotUrl,
+            _settingsService.Get<ObicoSettings>().AnalysisTimeoutSeconds,
+            snapshotFetchToken);
+        if (capture.ImageData is null)
         {
-            EgressCheckResult egressCheck = await _egressGuard.CheckAsync(snapshotUrl, ct);
-            if (!egressCheck.IsAllowed || egressCheck.Uri is null || egressCheck.ResolvedAddress is null)
-            {
-                return FailureDetectionResult.Error(
-                    $"Snapshot URL is not allowed for local fallback: {egressCheck.DenyReason ?? "Destination could not be pinned to a vetted address"}");
-            }
-
-            using HttpClient httpClient = _httpClientFactory.CreateClient("VettedEgress");
-            httpClient.Timeout = TimeSpan.FromSeconds(_settingsService.Get<ObicoSettings>().AnalysisTimeoutSeconds);
-
-            _logger.LogDebug("[ObicoFailureDetection] Fetching image from {SnapshotUrl}", LogSanitizer.Sanitize(snapshotUrl));
-
-            // Pin the vetted address to prevent DNS rebinding; retain the original authority
-            // for virtual hosting and TLS SNI. VettedEgress does not follow redirects.
-            using var request = new HttpRequestMessage(
-                HttpMethod.Get,
-                EgressGuard.CreatePinnedUri(egressCheck.Uri, egressCheck.ResolvedAddress));
-            request.Headers.Host = egressCheck.Uri.Authority;
-            using HttpResponseMessage response = await httpClient.SendAsync(request, ct);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogWarning(
-                    "[ObicoFailureDetection] Failed to fetch snapshot: {StatusCode}",
-                    response.StatusCode);
-                return FailureDetectionResult.Error($"Failed to fetch snapshot: HTTP {(int)response.StatusCode}");
-            }
-
-            byte[] imageData = await response.Content.ReadAsByteArrayAsync(ct);
-
-            if (imageData.Length == 0)
-            {
-                return FailureDetectionResult.Error("Fetched image is empty");
-            }
-
-            return await AnalyzeImageAsync(
-                imageData,
-                obicoServerUrl,
-                apiKey,
-                treatLegacyUploadMismatchAsCompatibilityError: true,
-                snapshotReachabilityFallbackTriggered: snapshotReachabilityFallbackTriggered,
-                ct: ct);
+            return FailureDetectionResult.Error(capture.ErrorMessage ?? throw new InvalidOperationException("Failed snapshot capture must include an error."));
         }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogError(ex, "[ObicoFailureDetection] Failed to fetch snapshot from {SnapshotUrl}", LogSanitizer.Sanitize(snapshotUrl));
-            return FailureDetectionResult.Error($"PrintFarmer could not download the camera snapshot: {ex.Message}");
-        }
-        catch (TaskCanceledException)
-        {
-            _logger.LogWarning("[ObicoFailureDetection] Snapshot fetch timeout from {SnapshotUrl}", LogSanitizer.Sanitize(snapshotUrl));
-            return FailureDetectionResult.Error("Snapshot fetch timeout. PrintFarmer could not download the camera snapshot in time.");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[ObicoFailureDetection] Unexpected error fetching snapshot");
-            return FailureDetectionResult.Error($"Unexpected error: {ex.GetType().Name}");
-        }
+
+        FailureDetectionResult result = await AnalyzeImageAsync(
+            capture.ImageData,
+            obicoServerUrl,
+            apiKey,
+            treatLegacyUploadMismatchAsCompatibilityError: true,
+            snapshotReachabilityFallbackTriggered: snapshotReachabilityFallbackTriggered,
+            ct: ct);
+        return result;
     }
 
     /// <summary>

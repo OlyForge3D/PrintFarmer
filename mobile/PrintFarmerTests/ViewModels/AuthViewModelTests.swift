@@ -53,7 +53,8 @@ final class AuthViewModelTests: XCTestCase {
                     serverGeneration: generation,
                     authenticated: identity
                 )
-            }
+            },
+            signalRServiceFactory: { _, _ in MockSignalRService() }
         )
         authService = AuthService(apiClient: apiClient, authEpoch: services.authOperationEpoch)
         services.authService = authService
@@ -61,6 +62,7 @@ final class AuthViewModelTests: XCTestCase {
     }
 
     override func tearDown() async throws {
+        await services?.signalRService.disconnect()
         UserDefaults.standard.removeObject(forKey: APIClient.serverURLKey)
         DemoMode.shared.isActive = priorDemoModeState
         viewModel = nil
@@ -570,6 +572,10 @@ extension AuthViewModelTests {
         XCTAssertEqual(viewModel.currentUser?.username, "admin")
         XCTAssertNil(viewModel.errorMessage)
         XCTAssertFalse(viewModel.isLoading)
+        XCTAssertTrue(
+            services.signalRService is MockSignalRService,
+            "AuthViewModel tests must not start a production SignalR connection"
+        )
     }
 
     /// The teardown happens BEFORE authentication, so it must also hold when the

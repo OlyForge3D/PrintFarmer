@@ -24,3 +24,12 @@ public sealed class DeleteFilesRequest
 {
     [JsonPropertyName("fileIds")] public IList<Guid> FileIds { get; init; } = [];
 }
+
+/// <summary>Response body for bulk deletion of virtual G-code files.</summary>
+/// <param name="Deleted">Number of distinct requested records that were removed, including those whose stored-file cleanup was incomplete.</param>
+/// <param name="TotalRequested">Number of distinct requested file IDs.</param>
+/// <param name="Results">One outcome per distinct requested ID, in request order.</param>
+public sealed record DeleteFilesResponse(
+    [property: JsonPropertyName("deleted")] int Deleted,
+    [property: JsonPropertyName("totalRequested")] int TotalRequested,
+    [property: JsonPropertyName("results")] IReadOnlyList<BulkDeleteItemResult> Results);

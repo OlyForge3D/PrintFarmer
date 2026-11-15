@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Badge, Button, EmptyState, Input, Spinner, Toggle } from '@/common/components/ui';
+import { Badge, Button, EmptyState, Spinner, Toggle, HeaderActions, SearchField, Toolbar, FiltersDisclosure, TableHeaderCell } from '@/common/components/ui';
+import { useTableSort } from '@/common/hooks/useTableSort';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import {
   PlusIcon,
   EditIcon,
   DeleteIcon,
-  SearchIcon,
   DatabaseIcon,
   BarcodeScanIcon,
 } from '@/common/components/icons/MdiIcons';
@@ -32,6 +32,7 @@ export function BinsTab() {
 
   const { data: bins = [], isLoading, error } = useBins({ includeInactive });
   const deleteBin = useDeleteBin();
+  const { headerProps, sortDataByValues } = useTableSort<'code' | 'name' | 'location' | 'notes' | 'status'>();
 
   const filtered = useMemo(() => {
     const needle = filter.trim().toLowerCase();
@@ -43,6 +44,13 @@ export function BinsTab() {
       return haystack.includes(needle);
     });
   }, [bins, filter]);
+  const sortedBins = sortDataByValues(filtered, {
+    code: bin => bin.code,
+    name: bin => bin.name,
+    location: bin => bin.location,
+    notes: bin => bin.notes,
+    status: bin => bin.isActive ? 'Active' : 'Inactive',
+  });
 
   const handleDelete = async () => {
     if (!confirmDelete) return;
@@ -57,47 +65,51 @@ export function BinsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-        <div className="relative flex-1">
-          <label htmlFor="bins-filter" className="sr-only">
-            Search bins
-          </label>
-          <SearchIcon
-            className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-pf-text-secondary pointer-events-none"
-            ariaLabel="Search"
-          />
-          <Input
-            id="bins-filter"
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-            placeholder="Filter by code, name, location, or notes"
-            className="pl-8"
-          />
-        </div>
-        <div className="flex items-center gap-3">
-          <Toggle
-            checked={includeInactive}
-            onChange={(event) => setIncludeInactive(event.target.checked)}
-            label="Show inactive"
-          />
-          <Button
-            variant="secondary"
-            size="sm"
-            iconLeft={<BarcodeScanIcon className="w-4 h-4" ariaLabel="Scan" />}
-            onClick={() => setIsRegistering(true)}
-          >
-            Register barcode
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            iconLeft={<PlusIcon className="w-4 h-4" ariaLabel="Add" />}
-            onClick={() => setIsCreating(true)}
-          >
-            Add bin
-          </Button>
-        </div>
-      </div>
+      <HeaderActions>
+        <Button
+          control
+          variant="secondary"
+          iconLeft={<BarcodeScanIcon className="w-4 h-4" ariaLabel="Scan" />}
+          onClick={() => setIsRegistering(true)}
+        >
+          Register barcode
+        </Button>
+        <Button
+          control
+          variant="primary"
+          iconLeft={<PlusIcon className="w-4 h-4" ariaLabel="Add" />}
+          onClick={() => setIsCreating(true)}
+        >
+          Add bin
+        </Button>
+      </HeaderActions>
+      <Toolbar aria-label="Bin inventory filters">
+        <FiltersDisclosure activeCount={includeInactive ? 1 : 0} onReset={() => setIncludeInactive(false)}
+          controls={trigger => (
+            <Toolbar.Controls>
+              <SearchField
+                id="bins-filter"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                onClear={() => setFilter('')}
+                label="Search bins"
+                placeholder="Filter by code, name, location, or notes"
+              />
+              {trigger}
+              <Toolbar.Spacer />
+            </Toolbar.Controls>
+          )}
+        >
+          {/* Keep the thumb positioned against its track as the label target grows. */}
+          <div data-filter-hit-target="inactive-bins" className="[&_label]:min-h-[var(--pf-control-h-md)] [&_label]:inline-flex [&_label]:items-center [&_label>div]:relative">
+            <Toggle
+              checked={includeInactive}
+              onChange={(event) => setIncludeInactive(event.target.checked)}
+              label="Show inactive"
+            />
+          </div>
+        </FiltersDisclosure>
+      </Toolbar>
 
       {isLoading && (
         <div className="flex items-center gap-2 py-8 justify-center text-pf-text-secondary">
@@ -136,16 +148,16 @@ export function BinsTab() {
           <table className="min-w-full text-sm">
             <thead className="bg-pf-bg-1 text-pf-text-secondary">
               <tr>
-                <th scope="col" className="px-3 py-2 text-left font-medium">Code</th>
-                <th scope="col" className="px-3 py-2 text-left font-medium">Name</th>
-                <th scope="col" className="px-3 py-2 text-left font-medium">Location</th>
-                <th scope="col" className="px-3 py-2 text-left font-medium">Notes</th>
-                <th scope="col" className="px-3 py-2 text-left font-medium">Status</th>
+                <TableHeaderCell {...headerProps('code')} className="px-3 py-2 font-medium">Code</TableHeaderCell>
+                <TableHeaderCell {...headerProps('name')} className="px-3 py-2 font-medium">Name</TableHeaderCell>
+                <TableHeaderCell {...headerProps('location')} className="px-3 py-2 font-medium">Location</TableHeaderCell>
+                <TableHeaderCell {...headerProps('notes')} className="px-3 py-2 font-medium">Notes</TableHeaderCell>
+                <TableHeaderCell {...headerProps('status')} className="px-3 py-2 font-medium">Status</TableHeaderCell>
                 <th scope="col" className="px-3 py-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-pf-border">
-              {filtered.map((bin) => (
+              {sortedBins.map((bin) => (
                 <tr key={bin.id} className={bin.isActive ? '' : 'opacity-60'}>
                   <td className="px-3 py-2 font-mono text-pf-text-primary">{bin.code}</td>
                   <td className="px-3 py-2">{bin.name}</td>

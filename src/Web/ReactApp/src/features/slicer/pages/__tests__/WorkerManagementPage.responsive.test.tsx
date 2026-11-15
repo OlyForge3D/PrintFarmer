@@ -1,9 +1,10 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { WorkerManagementPage } from '../WorkerManagementPage';
-import { workerService, WorkerResponse } from '@/services/workerService';
+import { workerService, WorkerResponse, WorkerStatus } from '@/services/workerService';
 import { slicerHubService } from '@/services/slicerHubService';
 
 vi.mock('@/features/slicer/components/SliceJobsPanel', () => ({
@@ -118,7 +119,73 @@ describe('WorkerManagementPage responsive workers table', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(workerService.getAllWorkers).mockResolvedValue([mockWorker]);
+    vi.mocked(workerService.getWorkersByStatus).mockResolvedValue([mockWorker]);
     vi.mocked(slicerHubService.start).mockResolvedValue(undefined);
+  });
+
+  it.each(['Worker', 'Status'])('cycles %s without changing worker or expansion identity', async label => {
+    const workers = [
+      { ...mockWorker, id: 'z', name: 'Zeta', status: WorkerStatus.Online },
+      { ...mockWorker, id: 'a', name: 'Alpha', status: WorkerStatus.Busy },
+    ];
+    vi.mocked(workerService.getAllWorkers).mockResolvedValue(workers);
+    vi.mocked(workerService.getWorkerJobs).mockResolvedValue([]);
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('Zeta');
+    const table = screen.getByRole('table');
+    const order = () => within(table).getAllByRole('row').slice(1)
+      .filter(row => row.querySelectorAll('td').length === 6)
+      .map(row => row.querySelector('td div.text-sm.font-medium')?.textContent);
+    const header = within(table).getByRole('columnheader', { name: label });
+    const button = within(header).getByRole('button', { name: label });
+    expect(header).toHaveAttribute('aria-sort', 'none');
+    await user.click(button);
+    expect(header).toHaveAttribute('aria-sort', 'ascending');
+    expect(order()).toEqual(['Alpha', 'Zeta']);
+    await user.click(within(within(table).getAllByRole('row')[1]).getAllByRole('button')[0]);
+    expect(workerService.getWorkerJobs).toHaveBeenCalledWith('a');
+    expect(await screen.findByText('No active jobs')).toBeInTheDocument();
+    button.focus();
+    await user.keyboard(' ');
+    expect(header).toHaveAttribute('aria-sort', 'descending');
+    expect(order()).toEqual(['Zeta', 'Alpha']);
+    expect(screen.getByText('No active jobs').closest('tr')?.previousElementSibling).toHaveTextContent('Alpha');
+    await user.keyboard('{Enter}');
+    expect(header).toHaveAttribute('aria-sort', 'none');
+    expect(order()).toEqual(['Zeta', 'Alpha']);
+    expect(workers.map(worker => worker.id)).toEqual(['z', 'a']);
+    for (const name of ['Capacity', 'Statistics', 'Performance', 'Actions']) {
+      expect(within(table).getByRole('columnheader', { name })).not.toHaveAttribute('aria-sort');
+    }
+  });
+
+  it('discloses status refinements and resets the live filter without hiding refresh or connection status', async () => {
+    renderPage();
+    await screen.findByText('Worker One');
+    const trigger = screen.getByRole('button', { name: 'Filters' });
+    const panel = document.getElementById(trigger.getAttribute('aria-controls')!);
+    expect(panel).toHaveAttribute('hidden');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('combobox', { name: 'Filter by worker status' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh workers' })).toBeVisible();
+    expect(await screen.findByText('Real-time updates active')).toBeVisible();
+
+    fireEvent.click(trigger);
+    expect(panel).not.toHaveAttribute('hidden');
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    const status = screen.getByRole('combobox', { name: 'Filter by worker status' });
+    fireEvent.change(status, { target: { value: WorkerStatus.Online } });
+    await waitFor(() => expect(workerService.getWorkersByStatus).toHaveBeenLastCalledWith(WorkerStatus.Online));
+    expect(screen.getByRole('button', { name: 'Filters (1)' })).toBe(trigger);
+
+    vi.mocked(workerService.getAllWorkers).mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
+    await waitFor(() => expect(workerService.getAllWorkers).toHaveBeenCalledOnce());
+    expect(status).toHaveValue('all');
+    expect(trigger).toHaveAccessibleName('Filters');
+    expect(trigger).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Reset filters' })).toBeDisabled();
   });
 
   it.each([320, 768, 1920])('keeps every column and the Actions buttons reachable at %ipx viewport', async (width) => {

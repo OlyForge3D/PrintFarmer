@@ -1,0 +1,17 @@
+{
+  "hook": {
+    "enabled": true
+  },
+  "detector": {
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "src/Web/ReactApp/src/ignored.tsx"
+        ],
+        "reason": "The narrow accent rail is intentional for the documented warning state."
+      }
+    ]
+  }
+}

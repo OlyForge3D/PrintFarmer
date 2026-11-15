@@ -167,8 +167,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertFalse(fixture.api.capturedRequests.contains { $0.url?.path == Self.deviceTokensPath })
     }
 
-    /// The production offline Control page renders no lockout banner or
-    /// explanation, only the hidden VoiceOver element (#3548).
+    /// An offline printer without motion support retains the Control page,
+    /// without exposing jog commands or a lockout explanation (#3548).
     func testProductionOfflineControlPageRendersNoLockoutText() async throws {
         executionTimeAllowance = 60
         let fixture = try detailHostFixture(isOnline: false)
@@ -183,14 +183,23 @@ final class PrinterDetailPanelsTests: XCTestCase {
         defer { window.isHidden = true; window.rootViewController = nil }
         try await selectControls(in: controller)
         try await waitForHost("The offline Control page must settle", in: controller.view) {
-            !VisibleText.collect(in: controller.view).isEmpty
+            self.capabilityRequests(fixture.api).count == 2
+                && VisibleText.collect(in: controller.view).contains("Move")
         }
-        XCTAssertNil(heaterTarget(in: controller.view), "Offline controls stay hidden")
+        for segment in ["move", "heat", "tune"] {
+            XCTAssertNotNil(views(UIControl.self, in: controller.view).first {
+                $0.accessibilityIdentifier == "printer.controls.segment.\(segment)"
+            }, "The retained panel must render its \(segment) segment")
+        }
+        XCTAssertNil(views(UIControl.self, in: controller.view).first {
+            $0.accessibilityIdentifier?.hasPrefix("printer.controls.jog.") == true
+        }, "Unsupported motion must not expose jog commands")
         let text = VisibleText.collect(in: controller.view)
         VisibleText.assertNoLockoutText(text, "production-offline-control-page")
         for fragment in ["unavailable", "reconnect"] {
             XCTAssertFalse(text.contains { $0.localizedCaseInsensitiveContains(fragment) }, "\(fragment): \(text)")
         }
+        XCTAssertTrue(detailRequests(fixture.api).allSatisfy { $0.httpMethod == "GET" })
     }
 
     // MARK: - #3528 H01: production cached-seed lifecycle

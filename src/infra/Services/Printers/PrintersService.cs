@@ -2188,10 +2188,12 @@ public class PrintersService(
                     UseModelDispatchDefaults: p.UseModelDispatchDefaults,
                     RowVersion: p.RowVersion is { Length: > 0 } ? Convert.ToBase64String(p.RowVersion) : null,
                     CurrentJobThumbnailUrl: status.CurrentJobThumbnailUrl,
+                    PrintGuardEnabled: p.PrintGuardEnabled,
                     ShowExternalSpool: p.ShowExternalSpool,
                     ActiveExtruderId: status.ActiveExtruderId,
                     SpeedFactorPercent: status.SpeedFactorPercent,
-                    FlowFactorPercent: status.FlowFactorPercent));
+                    FlowFactorPercent: status.FlowFactorPercent,
+                    IpAddress: PrinterClientUrl.ExtractIpAddress(p.ServerUrl)));
             }
             catch (Exception ex)
             {
@@ -2243,7 +2245,9 @@ public class PrintersService(
                     BedTypeColor: p.BedType?.Color,
                     UseModelDispatchDefaults: p.UseModelDispatchDefaults,
                     RowVersion: p.RowVersion is { Length: > 0 } ? Convert.ToBase64String(p.RowVersion) : null,
-                    ShowExternalSpool: p.ShowExternalSpool));
+                    ShowExternalSpool: p.ShowExternalSpool,
+                    PrintGuardEnabled: p.PrintGuardEnabled,
+                    IpAddress: PrinterClientUrl.ExtractIpAddress(p.ServerUrl)));
             }
         }
 
@@ -2674,7 +2678,8 @@ public class PrintersService(
             UseModelDispatchDefaults: p.UseModelDispatchDefaults,
             RowVersion: rowVersion,
             ConfigurationRevision: p.ConfigurationRevision,
-            ShowExternalSpool: p.ShowExternalSpool));
+            ShowExternalSpool: p.ShowExternalSpool,
+            PrintGuardEnabled: p.PrintGuardEnabled));
     }
 
     private static PrinterDto ApplyCameraContract(PrinterDto dto)

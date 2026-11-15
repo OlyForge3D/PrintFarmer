@@ -11,6 +11,20 @@ public class EfMachineModelProfileRepository(SlicerDbContext db) : IMachineModel
     private readonly SlicerDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
 
     /// <inheritdoc/>
+    public async Task<HashSet<Guid>> GetPrinterModelIdsWithProfilesAsync(IEnumerable<Guid> printerModelIds, CancellationToken ct = default)
+    {
+        HashSet<Guid> result = [];
+        foreach (Guid[] batch in printerModelIds.Distinct().Chunk(100))
+        {
+            result.UnionWith(await _db.MachineModelProfiles.AsNoTracking()
+                .Where(p => p.PrinterModelId.HasValue && batch.Contains(p.PrinterModelId.Value))
+                .Select(p => p.PrinterModelId!.Value).Distinct().ToListAsync(ct));
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc/>
     public async Task<MachineModelProfile?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
         await _db.MachineModelProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
 

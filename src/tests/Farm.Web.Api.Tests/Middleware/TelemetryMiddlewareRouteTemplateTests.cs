@@ -97,10 +97,19 @@ public class TelemetryMiddlewareRouteTemplateTests
 
         WebApplication app = builder.Build();
 
+        _ = app.Use(async (context, next) =>
+        {
+            context.TraceIdentifier = "telemetry-test-trace";
+            await next();
+        });
+
         // Mirrors Program.cs: telemetry middleware is registered before MapGet/MapControllers.
         _ = app.UseTelemetryMiddleware();
 
         _ = app.MapGet("/api/printers/{id}", (string id) => Results.Ok(new { id }));
+        _ = app.MapGet(
+            "/api/correlation-id",
+            (HttpContext context) => Results.Text(context.Items["CorrelationId"]?.ToString() ?? string.Empty));
 
         await app.StartAsync().ConfigureAwait(false);
         return (app, telemetry);
@@ -136,6 +145,39 @@ public class TelemetryMiddlewareRouteTemplateTests
 
         _ = Assert.Single(telemetry.RecordedCalls);
         Assert.Equal("unknown", telemetry.RecordedCalls[0].Endpoint);
+    }
+
+    [Fact]
+    public async Task CorrelationId_PrefersCorrelationHeaderThenRequestHeaderThenTraceIdentifier()
+    {
+        (IHost host, _) = await BuildHostAsync();
+        using IHost hostHandle = host;
+        using HttpClient client = host.GetTestClient();
+
+        using HttpRequestMessage bothHeaders = new(HttpMethod.Get, "/api/correlation-id");
+        bothHeaders.Headers.Add("X-Correlation-Id", "preferred-correlation");
+        bothHeaders.Headers.Add("X-Request-Id", "secondary-request");
+        using HttpResponseMessage bothHeadersResponse = await client.SendAsync(bothHeaders);
+        Assert.Equal("preferred-correlation", await bothHeadersResponse.Content.ReadAsStringAsync());
+
+        using HttpRequestMessage requestHeader = new(HttpMethod.Get, "/api/correlation-id");
+        requestHeader.Headers.Add("X-Request-Id", "request-only");
+        using HttpResponseMessage requestHeaderResponse = await client.SendAsync(requestHeader);
+        Assert.Equal("request-only", await requestHeaderResponse.Content.ReadAsStringAsync());
+
+        using HttpRequestMessage repeatedHeaders = new(HttpMethod.Get, "/api/correlation-id");
+        repeatedHeaders.Headers.Add("X-Correlation-Id", [" ", "ignored-correlation-second"]);
+        repeatedHeaders.Headers.Add("X-Request-Id", ["request-first", "request-second"]);
+        using HttpResponseMessage repeatedHeadersResponse = await client.SendAsync(repeatedHeaders);
+        Assert.Equal("request-first", await repeatedHeadersResponse.Content.ReadAsStringAsync());
+
+        using HttpRequestMessage blankRequestHeaders = new(HttpMethod.Get, "/api/correlation-id");
+        blankRequestHeaders.Headers.Add("X-Request-Id", [" ", "ignored-request-second"]);
+        using HttpResponseMessage blankRequestHeadersResponse = await client.SendAsync(blankRequestHeaders);
+        Assert.Equal("telemetry-test-trace", await blankRequestHeadersResponse.Content.ReadAsStringAsync());
+
+        using HttpResponseMessage noHeadersResponse = await client.GetAsync("/api/correlation-id");
+        Assert.Equal("telemetry-test-trace", await noHeadersResponse.Content.ReadAsStringAsync());
     }
 
     private static async Task<(IHost Host, RecordingTelemetryService Telemetry)> BuildControllerHostAsync()

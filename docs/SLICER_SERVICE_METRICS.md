@@ -4,6 +4,52 @@
 
 The `SlicerServiceMetrics` class provides comprehensive observability metrics for slicer service operations in PrintFarmer. These metrics enable monitoring of job lifecycles, performance, capacity utilization, and service health.
 
+## Recurring profile-task scans
+
+The startup/five-minute `ProfileTaskCheckService` scan resolves profile presence
+using two independent slicer-repository projections, each chunked at 100 distinct
+model IDs. Missing models alone receive an ID-filtered catalog name projection
+(one application-database query per 100 IDs, no component or filament graphs).
+The application and slicer databases remain separate; this is not an atomic
+cross-store snapshot.
+
+Each eligible model then receives one collection upsert through `UserTaskService`.
+It retains the authoritative open-task read, per-model gate, unique-index recovery
+and optimistic concurrency checks. Incoming printer IDs are deduplicated and
+unioned with historical associations. An unchanged union does not write, advance
+mutation sequence/timestamps or broadcast. A changed model publishes one committed
+task event plus one pending-count event, rather than per-printer intermediate
+events. Existing title/metadata/source/status are preserved on merges; terminal
+tasks are never reopened by a stale update.
+
+`ProfileTaskScanBatchTests` exercises real separate in-memory SQLite stores and
+reports application/slicer SQL command counts, catalog method calls, task-row
+write attempts, task/count events, elapsed milliseconds and whole-process
+allocated-byte deltas. The cardinality matrix covers 0/0, 1/1, 100/10, 1000/100,
+1000/1 and 10000/1000 printers/models for covered, missing and already-associated
+workloads. Its legacy orchestration mirrors the pre-#3577 scan at `0c898df`;
+both paths use the same runtime, repositories and singular/collection task core.
+This is a deterministic call-count regression and single-sample timing harness,
+not a warmed statistical benchmark or a PostgreSQL/SQL Server measurement.
+Setup and assertions are excluded from timing; worker discovery is mocked, while
+printer, catalog, profile and task SQL are counted. SQL command totals include
+mutation-counter and broadcast reload/count commands, not transaction API calls.
+
+From `src/`, run the focused harness and retain its detailed output:
+
+```bash
+dotnet test tests/Farm.Slicer.Module.Tests/Farm.Slicer.Module.Tests.csproj \
+  -c Debug --no-build \
+  --filter "FullyQualifiedName~ProfileTaskScanBatchTests" \
+  --logger "console;verbosity=detailed"
+```
+
+Do not interpret one task mutation as one SQL command or claim writes are removed
+from an already-associated no-change scan: that path already had zero writes and
+events. Contention can require more authoritative reads/write attempts. Broadcast
+delivery is still best-effort, not an outbox; an import racing discovery remains
+subject to the existing cross-store timing window.
+
 ## Metric Categories
 
 ### 1. Job Lifecycle Metrics (Counters)

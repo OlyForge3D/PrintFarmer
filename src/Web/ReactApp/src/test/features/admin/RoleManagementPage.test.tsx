@@ -141,6 +141,29 @@ function renderPage() {
 }
 
 describe('RoleManagementPage', () => {
+  it('sorts actual permission counts numerically while keeping the All sentinel last and restores incoming order', async () => {
+    vi.mocked(apiClient.getAdminRoles).mockResolvedValue([
+      { ...customRole, id: 'ten', displayName: 'Ten permissions', permissionCount: 10 },
+      systemRole,
+      { ...customRole, id: 'two', displayName: 'Two permissions', permissionCount: 2 },
+    ]);
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('Ten permissions');
+    const rows = () => screen.getAllByRole('row').slice(1);
+    const button = screen.getByRole('button', { name: 'Permissions' });
+    await user.click(button);
+    expect(button.closest('th')).toHaveAttribute('aria-sort', 'ascending');
+    expect(rows()[0]).toHaveTextContent('Two permissions');
+    expect(rows()[2]).toHaveTextContent('Farm Admin');
+    await user.click(button);
+    expect(rows()[0]).toHaveTextContent('Ten permissions');
+    expect(rows()[2]).toHaveTextContent('Farm Admin');
+    await user.click(button);
+    expect(button.closest('th')).toHaveAttribute('aria-sort', 'none');
+    expect(rows()[1]).toHaveTextContent('Farm Admin');
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(apiClient.getAdminRoles).mockResolvedValue([customRole, systemRole]);

@@ -522,6 +522,28 @@ public sealed class OrcaProfilesServiceInheritanceTests : IDisposable
         profile.Supports.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task ProcessInfillPercentage_ParsesOrcaPercentString()
+    {
+        WriteManufacturerBundle("TestMfg", processEntries: [
+            ("Percent Infill Profile", "process/percent_infill.json"),
+        ]);
+
+        WriteProfile("TestMfg", "process/percent_infill.json", """
+            {
+              "name": "Percent Infill Profile",
+              "instantiation": "true",
+              "layer_height": "0.2",
+              "sparse_infill_density": "15%"
+            }
+            """);
+
+        var service = new OrcaProfilesService(NullLogger.Instance, _profilesRoot);
+        var profiles = await service.ListAvailableProcessProfilesAsync();
+
+        profiles.Should().ContainSingle().Which.InfillPercentage.Should().Be(15);
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // 11. Settings dict contains merged keys from both parent and child
     // ──────────────────────────────────────────────────────────────────────

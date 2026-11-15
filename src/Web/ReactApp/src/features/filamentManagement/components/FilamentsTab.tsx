@@ -1,11 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue } from 'react';
 import { useUrlFilterState } from '@/common/hooks/useUrlFilterState';
 import {
-  FilterIcon,
-  RefreshIcon,
   PackageIcon,
-  GridIcon,
-  TableIcon,
   ArrowUpIcon,
   ArrowDownIcon,
   DownloadIcon,
@@ -17,10 +13,11 @@ import {
   PlusIcon,
   GearIcon,
 } from '@/common/components/icons/MdiIcons';
-import { Button, Select, FileUpload } from '@/common/components/ui';
+import { Button, Select, FileUpload, HeaderActions, SearchField, SortControl, Toolbar, ToolbarField, ViewToggle, RefreshButton, Pagination, FiltersDisclosure } from '@/common/components/ui';
 import { Checkbox } from '@/common/components/ui/Checkbox';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
 import { classifyColor } from '@/common/utils/colorFamilies';
+import { getErrorMessage } from '@/common/utils/apiErrors';
 import { ColorFamilySelect } from '@/features/filamentManagement/components/ColorFamilySelect';
 import { FilamentCard } from '@/features/filamentManagement/components/FilamentCard';
 import { FilamentTableView } from '@/features/filamentManagement/components/FilamentTableView';
@@ -33,14 +30,12 @@ import { Modal } from '@/common/components/modals/Modal';
 import { apiClient } from '@/services/api';
 import { useExportSpoolmanFilamentsCsv, useImportSpoolmanFilamentsCsv, useDeleteFilament, useBulkDeleteFilaments } from '@/common/hooks/useApi';
 import { formatTemp, formatFilamentWeight, formatPrice, formatDiameter } from '@/features/filamentManagement/utils/formatters';
-import type { SpoolmanFilament } from '@/types/api';
+import type { SpoolmanFilament, SpoolmanFilamentDeletePreview } from '@/types/api';
 import type { FilamentTableColumn } from '@/features/filamentManagement/types';
 import { toast } from 'sonner';
 
-type SortField = 'name' | 'vendor' | 'material' | 'diameter' | 'weight' | 'extruderTemp' | 'bedTemp' | 'price';
-
 /** Maps frontend sort field IDs to Spoolman API sort parameter names. */
-const FILAMENT_SORT_FIELD_MAP: Record<SortField, string> = {
+const FILAMENT_SORT_FIELD_MAP: Partial<Record<string, string>> = {
   name: 'name',
   vendor: 'vendor.name',
   material: 'material',
@@ -81,8 +76,6 @@ export function FilamentsTab() {
     page: urlPage,
     setSearch,
     setMany,
-    resetAll,
-    hasActiveFilters: urlHasActiveFilters,
   } = useUrlFilterState({
     search: { key: 'q', type: 'string', defaultValue: '', debounce: 300 },
     material: { key: 'material', type: 'string', defaultValue: '' },
@@ -97,7 +90,7 @@ export function FilamentsTab() {
 
   // Only color is filtered client-side; server handles search, material, vendor, sort
   const deferredFilters = useMemo(() => ({ color: deferredColor }), [deferredColor]);
-  const sortField = urlSortField as SortField;
+  const sortField = urlSortField;
   const sortDir = urlSortDir as 'asc' | 'desc';
   const page = urlPage as number;
   const [pageSize, setPageSize] = useState<number>(() => {
@@ -117,6 +110,25 @@ export function FilamentsTab() {
   const importCsvMutation = useImportSpoolmanFilamentsCsv();
   const deleteFilamentMutation = useDeleteFilament();
   const bulkDeleteMutation = useBulkDeleteFilaments();
+  const [deletePreview, setDeletePreview] = useState<SpoolmanFilamentDeletePreview | null>(null);
+  const [deletePreviewError, setDeletePreviewError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDeletePreview(null);
+    setDeletePreviewError(null);
+    if (deleteConfirm?.type !== 'single') return;
+    const controller = new AbortController();
+    apiClient.previewFilamentDelete(deleteConfirm.filament.id, controller.signal)
+      .then(preview => {
+        if (!controller.signal.aborted) setDeletePreview(preview);
+      })
+      .catch((err: unknown) => {
+        if (!controller.signal.aborted) {
+          setDeletePreviewError(getErrorMessage(err, "Could not check the filament's spools. Close and try again."));
+        }
+      });
+    return () => controller.abort();
+  }, [deleteConfirm]);
 
   // --- Column configuration ---
   const [showColumnConfig, setShowColumnConfig] = useState(false);
@@ -215,8 +227,8 @@ export function FilamentsTab() {
     setDragColId(null);
   };
 
-  const hasActiveFilters = urlHasActiveFilters;
-  const resetFilters = () => resetAll();
+  const activeFilterCount = [urlMaterial, urlVendor, urlColor].filter(Boolean).length;
+  const resetFilters = () => setMany({ material: '', vendor: '', color: '', page: 1 });
 
   // Filter dropdown options — loaded once from dedicated endpoint, supplemented by page data
   const [materialOptions, setMaterialOptions] = useState<string[]>([]);
@@ -244,7 +256,7 @@ export function FilamentsTab() {
   const loadFilaments = useCallback(async (signal?: AbortSignal) => {
     try {
       setError(null);
-      const spoolmanSortField = FILAMENT_SORT_FIELD_MAP[sortField as SortField];
+      const spoolmanSortField = FILAMENT_SORT_FIELD_MAP[sortField];
       const sort = spoolmanSortField ? `${spoolmanSortField}:${sortDir}` : undefined;
       // Clamp page to ≥ 1 before computing offset (guards against stale/invalid URL values)
       const safePage = Math.max(1, page);
@@ -381,24 +393,29 @@ export function FilamentsTab() {
   const handleConfirmDelete = async () => {
     if (!deleteConfirm) return;
     if (deleteConfirm.type === 'single') {
+      if (!deletePreview || deletePreview.activeSpoolCount > 0) return;
       try {
-        await deleteFilamentMutation.mutateAsync(deleteConfirm.filament.id);
+        await deleteFilamentMutation.mutateAsync({
+          id: deleteConfirm.filament.id,
+          archivedSpoolIds: deletePreview.archivedSpoolIds,
+        });
         toast.success(`Deleted "${deleteConfirm.filament.name || 'filament'}".`);
         reload();
-      } catch {
-        toast.error('Failed to delete filament.');
+      } catch (err) {
+        toast.error(`Failed to delete filament: ${getErrorMessage(err, 'Refresh inventory and try again.')}`, { duration: 10000 });
+        reload();
       }
     } else {
       try {
         const result = await bulkDeleteMutation.mutateAsync([...selectedIds]);
         if (result.errorCount > 0) {
-          toast.error(`Deleted ${result.updatedCount}, failed ${result.errorCount}.`);
+          toast.error(`Deleted ${result.updatedCount}, failed ${result.errorCount}. ${result.errors.join(' ')}`, { duration: 10000 });
         } else {
           toast.success(`Deleted ${result.updatedCount} filament${result.updatedCount !== 1 ? 's' : ''}.`);
         }
         reload();
-      } catch {
-        toast.error('Bulk delete failed.');
+      } catch (err) {
+        toast.error(`Bulk delete failed: ${getErrorMessage(err, 'Refresh inventory and try again.')}`);
       }
     }
     setDeleteConfirm(null);
@@ -458,10 +475,11 @@ export function FilamentsTab() {
 
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-bold text-pf-text-primary">Filaments ({totalCount})</h2>
-        <div className="flex gap-2 items-center">
+        <HeaderActions>
           <Button
             variant="secondary"
-            size="sm"
+            aria-label="Export Spoolman filaments to CSV"
+            control
             title="Export Spoolman filaments to CSV"
             disabled={exportCsvMutation.isPending || filaments.length === 0}
             onClick={async () => {
@@ -485,7 +503,8 @@ export function FilamentsTab() {
           </Button>
           <Button
             variant="secondary"
-            size="sm"
+            aria-label="Import filaments from CSV file"
+            control
             title="Import filaments from CSV file"
             disabled={importCsvMutation.isPending}
             onClick={() => csvFileInputRef.current?.click()}
@@ -494,7 +513,8 @@ export function FilamentsTab() {
           </Button>
           <Button
             variant="secondary"
-            size="sm"
+            aria-label="Browse and import from Open Filament Database"
+            control
             title="Browse and import from Open Filament Database"
             onClick={() => setIsOfdOpen(true)}
           >
@@ -502,41 +522,22 @@ export function FilamentsTab() {
           </Button>
           <Button
             variant="primary"
-            size="sm"
+            aria-label="Add a new filament"
+            control
             title="Add a new filament"
             onClick={() => setIsAddOpen(true)}
           >
             <PlusIcon className="h-4 w-4 mr-1" />
           </Button>
-          <div className="flex rounded-sm overflow-hidden border border-pf-border">
-            <Button
-              variant={viewMode === 'cards' ? 'primary' : 'secondary'}
-              size="sm"
-              aria-label="Card view"
-              title="Card view"
-              onClick={() => setViewMode('cards')}
-            >
-              <GridIcon className="h-4 w-4" />
-            </Button>
-            <Button
-              variant={viewMode === 'table' ? 'primary' : 'secondary'}
-              size="sm"
-              aria-label="Table view"
-              title="Table view"
-              onClick={() => setViewMode('table')}
-            >
-              <TableIcon className="h-4 w-4" />
-            </Button>
-          </div>
           <div className="relative">
             <Button
-              size="sm"
               variant="secondary"
               aria-label="Configure columns"
               title="Configure columns"
               aria-haspopup="dialog"
               aria-expanded={showColumnConfig && viewMode === 'table'}
               aria-controls="filament-column-config-panel"
+              control
               onClick={() => setShowColumnConfig(!showColumnConfig)}
               disabled={viewMode !== 'table'}
             >
@@ -599,54 +600,99 @@ export function FilamentsTab() {
               </div>
             )}
           </div>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={reload}
-            disabled={loading}
-            aria-label="Refresh filaments"
-            title="Refresh filaments"
-          >
-            <RefreshIcon className="h-4 w-4" />
-          </Button>
-        </div>
+        </HeaderActions>
       </div>
 
       {/* Filters */}
+      {filaments.length === 0 && (
+        <Toolbar aria-label="Filament view controls">
+          <Toolbar.Spacer />
+          <ViewToggle
+            value={viewMode}
+            onChange={setViewMode}
+            size="md"
+            ariaLabel="Filament view"
+            options={[
+              { mode: 'cards', kind: 'cards', title: 'Card view' },
+              { mode: 'table', kind: 'table', title: 'Table view' },
+            ]}
+          />
+          <RefreshButton busy={loading} onClick={reload} aria-label="Refresh filaments" />
+        </Toolbar>
+      )}
       {filaments.length > 0 && (
-        <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <FilterIcon className="h-4 w-4 text-pf-text-secondary" />
-            <span className="text-sm font-medium text-pf-text-primary">Filters:</span>
-            {hasActiveFilters && (
-              <Button
-                size="sm"
-                variant="subtle"
-                onClick={resetFilters}
-                aria-label="Reset all filters"
-                title="Reset all filters"
-                iconLeft={<CloseIcon className="h-3 w-3" />}
-              >
-                Reset
-              </Button>
+        <Toolbar labelled aria-label="Filament filters">
+          <FiltersDisclosure activeCount={activeFilterCount} onReset={resetFilters}
+            controls={trigger => (
+              <Toolbar.Controls>
+                <ToolbarField label="Search" htmlFor="filament-search">
+                  <SearchField
+                    id="filament-search"
+                    value={urlSearch}
+                    onChange={e => setSearch(e.target.value)}
+                    onClear={() => setSearch('')}
+                    label="Search filaments"
+                    placeholder="Name, vendor, material…"
+                  />
+                </ToolbarField>
+                {trigger}
+                {(viewMode !== 'table' || !Object.keys(FILAMENT_SORT_FIELD_MAP).every(key =>
+                  tableColumns.some(column => column.id === key && column.visible && column.sortable))) && (
+                  <ToolbarField label="Sort" htmlFor="filament-sort">
+                    <SortControl
+                      id="filament-sort"
+                      aria-label="Sort by"
+                      value={sortField}
+                      direction={sortDir}
+                      onDirectionChange={() => setMany({ sortDir: sortDir === 'asc' ? 'desc' : 'asc', page: 1 })}
+                      onChange={e => setMany({ sortField: e.target.value, page: 1 })}
+                    >
+                        <option value="none">Default order</option>
+                        <option value="name">Name</option>
+                        <option value="vendor">Vendor</option>
+                        <option value="material">Material</option>
+                        <option value="diameter">Diameter</option>
+                        <option value="weight">Weight</option>
+                        <option value="extruderTemp">Extruder Temp</option>
+                        <option value="bedTemp">Bed Temp</option>
+                        <option value="price">Price</option>
+                    </SortControl>
+                  </ToolbarField>
+                )}
+                <ToolbarField label="Show" htmlFor="filament-page-size">
+                    <Select
+                      id="filament-page-size"
+                      aria-label="Page size"
+                      value={String(pageSize)}
+                      onChange={e => { const v = Number(e.target.value); setPageSize(v); setMany({ page: 1 }); }}
+                      className="pf-control w-20 py-0"
+                      data-role="field"
+                    >
+                      <option value="10">10</option>
+                      <option value="25">25</option>
+                      <option value="50">50</option>
+                      <option value="100">100</option>
+                      <option value="0">All</option>
+                    </Select>
+                </ToolbarField>
+                <Toolbar.Spacer />
+                <ViewToggle
+                  value={viewMode}
+                  onChange={setViewMode}
+                  size="md"
+                  ariaLabel="Filament view"
+                  options={[
+                    { mode: 'cards', kind: 'cards', title: 'Card view' },
+                    { mode: 'table', kind: 'table', title: 'Table view' },
+                  ]}
+                />
+                <RefreshButton busy={loading} onClick={reload} aria-label="Refresh filaments" />
+              </Toolbar.Controls>
             )}
-          </div>
-          <div className="flex flex-wrap gap-4 items-end">
-            <div className="flex flex-col gap-1">
-              <label htmlFor="filament-search" className="text-xs text-pf-text-secondary">Search</label>
-              <input
-                id="filament-search"
-                type="search"
-                value={urlSearch}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Name, vendor, material..."
-                className="w-56 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-sm text-pf-text-primary placeholder:text-pf-text-secondary/60 focus:outline-hidden focus:ring-1 focus:ring-pf-accent"
-                aria-label="Search filaments"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-pf-text-secondary">Material</label>
+          >
+            <ToolbarField label="Material" htmlFor="filament-material">
               <Select
+                id="filament-material"
                 aria-label="Filter by material"
                 value={urlMaterial}
                 onChange={e => setMany({ material: e.target.value, page: 1 })}
@@ -657,10 +703,10 @@ export function FilamentsTab() {
                   <option key={m} value={m}>{m}</option>
                 ))}
               </Select>
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-pf-text-secondary">Vendor</label>
+            </ToolbarField>
+            <ToolbarField label="Vendor" htmlFor="filament-vendor">
               <Select
+                id="filament-vendor"
                 aria-label="Filter by vendor"
                 value={urlVendor}
                 onChange={e => setMany({ vendor: e.target.value, page: 1 })}
@@ -671,70 +717,21 @@ export function FilamentsTab() {
                   <option key={v} value={v}>{v}</option>
                 ))}
               </Select>
-            </div>
-            <div className="flex flex-col gap-1" title={isPaginated ? 'Color filter unavailable in paginated mode — set page size to All to enable' : undefined}>
-              <label className={`text-xs ${isPaginated ? 'text-pf-text-secondary/40' : 'text-pf-text-secondary'}`}>Color</label>
+            </ToolbarField>
+            <ToolbarField label="Color" htmlFor="filament-color" className={isPaginated ? 'opacity-60' : undefined}>
+              <div title={isPaginated ? 'Color filter unavailable in paginated mode — set page size to All to enable' : undefined}>
               <ColorFamilySelect
+                id="filament-color"
                 value={isPaginated ? '' : urlColor}
                 onChange={val => setMany({ color: val, page: 1 })}
                 options={colorFamilyOptions}
                 placeholder={isPaginated ? 'Paged mode' : 'All Colors'}
                 disabled={isPaginated}
               />
-            </div>
-            {viewMode === 'cards' && (
-              <div className="flex flex-col gap-1">
-                <label className="text-xs text-pf-text-secondary" htmlFor="filament-sort">Sort</label>
-                <div className="flex gap-1 items-center">
-                  <Select
-                    id="filament-sort"
-                    aria-label="Sort field"
-                    value={sortField}
-                    onChange={e => setMany({ sortField: e.target.value })}
-                    className="w-40"
-                  >
-                    <option value="name">Name</option>
-                    <option value="vendor">Vendor</option>
-                    <option value="material">Material</option>
-                    <option value="diameter">Diameter</option>
-                    <option value="weight">Weight</option>
-                    <option value="extruderTemp">Extruder Temp</option>
-                    <option value="bedTemp">Bed Temp</option>
-                    <option value="price">Price</option>
-                  </Select>
-                  <Button
-                    size="sm"
-                    variant="subtle"
-                    aria-label="Toggle sort direction"
-                    onClick={() => setMany({ sortDir: sortDir === 'asc' ? 'desc' : 'asc' })}
-                    iconLeft={sortDir === 'asc' ? <ArrowUpIcon className="h-3 w-3" /> : <ArrowDownIcon className="h-3 w-3" />}
-                  />
-                </div>
               </div>
-            )}
-            <div className="flex items-center gap-3 ml-auto">
-              <div className="flex items-center gap-1.5">
-                <label htmlFor="filament-page-size" className="text-xs text-pf-text-secondary">Show</label>
-                <Select
-                  id="filament-page-size"
-                  aria-label="Page size"
-                  value={String(pageSize)}
-                  onChange={e => { const v = Number(e.target.value); setPageSize(v); setMany({ page: 1 }); }}
-                  className="w-20"
-                >
-                  <option value="10">10</option>
-                  <option value="25">25</option>
-                  <option value="50">50</option>
-                  <option value="100">100</option>
-                  <option value="0">All</option>
-                </Select>
-              </div>
-              <span className="text-sm text-pf-text-secondary">
-                Showing {pagedFilaments.length} of {totalCount}
-              </span>
-            </div>
-          </div>
-        </div>
+            </ToolbarField>
+          </FiltersDisclosure>
+        </Toolbar>
       )}
 
       {/* Bulk edit toolbar */}
@@ -802,7 +799,7 @@ export function FilamentsTab() {
           tableColumns={tableColumns}
           onToggleSelect={toggleSelect}
           onToggleSelectAll={toggleSelectAll}
-          onSort={(field, dir) => setMany({ sortField: field, sortDir: dir })}
+          onSort={(field, dir) => setMany({ sortField: field ?? 'none', sortDir: dir ?? 'asc', page: 1 })}
           onEdit={f => setEditingFilament(f)}
           onClone={f => setCloningFilament(f)}
           onDelete={f => setDeleteConfirm({ type: 'single', filament: f })}
@@ -811,29 +808,7 @@ export function FilamentsTab() {
 
       {/* Pagination controls */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2 pt-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={page <= 1}
-            onClick={() => setMany({ page: Math.max(1, page - 1) })}
-            aria-label="Previous page"
-          >
-            ← Prev
-          </Button>
-          <span className="text-sm text-pf-text-secondary">
-            Page {page} of {totalPages}
-          </span>
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={page >= totalPages}
-            onClick={() => setMany({ page: Math.min(totalPages, page + 1) })}
-            aria-label="Next page"
-          >
-            Next →
-          </Button>
-        </div>
+        <Pagination page={page} totalPages={totalPages} onPageChange={(nextPage) => setMany({ page: nextPage })} disabled={loading} />
       )}
 
       {pagedFilaments.length === 0 && totalCount > 0 && (
@@ -883,27 +858,51 @@ export function FilamentsTab() {
       {/* Delete Confirmation Modal */}
       <Modal
         isOpen={deleteConfirm !== null}
-        onClose={() => setDeleteConfirm(null)}
+        onClose={() => { if (!isDeleting) setDeleteConfirm(null); }}
         title={deleteConfirm?.type === 'bulk' ? 'Delete Filaments?' : 'Delete Filament?'}
-        width="max-w-sm"
+        width="max-w-md"
         footer={
-          <div className="flex gap-3">
+          <div className="flex flex-col-reverse sm:flex-row gap-3">
             <Button variant="secondary" onClick={() => setDeleteConfirm(null)} disabled={isDeleting}>
               Cancel
             </Button>
-            <Button variant="danger" onClick={handleConfirmDelete} disabled={isDeleting}>
-              {isDeleting ? 'Deleting...' : 'Delete'}
+            <Button
+              variant="danger"
+              onClick={handleConfirmDelete}
+              disabled={isDeleting || (deleteConfirm?.type === 'single' && (!deletePreview || deletePreview.activeSpoolCount > 0))}
+            >
+              {isDeleting ? 'Deleting...' : deleteConfirm?.type === 'single' && deletePreview?.activeSpoolCount === 0 && deletePreview.archivedSpoolIds.length > 0 ? 'Delete filament and spools' : 'Delete'}
             </Button>
           </div>
         }
       >
         {deleteConfirm?.type === 'single' ? (
-          <p className="text-pf-text-secondary">
-            Are you sure you want to delete <strong>{deleteConfirm.filament.name || 'this filament'}</strong>? This action cannot be undone.
-          </p>
+          <div className="space-y-3 text-pf-text-secondary">
+            <p>Delete <strong className="text-pf-text-primary">{deleteConfirm.filament.name || 'this filament'}</strong>?</p>
+            <div aria-live="polite">
+              {deletePreviewError ? (
+                <p role="alert" className="text-pf-error">{deletePreviewError}</p>
+              ) : !deletePreview ? (
+                <p role="status">Checking active and archived spools...</p>
+              ) : deletePreview.activeSpoolCount > 0 ? (
+                <p role="alert" className="text-pf-error">
+                  Cannot delete: {deletePreview.activeSpoolCount} active spool{deletePreview.activeSpoolCount !== 1 ? 's' : ''} still reference this filament.
+                  {' '}Move or archive those spools first. Nothing will be deleted.
+                </p>
+              ) : deletePreview.archivedSpoolIds.length > 0 ? (
+                <p>
+                  This will also permanently delete <strong className="text-pf-text-primary">{deletePreview.archivedSpoolIds.length} archived spool{deletePreview.archivedSpoolIds.length !== 1 ? 's' : ''}</strong> and their NFC tag bindings.
+                  {' '}The filament&apos;s NFC tag bindings will also be removed. This cannot be undone.
+                </p>
+              ) : (
+                <p>This filament has no spools. This action cannot be undone.</p>
+              )}
+            </div>
+          </div>
         ) : deleteConfirm?.type === 'bulk' ? (
           <p className="text-pf-text-secondary">
             Are you sure you want to delete <strong>{selectedIds.size}</strong> filament{selectedIds.size !== 1 ? 's' : ''}? This action cannot be undone.
+            {' '}Filaments with active or archived spools will be skipped. Delete those individually to review their spools.
           </p>
         ) : null}
       </Modal>

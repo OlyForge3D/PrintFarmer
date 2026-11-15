@@ -18,20 +18,50 @@ public sealed class PrinterFileCatalogService(
     IBackendCapabilityFactory capabilities,
     IPrinterFileLeaseCoordinator leases,
     IPrinterStatusCacheReader statusCache,
-    ILogger<PrinterFileCatalogService> logger)
+    ILogger<PrinterFileCatalogService> logger,
+    PrinterFileEnrichmentService? enrichment = null)
 {
-    public async Task ScanAsync(Guid printerId, CancellationToken ct = default)
+    private static readonly TimeSpan AdapterDeadlineGrace = TimeSpan.FromSeconds(15);
+
+    public async Task ScanAsync(Guid printerId, CancellationToken ct = default) =>
+        _ = await ScanCoreAsync(printerId, false, ct);
+
+    /// <summary>
+    /// Operator-requested scan that ignores the schedule, failure backoff, and automatic-discovery switches,
+    /// advances every observed file's revision, and marks every file's enrichment due for background
+    /// reacquisition. The confirmed-idle check, exclusive per-printer lease, and deployment I/O slots still apply.
+    /// </summary>
+    public async Task<PrinterFileForceRefreshResult> ForceRefreshAsync(Guid printerId, CancellationToken ct = default)
     {
-        await using IPrinterFileLease? lease = await leases.TryAcquireAsync(printerId, false, ct);
+        if (!PrinterFileIndexPolicy.IsConfirmedIdle(statusCache.GetSnapshot(printerId), DateTime.UtcNow))
+        {
+            return new(PrinterFileForceRefreshStatus.NotIdle, "waiting_for_confirmed_idle");
+        }
+
+        return await ScanCoreAsync(printerId, true, ct);
+    }
+
+    private async Task<PrinterFileForceRefreshResult> ScanCoreAsync(Guid printerId, bool force, CancellationToken ct)
+    {
+        await using IPrinterFileLease? lease = force
+            ? await leases.TryAcquireForRefreshAsync(printerId, ct)
+            : await leases.TryAcquireAsync(printerId, false, ct);
         if (lease is null)
         {
-            return;
+            return new(PrinterFileForceRefreshStatus.Busy, "source_busy");
         }
 
         Printer? printer = await printers.FindByIdWithIncludesAsync(printerId, lease.Token);
         if (printer is null || !await lease.IsCurrentAsync(ct))
         {
-            return;
+            return new(PrinterFileForceRefreshStatus.Superseded, "scan_state_changed");
+        }
+
+        if (!force && enrichment is not null && !await IsInventoryDueAsync(printerId, lease.Token))
+        {
+            // The lease was granted only for due per-file enrichment.
+            await RunEnrichmentAsync(lease, ct);
+            return new(PrinterFileForceRefreshStatus.Incomplete, "enrichment_only");
         }
 
         PrinterFileInventoryResult result;
@@ -45,21 +75,24 @@ public sealed class PrinterFileCatalogService(
             await using AppDbContext policyDb = await dbFactory.CreateDbContextAsync(ct);
             var settings = await PrinterFileIndexPolicy.ReadAsync(policyDb, ct);
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(lease.Token);
-            deadline.CancelAfter(TimeSpan.FromSeconds(settings.ScanTimeoutSeconds));
+
+            // Grace lets the adapter's own deadline fire first and return the listing it already completed.
+            deadline.CancelAfter(TimeSpan.FromSeconds(settings.ScanTimeoutSeconds) + AdapterDeadlineGrace);
             if (!PrinterFileIndexPolicy.IsConfirmedIdle(statusCache.GetSnapshot(printerId), DateTime.UtcNow))
             {
-                return;
+                return new(PrinterFileForceRefreshStatus.NotIdle, "waiting_for_confirmed_idle");
             }
 
             try
             {
+                // Per-file details are acquired by the bounded enrichment slice, never by the listing.
                 result = await client.GetFileInventoryAsync(
                     printer.BackendUrl,
                     printer.Credential,
                     new PrinterFileInventoryOptions
                     {
                         Deadline = TimeSpan.FromSeconds(settings.ScanTimeoutSeconds),
-                        MaxRequests = settings.MaxRequests,
+                        IncludeFileDetails = false,
                         MaxEntries = settings.MaxEntries,
                         MaxDepth = settings.MaxDepth,
                     },
@@ -69,6 +102,10 @@ public sealed class PrinterFileCatalogService(
             {
                 result = new PrinterFileInventoryResult(
                     PrinterFileInventoryOutcome.Unavailable, PrinterFileInventoryReason.Timeout, [], []);
+            }
+            catch (OperationCanceledException) when (lease.Token.IsCancellationRequested && !ct.IsCancellationRequested)
+            {
+                return new(PrinterFileForceRefreshStatus.Superseded, "scan_interrupted");
             }
 
             if (result.Outcome == PrinterFileInventoryOutcome.Cancelled &&
@@ -81,14 +118,61 @@ public sealed class PrinterFileCatalogService(
 
         if (result.Outcome == PrinterFileInventoryOutcome.Cancelled || lease.Token.IsCancellationRequested)
         {
+            return new(PrinterFileForceRefreshStatus.Superseded, "scan_interrupted");
+        }
+
+        if (!await PublishAsync(lease, result, force, ct))
+        {
+            return new(PrinterFileForceRefreshStatus.Superseded, "scan_state_changed");
+        }
+
+        // A reachable listing lets due files enrich under the same idle lease; forced refresh only marks them due.
+        if (!force && result.Outcome is PrinterFileInventoryOutcome.Complete or PrinterFileInventoryOutcome.Partial)
+        {
+            await RunEnrichmentAsync(lease, ct);
+        }
+
+        return result.Outcome == PrinterFileInventoryOutcome.Complete
+            ? new(PrinterFileForceRefreshStatus.Completed, result.Reason.ToString(), result.Entries.Length)
+            : new(PrinterFileForceRefreshStatus.Incomplete, result.Reason.ToString());
+    }
+
+    private async Task<bool> IsInventoryDueAsync(Guid printerId, CancellationToken ct)
+    {
+        await using AppDbContext db = await dbFactory.CreateDbContextAsync(ct);
+        DateTime now = DateTime.UtcNow;
+        return await db.PrinterFileScanStates.AsNoTracking()
+            .AnyAsync(x => x.SourcePrinterId == printerId && x.NextScanAtUtc <= now, ct);
+    }
+
+    private async Task RunEnrichmentAsync(IPrinterFileLease lease, CancellationToken ct)
+    {
+        if (enrichment is null)
+        {
             return;
         }
 
-        await PublishAsync(lease, result, ct);
+        try
+        {
+            await enrichment.RunSliceAsync(lease, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(
+                "Printer file enrichment slice failed for {PrinterId}: {FailureType}", lease.PrinterId, ex.GetType().Name);
+        }
     }
 
+    public Task<bool> PublishAsync(
+        IPrinterFileLease lease, PrinterFileInventoryResult result, CancellationToken ct = default) =>
+        PublishAsync(lease, result, false, ct);
+
+    /// <summary>
+    /// Forced publication advances the revision of every observed file so revision-keyed preview caches miss, except files with an
+    /// in-flight operation that is pinned to the current revision.
+    /// </summary>
     public async Task<bool> PublishAsync(
-        IPrinterFileLease lease, PrinterFileInventoryResult result, CancellationToken ct = default)
+        IPrinterFileLease lease, PrinterFileInventoryResult result, bool force, CancellationToken ct = default)
     {
         if (result.Outcome == PrinterFileInventoryOutcome.Cancelled || ct.IsCancellationRequested)
         {
@@ -107,14 +191,26 @@ public sealed class PrinterFileCatalogService(
         PrinterFileScanState state = await db.PrinterFileScanStates.SingleAsync(
             x => x.SourcePrinterId == lease.PrinterId, ct);
         var settings = await PrinterFileIndexPolicy.ReadAsync(db, ct);
+        HashSet<Guid> pinned = force
+            ? (await db.PrinterFileOperations
+                .Where(x => x.SourcePrinterId == lease.PrinterId &&
+                    x.State != PrinterFileOperationState.Queued &&
+                    x.State != PrinterFileOperationState.Deleted &&
+                    x.State != PrinterFileOperationState.Failed &&
+                    x.State != PrinterFileOperationState.Cancelled)
+                .Select(x => x.LocationId).ToListAsync(ct)).ToHashSet()
+            : [];
         Dictionary<string, PrinterFileLocation> locations = await db.PrinterFileLocations
             .Where(x => x.SourcePrinterId == lease.PrinterId).ToDictionaryAsync(x => x.IdentityKey, ct);
+        Dictionary<Guid, PrinterFileEnrichment> enrichments = await db.PrinterFileEnrichments
+            .Where(x => x.Location.SourcePrinterId == lease.PrinterId).ToDictionaryAsync(x => x.LocationId, ct);
         HashSet<string> observed = new(StringComparer.Ordinal);
         foreach (PrinterFileInventoryEntry entry in result.Entries)
         {
             if (!PrinterInventoryPath.TryCanonicalizeRoot(entry.StorageRoot, out string root) ||
                 !PrinterInventoryPath.TryCanonicalizeRelativePath(entry.RelativePath, out string path) ||
-                root != entry.StorageRoot || path != entry.RelativePath || entry.SizeBytes < 0)
+                root != entry.StorageRoot || path != entry.RelativePath || entry.SizeBytes < 0 ||
+                (entry.Metadata is { } metadata && (!metadata.IsValid() || !entry.DetailsFetchedAtUtc.HasValue)))
             {
                 throw new InvalidOperationException("Inventory adapter returned a noncanonical observation.");
             }
@@ -142,18 +238,44 @@ public sealed class PrinterFileCatalogService(
                 locations.Add(key, location);
             }
 
-            bool changed = location.SizeBytes != entry.SizeBytes ||
+            // A listing without details keeps saved size and name only while its evidence still matches them.
+            bool sameEvidence = !isNew && entry.ModifiedValue is not null && location.ModifiedValue == entry.ModifiedValue &&
+                (entry.SizeBytes is null || location.SizeBytes == entry.SizeBytes) &&
+                location.ProviderVersion == entry.ProviderVersion && location.ProviderDigest == entry.ProviderHash &&
+                location.Availability == PrinterFileAvailability.Available &&
+                location.ConfigurationGeneration == lease.ConfigurationGeneration &&
+                location.MutationGeneration == lease.MutationGeneration;
+            bool wasAvailable = !isNew && location.Availability == PrinterFileAvailability.Available;
+            string? previousSource = isNew ? null : PrinterFileEnrichmentIdentity.For(location);
+            long? sizeBytes = entry.SizeBytes ?? (sameEvidence ? location.SizeBytes : null);
+            string? observedDisplayName = entry.DisplayName ?? (sameEvidence ? location.DisplayName : null);
+            PrinterPrintMetadata? observedMetadata = entry.Metadata;
+            if (observedMetadata is not null && !observedMetadata.FitsStorage())
+            {
+                logger.LogWarning(
+                    "Skipping print metadata for catalog location {LocationId}: stored JSON exceeds {MaxLength} characters",
+                    location.Id,
+                    PrinterPrintMetadata.MaximumStoredJsonLength);
+                observedMetadata = null;
+            }
+
+            // Presentation-only detail never advances the revision that pins in-flight operations.
+            bool changed = location.SizeBytes != sizeBytes ||
                 location.ModifiedValue != entry.ModifiedValue ||
                 location.ProviderVersion != entry.ProviderVersion ||
                 location.ProviderDigest != entry.ProviderHash ||
                 location.ConfigurationGeneration != lease.ConfigurationGeneration;
-            if (!isNew && (changed || location.Availability == PrinterFileAvailability.Deleted))
+            if (!isNew && ((force && !pinned.Contains(location.Id)) || changed ||
+                    location.Availability == PrinterFileAvailability.Deleted))
             {
                 location.ObservationRevision++;
             }
 
-            location.DisplayName = path[(path.LastIndexOf('/') + 1)..];
-            location.SizeBytes = entry.SizeBytes;
+            location.DisplayName = observedDisplayName is { Length: > 0 and <= 512 } displayName &&
+                !string.IsNullOrWhiteSpace(displayName) &&
+                !displayName.Any(c => char.IsControl(c) || c is '/' or '\\')
+                ? displayName : path[(path.LastIndexOf('/') + 1)..];
+            location.SizeBytes = sizeBytes;
             location.ModifiedValue = entry.ModifiedValue;
             location.ProviderVersion = entry.ProviderVersion;
             location.ProviderDigest = entry.ProviderHash;
@@ -161,6 +283,46 @@ public sealed class PrinterFileCatalogService(
             location.MutationGeneration = lease.MutationGeneration;
             location.LastSeenAtUtc = now;
             location.Availability = PrinterFileAvailability.Available;
+
+            // An unrelated mutation keeps details once this listing proves the same file association.
+            string source = PrinterFileEnrichmentIdentity.For(location);
+            bool sameSource = wasAvailable && previousSource == source;
+            if (entry.DetailsFetchedAtUtc.HasValue)
+            {
+                location.Metadata = observedMetadata;
+                location.DetailsFetchedAtUtc = entry.DetailsFetchedAtUtc;
+            }
+            else if (!sameSource)
+            {
+                location.Metadata = null;
+                location.DetailsFetchedAtUtc = null;
+            }
+
+            if (!enrichments.TryGetValue(location.Id, out PrinterFileEnrichment? row))
+            {
+                row = new PrinterFileEnrichment { LocationId = location.Id, SourceIdentity = source, NextAttemptAtUtc = now };
+                db.PrinterFileEnrichments.Add(row);
+                enrichments.Add(location.Id, row);
+            }
+            else if (!sameSource || row.SourceIdentity != source)
+            {
+                // A changed source starts over; its old image is detached and reclaimed by store cleanup.
+                row.SourceIdentity = source;
+                row.MetadataState = PrinterFileEnrichmentState.Pending;
+                row.ThumbnailState = PrinterFileEnrichmentState.Pending;
+                row.MetadataReason = null;
+                row.ThumbnailReason = null;
+                row.MetadataSource = null;
+                row.AcquiredAtUtc = null;
+                row.ConsecutiveFailures = 0;
+                row.NextAttemptAtUtc = now;
+                row.ArtifactId = null;
+            }
+            else if (force)
+            {
+                // Same-source refresh reacquires in the background while the previous image is served as stale.
+                row.NextAttemptAtUtc = now;
+            }
         }
 
         List<PrinterFileRootScan> roots = await db.PrinterFileRootScans
@@ -206,6 +368,10 @@ public sealed class PrinterFileCatalogService(
                 {
                     location.Availability = PrinterFileAvailability.Missing;
                     location.ObservationRevision++;
+                    if (enrichments.TryGetValue(location.Id, out PrinterFileEnrichment? missing))
+                    {
+                        missing.ArtifactId = null;
+                    }
                 }
             }
         }

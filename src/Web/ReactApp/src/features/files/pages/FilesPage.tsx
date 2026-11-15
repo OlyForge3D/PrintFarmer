@@ -3,6 +3,7 @@ import { useNavigate, useLocation, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { FiltersDisclosure, HeaderActions, ToolbarField } from '@/common/components/ui/toolbar';
 import { LazyModalBoundary } from '@/common/components/LazyModalFallback';
 import { FileBrowser, type FileBrowserHandle } from '@/features/fileBrowser/components/FileBrowser';
 import {
@@ -11,6 +12,7 @@ import {
   type FileQueryState,
   type UseFileBrowserConfig,
 } from '@/features/fileBrowser/types';
+import { FILE_TABLE_PREVIEW_CELL_CLASS } from '@/features/fileBrowser/fileBrowserStyles';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
@@ -27,6 +29,7 @@ import { FileTypeGlyph } from '@/features/files/components/FileGlyphs';
 import { FileNameButton } from '@/features/files/components/FileNameButton';
 import { FileThumbnail } from '@/features/files/components/FileThumbnail';
 import { LocalFileDetails } from '@/features/files/components/LocalFileDetails';
+import { LocalLibraryFolders } from '@/features/files/components/LocalLibraryFolders';
 import { useFileDetailSelection } from '@/features/files/hooks/useFileDetailSelection';
 import {
   fileExtension,
@@ -39,6 +42,7 @@ import { GcodeUploadModal } from '@/common/components/modals/GcodeUploadModal';
 import { BulkTagAssignmentModal } from '@/common/components/modals/BulkTagAssignmentModal';
 import { TaggingModal } from '@/components/TaggingModal';
 import { apiClient } from '@/services/api';
+import { deleteLocalLibraryFiles, describeLocalLibraryDelete } from '@/features/files/utils/localLibraryBulkDelete';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import {
   ClipboardListIcon,
@@ -53,7 +57,7 @@ import {
   UploadIcon,
 } from '@/common/components/icons/MdiIcons';
 import { PrintablesIcon } from '@/common/components/icons/PrintablesIcon';
-import { Button } from '@/common/components/ui';
+import { Button, Select, Tabs } from '@/common/components/ui';
 import type { Model } from '@/types/models';
 import type { GcodeFile, UnifiedFile } from '@/types/api';
 import type { ModelViewerProps } from '@/features/models3d/components/3d/ModelViewer3D';
@@ -107,6 +111,7 @@ interface TaggingTarget {
 }
 
 interface UnifiedQueryParams {
+  path: string;
   page: number;
   pageSize: number;
   search: string;
@@ -434,6 +439,7 @@ export function FilesPage() {
       page: query.page,
       pageSize: query.pageSize,
       search: query.search || undefined,
+      path: query.path || undefined,
       sortBy: query.sortBy,
       sortOrder: query.sortOrder,
       filter: query.filter,
@@ -447,7 +453,7 @@ export function FilesPage() {
       totalSize: response.totalSize,
       page: response.page,
       folders: [],
-      currentPath: '/',
+      currentPath: query.path,
     };
   }, [printerId]);
 
@@ -455,6 +461,7 @@ export function FilesPage() {
     fetcher,
     mapDomainToFileItem: toFileItem,
     mapQueryParams: (query: FileQueryState): UnifiedQueryParams => ({
+      path: query.path,
       page: query.page,
       pageSize: query.pageSize,
       search: query.search,
@@ -465,7 +472,7 @@ export function FilesPage() {
     defaultSort: { sortBy: 'date', sortOrder: 'desc' },
     selectedIds,
     onSelectionChange: setSelectedIds,
-    initialPath: '/',
+    initialPath: '',
     viewMode,
     onViewModeChange: (mode) => setViewMode(mode),
   }), [fetcher, selectedFilter, selectedIds, setViewMode, viewMode]);
@@ -559,16 +566,29 @@ export function FilesPage() {
     ];
   }, [handleDownloadGcode, handleDownloadModel]);
 
-  // Same columns and glyphs as the On printers table; the thumbnail sits between the
-  // selection checkbox and the name. Extended metadata lives in the detail panel.
+  // The thumbnail sits between selection and name; type and extended metadata live in details.
+  // Like the On printers table, the preview opens details; here it is a real button so keyboard users can too.
   const modelColumns = useMemo<ColumnDef[]>(() => [
     {
       key: 'thumbnail',
       label: 'Preview',
-      render: (file) => <FileThumbnail kind={getFileKind(file)} size="row" src={file.thumbnailUrl} />,
+      className: FILE_TABLE_PREVIEW_CELL_CLASS,
+      render: (file) => (
+        <Button
+          type="button"
+          variant="unstyled"
+          aria-label={`Preview of ${file.fileName}, show details`}
+          title={file.fileName}
+          className="block cursor-pointer rounded focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
+          onClick={(event) => openDetails(file, event.currentTarget)}
+        >
+          <FileThumbnail kind={getFileKind(file)} size="row" src={file.thumbnailUrl} />
+        </Button>
+      ),
     },
     {
       key: 'fileName',
+      sortKey: 'name',
       label: 'Name',
       sortable: true,
       render: (file) => (
@@ -576,17 +596,8 @@ export function FilesPage() {
       ),
     },
     {
-      key: 'category',
-      label: 'Type',
-      render: (file) => (
-        <span className="inline-flex items-center gap-1.5 font-medium uppercase text-pf-text-secondary">
-          <FileTypeGlyph kind={getFileKind(file)} decorative />
-          {getFileExtension(file) || '—'}
-        </span>
-      ),
-    },
-    {
       key: 'fileSize',
+      sortKey: 'size',
       label: 'Size',
       sortable: true,
       align: 'right',
@@ -594,6 +605,7 @@ export function FilesPage() {
     },
     {
       key: 'uploadedAt',
+      sortKey: 'date',
       label: 'Uploaded',
       sortable: true,
       render: (file) => <FileDate value={file.uploadedAt} fallback="—" />,
@@ -626,58 +638,31 @@ export function FilesPage() {
     }
 
     setIsDeleting(true);
-    let successCount = 0;
-    let failedCount = 0;
-
-    for (const id of idsToDelete) {
-      const parsed = fromPrefixedId(id);
-      if (!parsed) {
-        failedCount++;
-        continue;
+    try {
+      const summary = await deleteLocalLibraryFiles(idsToDelete, apiClient, fromPrefixedId);
+      setDeleteTarget(null);
+      setShowBulkDeleteConfirm(false);
+      // Blocked, failed and unknown items stay selected so the user can review or retry them.
+      setSelectedIds((current) => current.filter((id) => !summary.removedIds.has(id)));
+      if (activeDetailId && summary.removedIds.has(activeDetailId)) {
+        closeDetails();
       }
-
-      try {
-        if (parsed.source === 'model') {
-          await apiClient.deleteModel3dFile(parsed.actualId);
-        } else {
-          await apiClient.deleteGcodeFile(parsed.actualId);
-        }
-        successCount++;
-      } catch {
-        failedCount++;
-      }
+      const { level, message } = describeLocalLibraryDelete(summary);
+      toast[level](message);
+    } finally {
+      setIsDeleting(false);
+      await handleRefresh();
     }
-
-    setIsDeleting(false);
-    setDeleteTarget(null);
-    setShowBulkDeleteConfirm(false);
-    setSelectedIds([]);
-    if (activeDetailId && idsToDelete.includes(activeDetailId)) {
-      closeDetails();
-    }
-    await handleRefresh();
-
-    if (successCount > 0 && failedCount === 0) {
-      toast.success(`Deleted ${successCount} file${successCount === 1 ? '' : 's'}`);
-      return;
-    }
-
-    if (successCount > 0) {
-      toast.warning(`Deleted ${successCount} file${successCount === 1 ? '' : 's'}, ${failedCount} failed`);
-      return;
-    }
-
-    toast.error('Failed to delete selected files');
   }, [activeDetailId, closeDetails, handleRefresh]);
 
   const headerActions = (
-    <div className="flex flex-wrap items-center gap-2">
+    <HeaderActions>
       {hasPermission('3d_models', 'create') && (
         <Button
           ref={printablesButtonRef}
           type="button"
           variant="secondary"
-          size="sm"
+          control
           iconLeft={<PrintablesIcon />}
           onClick={() => setShowPrintablesBrowserModal(true)}
           onFocus={() => void PrintablesBrowserModal.preload()}
@@ -690,7 +675,7 @@ export function FilesPage() {
         <Button
           type="button"
           variant="secondary"
-          size="sm"
+          control
           iconLeft={<CubeIcon className="h-4 w-4" />}
           onClick={() => setShowModelUploadModal(true)}
         >
@@ -701,17 +686,17 @@ export function FilesPage() {
         <Button
           type="button"
           variant="secondary"
-          size="sm"
+          control
           iconLeft={<UploadIcon className="h-4 w-4" />}
           onClick={() => setShowGcodeUploadModal(true)}
         >
           Upload G-Code
         </Button>
       )}
-    </div>
+    </HeaderActions>
   );
 
-  const toolbarActions = (
+  const toolbarActions = selectedIds.length > 0 ? (
     <>
       {selectedModelIds.length > 0 && (
         <Button
@@ -754,27 +739,20 @@ export function FilesPage() {
         </Button>
       )}
     </>
-  );
+  ) : null;
 
-  const filterButtons = (
-    <>
-      {FILE_TYPE_OPTIONS.map((option) => {
-        const isActive = selectedFilter === option.value;
-        return (
-          <Button
-            key={option.value}
-            type="button"
-            size="sm"
-            variant={isActive ? 'primary' : 'secondary'}
-            aria-pressed={isActive}
-            onClick={() => handleFilterChange(option.value)}
-            title={option.hint}
-          >
-            {option.label}
-          </Button>
-        );
-      })}
-    </>
+  const fileTypeFilter = (
+    <ToolbarField label="Type" htmlFor="local-library-type">
+      <Select id="local-library-type" value={selectedFilter} className="pf-control py-0 min-w-32"
+        onChange={event => {
+          const option = FILE_TYPE_OPTIONS.find(option => option.value === event.target.value);
+          if (option) handleFilterChange(option.value);
+        }}>
+        {FILE_TYPE_OPTIONS.map(option => (
+          <option key={option.value} value={option.value} title={option.hint}>{option.label}</option>
+        ))}
+      </Select>
+    </ToolbarField>
   );
 
   return (
@@ -785,57 +763,77 @@ export function FilesPage() {
         icon={FileIcon}
         actions={headerActions}
       >
-        <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="File source">
-          {(['local', 'printers'] as const).map(source => (
-            <Button key={source} size="sm"
-              variant={onPrinters === (source === 'printers') ? 'primary' : 'secondary'}
-              aria-pressed={onPrinters === (source === 'printers')}
-              onClick={() => {
-                const next = new URLSearchParams(searchParams);
-                if (source === 'printers') next.set('source', 'printers');
-                else next.delete('source');
-                next.delete('printer');
-                next.delete('file');
-                navigate(`/files${next.size ? `?${next.toString()}` : ''}`);
-                setSelectedIds([]);
-                closeDetails();
-              }}>
-              {source === 'local' ? 'Local library' : 'On printers'}
-            </Button>
-          ))}
-        </div>
-        {/* overflow-clip (not hidden) keeps the docked detail panel sticky while clipping overflow. */}
-        <div className="min-h-[65vh] min-w-0 overflow-clip">
-          {onPrinters ? <PrinterFileCatalog /> : (
-            <div className="flex items-start gap-4">
-              <div className="min-w-0 flex-1">
-                <FileBrowser
-                  ref={fileBrowserRef}
-                  config={config}
-                  sortOptions={FILE_BROWSER_SORT_OPTIONS}
-                  columns={modelColumns}
-                  renderItemActions={renderItemActions}
-                  renderCard={renderCard}
-                  filterActions={filterButtons}
-                  extraToolbarActions={toolbarActions}
-                  viewMode={viewMode}
-                  onViewModeChange={setViewMode}
-                  compact
-                />
+        <Tabs activeTab={onPrinters ? 'printers' : 'local'} onTabChange={source => {
+          const next = new URLSearchParams(searchParams);
+          if (source === 'printers') next.set('source', 'printers');
+          else next.delete('source');
+          next.delete('printer');
+          next.delete('file');
+          navigate(`/files${next.size ? `?${next.toString()}` : ''}`);
+          setSelectedIds([]);
+          closeDetails();
+        }}>
+          <Tabs.List aria-label="File source">
+            <Tabs.Tab id="local">Local library</Tabs.Tab>
+            <Tabs.Tab id="printers">On printers</Tabs.Tab>
+          </Tabs.List>
+          {/* overflow-clip keeps the docked detail panel sticky while clipping overflow. */}
+          <Tabs.Panels className="min-h-[65vh] min-w-0 overflow-clip">
+            <Tabs.Panel id="printers"><PrinterFileCatalog /></Tabs.Panel>
+            <Tabs.Panel id="local">
+              <div className="flex items-start gap-4">
+                <div className="min-w-0 flex-1">
+                  <FileBrowser
+                    ref={fileBrowserRef}
+                    config={config}
+                    sortOptions={FILE_BROWSER_SORT_OPTIONS}
+                    columns={modelColumns}
+                    renderItemActions={renderItemActions}
+                    renderCard={renderCard}
+                    filterActions={(controls) => (
+                      <FiltersDisclosure
+                        controls={controls}
+                        activeCount={selectedFilter === 'all' ? 0 : 1}
+                        onReset={() => handleFilterChange('all')}
+                      >
+                        {fileTypeFilter}
+                      </FiltersDisclosure>
+                    )}
+                    extraToolbarActions={toolbarActions}
+                    extraToolbarActionsPlacement="below"
+                    toolbarClassName="pf-toolbar--files mb-0"
+                    renderFolderNavigation={(path, onNavigate, controls) => (
+                      <LocalLibraryFolders
+                        controls={controls}
+                        path={path}
+                        onNavigate={(nextPath) => { closeDetails(); onNavigate(nextPath); }}
+                        modelIds={selectedModelIds}
+                        gcodeIds={selectedGcodeIds}
+                        canCreate={hasPermission('3d_models', 'create') && hasPermission('gcode_library', 'create')}
+                        canMove={(selectedModelIds.length === 0 || hasPermission('3d_models', 'create'))
+                          && (selectedGcodeIds.length === 0 || hasPermission('gcode_library', 'create'))}
+                        onMoved={() => { setSelectedIds([]); closeDetails(); }}
+                      />
+                    )}
+                    viewMode={viewMode}
+                    onViewModeChange={setViewMode}
+                    compact
+                  />
+                </div>
+                {details.selected && (
+                  <LocalFileDetails
+                    key={details.selected.id}
+                    file={details.selected}
+                    kind={getFileKind(details.selected)}
+                    extension={getFileExtension(details.selected)}
+                    actions={localActions(details.selected)}
+                    onClose={closeDetails}
+                  />
+                )}
               </div>
-              {details.selected && (
-                <LocalFileDetails
-                  key={details.selected.id}
-                  file={details.selected}
-                  kind={getFileKind(details.selected)}
-                  extension={getFileExtension(details.selected)}
-                  actions={localActions(details.selected)}
-                  onClose={closeDetails}
-                />
-              )}
-            </div>
-          )}
-        </div>
+            </Tabs.Panel>
+          </Tabs.Panels>
+        </Tabs>
       </PageTemplate>
 
       <Modal isOpen={!!linkedFileId} title="Owned local G-code" onClose={() => {

@@ -145,7 +145,9 @@ public interface IPrintJobManagementRepository
     /// </summary>
     /// <param name="limit">Maximum number of jobs to return.</param>
     /// <param name="offset">Number of jobs to skip for pagination.</param>
-    /// <param name="sortBy">Field to sort by (completedAt, duration, name, status).</param>
+    /// <param name="sortBy">History sort mode: completedAt/newest, oldest, duration (descending),
+    /// duration_asc, name, status, printer, model, material, filament, cost, deadline.
+    /// Named fields other than duration also accept _desc. ID breaks ties before paging.</param>
     /// <param name="statuses">Optional list of statuses to filter by (completed, failed, cancelled).</param>
     /// <param name="dateStart">Optional start date filter (inclusive).</param>
     /// <param name="dateEnd">Optional end date filter (inclusive).</param>

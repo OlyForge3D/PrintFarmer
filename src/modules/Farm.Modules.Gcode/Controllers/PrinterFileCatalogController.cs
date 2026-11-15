@@ -5,6 +5,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Gcode.PrinterFiles;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
+using Farm.Modules.Gcode.Services.Gcode;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -20,7 +21,8 @@ public sealed class PrinterFileCatalogController(
     AppDbContext db,
     IPrinterFileAccessService access,
     IQueueResourceAuthorizationService resources,
-    IBackendClientFactory? backendClients = null) : ControllerBase
+    IBackendClientFactory? backendClients = null,
+    PrinterFileCatalogService? catalog = null) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> ListAsync(
@@ -80,34 +82,94 @@ public sealed class PrinterFileCatalogController(
             .Select(x => x.GcodeFileId!.Value).Distinct().ToArrayAsync(ct);
         Guid[] allowedLocal = [.. await access.FilterAccessibleLocalAsync(actor, localCandidates, ct: ct)];
 
-        var items = await query.OrderBy(x => x.DisplayName).ThenBy(x => x.Id)
-            .Skip((page - 1) * pageSize).Take(pageSize)
-            .Select(x => new
+        var rows = await (
+                from x in query
+                join row in db.PrinterFileEnrichments on x.Id equals row.LocationId into joined
+                from enrichment in joined.DefaultIfEmpty()
+                orderby x.DisplayName, x.Id
+                select new
+                {
+                    x.Id,
+                    printerId = x.SourcePrinterId,
+                    printerName = x.RegisteredPrinter!.Name,
+                    x.StorageRoot,
+                    x.RelativePath,
+                    x.DisplayName,
+                    x.SizeBytes,
+                    x.Metadata,
+                    x.DetailsFetchedAtUtc,
+                    x.ModifiedValue,
+                    x.ProviderVersion,
+                    x.ProviderDigest,
+                    x.ObservationRevision,
+                    x.ConfigurationGeneration,
+                    x.Availability,
+                    x.LastSeenAtUtc,
+                    x.LastCompleteScanAtUtc,
+                    isStale = x.LastSeenAtUtc < staleBefore,
+                    localCopies = db.PrinterFileOrigins.Where(origin =>
+                            origin.LocationId == x.Id && origin.GcodeFileId.HasValue &&
+                            allowedLocal.Contains(origin.GcodeFileId.Value))
+                        .Select(origin => new
+                        {
+                            origin.GcodeFileId,
+                            origin.CapturedAtUtc,
+                            origin.Verification,
+                        }).ToArray(),
+                    enrichment,
+                })
+            .Skip((page - 1) * pageSize).Take(pageSize).ToArrayAsync(ct);
+        DateTime now = DateTime.UtcNow;
+        var items = rows.Select(x =>
+        {
+            // Outcomes recorded for an older source or configuration generation are never presented.
+            PrinterFileEnrichment? enrichment = x.enrichment is { } candidate &&
+                candidate.SourceIdentity == PrinterFileEnrichmentIdentity.For(new PrinterFileLocation
+                {
+                    SourcePrinterId = x.printerId,
+                    StorageRoot = x.StorageRoot,
+                    RelativePath = x.RelativePath,
+                    ConfigurationGeneration = x.ConfigurationGeneration,
+                    SizeBytes = x.SizeBytes,
+                    ModifiedValue = x.ModifiedValue,
+                    ProviderVersion = x.ProviderVersion,
+                    ProviderDigest = x.ProviderDigest,
+                })
+                    ? candidate : null;
+            Guid? thumbnailVersion = x.Availability == PrinterFileAvailability.Available
+                ? enrichment?.ArtifactId : null;
+            return new
             {
                 x.Id,
-                printerId = x.SourcePrinterId,
-                printerName = x.RegisteredPrinter!.Name,
+                x.printerId,
+                x.printerName,
                 x.StorageRoot,
                 x.RelativePath,
                 x.DisplayName,
                 x.SizeBytes,
+                x.Metadata,
+                x.DetailsFetchedAtUtc,
                 x.ModifiedValue,
                 x.ObservationRevision,
                 x.ConfigurationGeneration,
                 x.Availability,
                 x.LastSeenAtUtc,
                 x.LastCompleteScanAtUtc,
-                isStale = x.LastSeenAtUtc < staleBefore,
-                localCopies = db.PrinterFileOrigins.Where(origin =>
-                        origin.LocationId == x.Id && origin.GcodeFileId.HasValue &&
-                        allowedLocal.Contains(origin.GcodeFileId.Value))
-                    .Select(origin => new
-                    {
-                        origin.GcodeFileId,
-                        origin.CapturedAtUtc,
-                        origin.Verification,
-                    }).ToArray(),
-            }).ToArrayAsync(ct);
+                x.isStale,
+                x.localCopies,
+                metadataState = enrichment?.MetadataState,
+                thumbnailState = enrichment?.ThumbnailState,
+                metadataReason = enrichment?.MetadataReason,
+                thumbnailReason = enrichment?.ThumbnailReason,
+                thumbnailVersion,
+                thumbnailUrl = thumbnailVersion is Guid version
+                    ? PrinterFileContentService.ThumbnailUrl(x.Id, x.ObservationRevision, version)
+                    : null,
+                thumbnailIsStale = thumbnailVersion.HasValue &&
+                    (PrinterFileEnrichmentSchedule.IsDue(enrichment, now) ||
+                        enrichment!.ThumbnailState != PrinterFileEnrichmentState.Ready),
+            };
+        }).ToArray();
         var printerRows = await db.Printers.AsNoTracking().Where(x => allowed.Contains(x.Id))
             .OrderBy(x => x.Name).Select(x => new { x.Id, x.Name, x.Backend }).ToArrayAsync(ct);
         List<object> printers = [];
@@ -117,7 +179,9 @@ public sealed class PrinterFileCatalogController(
                 backendClients.IsBackendSupported((PrinterBackend)printer.Backend)
                     ? backendClients.GetClient(printer.Backend) : null;
             bool supportsCopy = backend is ISupportsPrinterFileCopy;
-            bool supportsPreview = backend is ISupportsPrinterFilePreview;
+
+            // Previews are served from locally persisted enrichment, so reading them needs only read authority.
+            bool supportsPreview = backend is ISupportsPrinterFileEnrichment;
             bool supportsDownload = backend is ISupportsPrinterFileCopy and ISupportsFileInventory;
             printers.Add(new
             {
@@ -127,7 +191,7 @@ public sealed class PrinterFileCatalogController(
                 supportsCopy,
                 canCopy = supportsCopy && authority.Copyable.Contains(printer.Id),
                 supportsPreview,
-                canPreview = supportsPreview && authority.Readable.Contains(printer.Id),
+                canPreview = authority.Readable.Contains(printer.Id),
                 supportsDownload,
                 canDownload = supportsDownload && authority.Copyable.Contains(printer.Id),
                 canDelete = authority.Deletable.Contains(printer.Id),
@@ -149,16 +213,54 @@ public sealed class PrinterFileCatalogController(
                 isScanning = x.LeaseOwner.HasValue && x.LeaseExpiresAtUtc > DateTime.UtcNow,
                 isStale = !x.LastCompleteScanAtUtc.HasValue || x.LastCompleteScanAtUtc < staleBefore,
             }).ToArrayAsync(ct);
-        return Ok(new { items, total, page, pageSize, printers, scans, automaticDiscoveryEnabled = policy.Enabled });
+        return Ok(new
+        {
+            items,
+            total,
+            page,
+            pageSize,
+            printers,
+            scans,
+            automaticDiscoveryEnabled = policy.Enabled,
+            maxConcurrentIo = policy.MaxConcurrentIo,
+        });
     }
 
+    /// <summary>
+    /// Without <paramref name="force"/>, only moves the next background scan and per-file enrichment forward.
+    /// With it, scans now and
+    /// returns 200 only after a complete listing is published; deferrals and incomplete scans return 409.
+    /// </summary>
     [HttpPost("printers/{printerId:guid}/refresh")]
     [Authorize(Policy = InteractiveSessionRequirement.PolicyName)]
-    public async Task<IActionResult> RefreshAsync(Guid printerId, CancellationToken ct)
+    public async Task<IActionResult> RefreshAsync(
+        Guid printerId, [FromQuery] bool force = false, CancellationToken ct = default)
     {
         if (!await CanManageAsync(printerId, ct))
         {
             return NotFound();
+        }
+
+        if (force)
+        {
+            PrinterFileCatalogService scanner = catalog ??
+                throw new InvalidOperationException("Printer file catalog service is not registered.");
+            PrinterFileForceRefreshResult outcome;
+            try
+            {
+                outcome = await scanner.ForceRefreshAsync(printerId, ct);
+            }
+            catch (DbUpdateException)
+            {
+                return Conflict(new { code = "scan_state_changed" });
+            }
+
+            return outcome.Status switch
+            {
+                PrinterFileForceRefreshStatus.Completed => Ok(new { code = "refresh_completed", files = outcome.FileCount }),
+                PrinterFileForceRefreshStatus.Incomplete => Conflict(new { code = "refresh_incomplete", reasonCode = outcome.ReasonCode }),
+                _ => Conflict(new { code = outcome.ReasonCode, reasonCode = outcome.ReasonCode }),
+            };
         }
 
         PrinterFileScanState? state = await db.PrinterFileScanStates.SingleOrDefaultAsync(
@@ -168,7 +270,19 @@ public sealed class PrinterFileCatalogController(
             return Accepted(new { code = "enrollment_pending" });
         }
 
-        state.NextScanAtUtc = DateTime.UtcNow;
+        DateTime requestedAt = DateTime.UtcNow;
+        state.NextScanAtUtc = requestedAt;
+
+        // Same-source rows are reacquired in the background; any stored image is served as stale meanwhile.
+        List<PrinterFileEnrichment> rows = await db.PrinterFileEnrichments
+            .Where(x => db.PrinterFileLocations.Any(location =>
+                location.Id == x.LocationId && location.SourcePrinterId == printerId))
+            .ToListAsync(ct);
+        foreach (PrinterFileEnrichment row in rows)
+        {
+            row.NextAttemptAtUtc = requestedAt;
+        }
+
         try
         {
             await db.SaveChangesAsync(ct);

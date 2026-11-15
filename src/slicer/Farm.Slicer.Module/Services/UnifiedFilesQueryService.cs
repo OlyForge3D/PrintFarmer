@@ -40,6 +40,26 @@ public sealed class UnifiedFilesQueryService(
         IQueryable<Model3D> modelQuery = BuildModelQuery(request);
         IQueryable<GcodeFile> gcodeQuery = BuildGcodeQuery(request);
 
+        if (!string.IsNullOrWhiteSpace(request.Path))
+        {
+            string path = request.Path.TrimEnd('/');
+            if (path.Length == 0)
+            {
+                path = "/";
+            }
+
+            // The model store references folders in the app database, so resolve before querying either source.
+            var folders = await _appDb.Set<FolderNode>()
+                .AsNoTracking()
+                .Where(folder => folder.Path == path && folder.DeletedAt == null)
+                .Select(folder => new { folder.Id, folder.FolderType })
+                .ToListAsync(ct);
+            Guid[] modelFolderIds = folders.Where(folder => folder.FolderType == "models").Select(folder => folder.Id).ToArray();
+            Guid[] gcodeFolderIds = folders.Where(folder => folder.FolderType == "gcode").Select(folder => folder.Id).ToArray();
+            modelQuery = modelQuery.Where(model => modelFolderIds.Contains(model.FolderId));
+            gcodeQuery = gcodeQuery.Where(file => gcodeFolderIds.Contains(file.FolderId));
+        }
+
         Task<SourceSummary> modelSummaryTask = GetModelSummaryAsync(modelQuery, ct);
         Task<SourceSummary> gcodeSummaryTask = GetGcodeSummaryAsync(gcodeQuery, ct);
         await Task.WhenAll(modelSummaryTask, gcodeSummaryTask);

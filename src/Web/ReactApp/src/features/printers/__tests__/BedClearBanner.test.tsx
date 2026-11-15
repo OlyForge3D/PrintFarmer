@@ -530,6 +530,43 @@ describe('BedClearBanner', () => {
         'Dispatching "part.gcode" to MK4 (filament override confirmed)',
       );
     });
+    expect(screen.queryByTestId('filament-override-modal')).not.toBeInTheDocument();
+  });
+
+  it('closes the override modal and surfaces the server reason when dispatch is rejected', async () => {
+    vi.mocked(confirmAutoDispatchReady)
+      .mockResolvedValueOnce(readyResultInsufficientFilament)
+      .mockRejectedValueOnce(
+        new Error("Printer 'qp4-1' is eliminated: Printer is in maintenance"),
+      );
+    render(
+      <BedClearBanner printerId="printer-1" printerName="qp4-1" autoDispatchStatus={baseStatus} />,
+      { wrapper: createWrapper() },
+    );
+    fireEvent.click(screen.getByLabelText('Confirm bed clear for qp4-1'));
+    await waitFor(() => {
+      expect(screen.getByTestId('filament-override-modal')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('print-anyway-btn'));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        "Printer 'qp4-1' is eliminated: Printer is in maintenance",
+      );
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId('filament-override-modal')).not.toBeInTheDocument();
+    });
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Confirm bed clear for qp4-1')).not.toBeDisabled();
+
+    // Stale consent is discarded: a new review must start from a fresh challenge.
+    vi.mocked(confirmAutoDispatchReady).mockResolvedValueOnce(readyResultInsufficientFilament);
+    fireEvent.click(screen.getByLabelText('Confirm bed clear for qp4-1'));
+    await waitFor(() => {
+      expect(confirmAutoDispatchReady).toHaveBeenNthCalledWith(3, 'printer-1', 'dispatch-v1');
+    });
   });
 
   it('reports reconciliation pending without claiming dispatch was rejected', async () => {

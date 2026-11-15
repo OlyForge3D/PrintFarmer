@@ -44,7 +44,8 @@ public class StaleWorkerCleanupHostedService : BackgroundService
             "Removes inactive slicer workers that haven't sent heartbeats",
             "Slicing",
             "pf-icon-worker",
-            settings.IntervalSeconds);
+            settings.IntervalSeconds,
+            GetType());
         _serviceMonitor?.ReportStarted(ServiceId);
 
         if (!settings.Enabled)

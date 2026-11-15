@@ -229,6 +229,441 @@ EOF
     pass_test
 }
 
+test_provider_endpoint_defaults_without_docker() {
+    start_test "provider URL regeneration distinguishes persisted empty values from explicit overrides"
+
+    local fixture_dir="$TEST_TEMP_DIR/provider-endpoint-fixture"
+    mkdir -p "$fixture_dir"
+    local helper_script="$TEST_TEMP_DIR/provider-endpoint-helper.sh"
+    write_base_config "$TEST_TEMP_DIR/provider-endpoint.config"
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -euo pipefail
+docker() { return 1; }
+source "$DEPLOY_SCRIPT"
+CONFIG_FILE="$TEST_TEMP_DIR/provider-endpoint.config"
+ENV_FILE="$TEST_TEMP_DIR/provider-endpoint.env"
+source "\$CONFIG_FILE"
+OS=linux
+NON_INTERACTIVE=true
+ORCA_HOST_PORT=8081
+ORCA_WORKER_INSTANCE_ID=
+ORCASLICER_CONTAINER_DIGEST=
+Jwt__Key=provider-endpoint-test-jwt-key-32-bytes
+WebAuthn__RelyingPartyId=localhost
+WebAuthn__RelyingPartyName=PrintFarmerTest
+WebAuthn__Origin=http://localhost:8080
+POSTGRES_PASSWORD=provider-endpoint-test-value
+GRAFANA_ADMIN_PASSWORD=provider-endpoint-test-value
+AUTO_ADMIN_PASSWORD=provider-endpoint-test-value
+PFARM__Setup__BootstrapSecret=provider-endpoint-test-value
+resolve_orcaslicer_container_digest() { :; }
+unset PFARM__Obico__ObicoApiUrl PFARM__PrintGuardShadow__ApiUrl
+
+assert_endpoints() {
+    grep -Fxq "PFARM__Obico__ObicoApiUrl=\$1" "\$ENV_FILE"
+    grep -Fxq "PFARM__PrintGuardShadow__ApiUrl=\$2" "\$ENV_FILE"
+}
+
+DEPLOY_OBICO_ML=no
+DEPLOY_PRINTGUARD=no
+generate_env_file
+assert_endpoints "" ""
+DEPLOY_OBICO_ML=yes
+DEPLOY_PRINTGUARD=yes
+generate_env_file
+assert_endpoints "http://obico-ml-api:3333" "http://printguard:8000"
+
+PFARM__Obico__ObicoApiUrl=
+PFARM__PrintGuardShadow__ApiUrl=
+generate_env_file
+assert_endpoints "" ""
+unset PFARM__Obico__ObicoApiUrl PFARM__PrintGuardShadow__ApiUrl
+DEPLOY_OBICO_ML=no
+DEPLOY_PRINTGUARD=no
+generate_env_file
+assert_endpoints "" ""
+
+PFARM__Obico__ObicoApiUrl=https://obico.example.test
+PFARM__PrintGuardShadow__ApiUrl=https://printguard.example.test
+generate_env_file
+assert_endpoints "https://obico.example.test" "https://printguard.example.test"
+unset PFARM__Obico__ObicoApiUrl PFARM__PrintGuardShadow__ApiUrl
+DEPLOY_OBICO_ML=yes
+DEPLOY_PRINTGUARD=yes
+generate_env_file
+assert_endpoints "https://obico.example.test" "https://printguard.example.test"
+
+PFARM__Obico__ObicoApiUrl=malformed
+PFARM__PrintGuardShadow__ApiUrl=malformed
+generate_env_file
+assert_endpoints "malformed" "malformed"
+unset PFARM__Obico__ObicoApiUrl PFARM__PrintGuardShadow__ApiUrl
+generate_env_file
+assert_endpoints "malformed" "malformed"
+EOF
+    chmod +x "$helper_script"
+    capture_output "cd '$fixture_dir' && bash '$helper_script' 2>&1"
+    if [[ "$(get_output_exit_code)" != 0 ]]; then
+        test_info "Provider endpoint generation failed: $(get_output)"
+        fail_test "Provider endpoint regeneration must preserve overrides and default only selected empty URLs"
+        return 1
+    fi
+    pass_test
+}
+
+test_provider_selection_persistence_and_overrides() {
+    start_test "provider selections default off, persist, and honor CLI/env overrides"
+
+    local failures_before=$TESTS_FAILED
+    local default_dir="$TEST_TEMP_DIR/provider-default"
+    local cli_dir="$TEST_TEMP_DIR/provider-cli"
+    local env_dir="$TEST_TEMP_DIR/provider-env"
+    mkdir -p "$default_dir" "$cli_dir" "$env_dir"
+
+    cd "$default_dir"
+    write_base_config ".deploy-config"
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" "Default provider configuration should complete" || true
+    assert_file_has_exact_line ".deploy-config" "DEPLOY_OBICO_ML=no" "Obico should persist disabled by default" || true
+    assert_file_has_exact_line ".deploy-config" "DEPLOY_PRINTGUARD=no" "PrintGuard should persist disabled by default" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__Enabled=false" "Obico application integration should be disabled by default" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__Enabled=false" "PrintGuard application integration should be disabled by default" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__ObicoApiUrl=" "Initially disabled Obico should have an empty saved URL" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__ApiUrl=" "Initially disabled PrintGuard should have an empty saved URL" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__ApiToken=" "PrintGuard API token should default to empty" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__RequestTimeoutSeconds=5" "PrintGuard request timeout should default to five seconds" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__CaptureTimeoutSeconds=5" "PrintGuard capture timeout should default to five seconds" || true
+    assert_file_has_exact_line ".env" "PRINTGUARD_CPU_LIMIT=2.0" "PrintGuard CPU limit should use its default" || true
+    assert_file_has_exact_line ".env" "PRINTGUARD_MEMORY_LIMIT=2gb" "PrintGuard memory limit should use its default" || true
+    assert_file_has_exact_line ".env" "PRINTGUARD_CPU_REQUEST=0.5" "PrintGuard CPU request should use its default" || true
+    assert_file_has_exact_line ".env" "PRINTGUARD_MEMORY_REQUEST=512m" "PrintGuard memory request should use its default" || true
+
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive --include-obico-ml --include-printguard 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" "Initially disabled providers should be enabled on redeploy" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__ObicoApiUrl=http://obico-ml-api:3333" "An existing empty Obico URL must become the selected bundled endpoint" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__ApiUrl=http://printguard:8000" "An existing empty PrintGuard URL must become the selected bundled endpoint" || true
+
+    cd "$cli_dir"
+    write_base_config ".deploy-config"
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive --include-obico-ml --include-printguard 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" "CLI provider selections should complete" || true
+    assert_file_has_exact_line ".deploy-config" "DEPLOY_OBICO_ML=yes" "CLI should enable and persist Obico" || true
+    assert_file_has_exact_line ".deploy-config" "DEPLOY_PRINTGUARD=yes" "CLI should enable and persist PrintGuard" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__Enabled=true" "CLI Obico selection should reach the application" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__Enabled=true" "CLI PrintGuard selection should reach the application" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__ObicoApiUrl=http://obico-ml-api:3333" "Selected Obico sidecar should use its internal endpoint" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__ApiUrl=http://printguard:8000" "Selected PrintGuard sidecar should use its internal endpoint" || true
+
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive --exclude-obico-ml --exclude-printguard 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" "Provider selections should be changeable on redeploy" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__Enabled=false" "Redeploy should disable Obico despite its previous generated .env value" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__Enabled=false" "Redeploy should disable PrintGuard despite its previous generated .env value" || true
+
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive --include-obico-ml --include-printguard 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" "Provider selections should be re-enabled on redeploy" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__Enabled=true" "Redeploy should re-enable Obico over its previous generated .env value" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__Enabled=true" "Redeploy should re-enable PrintGuard over its previous generated .env value" || true
+
+    cd "$env_dir"
+    write_base_config ".deploy-config"
+    cat >> ".deploy-config" << 'EOF'
+DEPLOY_OBICO_ML=yes
+DEPLOY_PRINTGUARD=yes
+EOF
+    capture_output "DEPLOY_OBICO_ML=no timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive --exclude-printguard 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" "Explicit provider overrides should complete" || true
+    assert_file_has_exact_line ".deploy-config" "DEPLOY_OBICO_ML=no" "Environment override should beat persisted Obico selection" || true
+    assert_file_has_exact_line ".deploy-config" "DEPLOY_PRINTGUARD=no" "CLI override should beat persisted PrintGuard selection" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__Enabled=false" "Environment override should disable Obico in the application" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__Enabled=false" "CLI override should disable PrintGuard in the application" || true
+
+    local external_dir="$TEST_TEMP_DIR/provider-external-config"
+    mkdir -p "$external_dir"
+    cd "$external_dir"
+    write_base_config ".deploy-config"
+    cat >> ".deploy-config" << 'EOF'
+DEPLOY_OBICO_ML=no
+DEPLOY_PRINTGUARD=no
+EOF
+    cat > ".env" << 'EOF'
+PFARM__Obico__Enabled=true
+PFARM__Obico__ObicoApiUrl=https://obico.example.test
+PFARM__PrintGuardShadow__Enabled=true
+PFARM__PrintGuardShadow__ApiUrl=https://printguard.example.test
+PFARM__PrintGuardShadow__ApiToken=printguard-secret-test-token
+PFARM__PrintGuardShadow__RequestTimeoutSeconds=17
+PFARM__PrintGuardShadow__CaptureTimeoutSeconds=19
+PRINTGUARD_CPU_LIMIT=3.0
+PRINTGUARD_MEMORY_LIMIT=3gb
+PRINTGUARD_CPU_REQUEST=1.0
+PRINTGUARD_MEMORY_REQUEST=1gb
+EOF
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --regenerate-config 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" "Provider settings should survive config regeneration" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__Enabled=false" "Regeneration should derive Obico enablement from provider deployment selection" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__ObicoApiUrl=https://obico.example.test" "Regeneration should preserve external Obico URL" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__Enabled=false" "Regeneration should derive PrintGuard enablement from provider deployment selection" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__ApiUrl=https://printguard.example.test" "Regeneration should preserve external PrintGuard URL" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__ApiToken=printguard-secret-test-token" "Regeneration should preserve the PrintGuard API token" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__RequestTimeoutSeconds=17" "Regeneration should preserve the PrintGuard request timeout" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__CaptureTimeoutSeconds=19" "Regeneration should preserve the PrintGuard capture timeout" || true
+    assert_not_contains "$(get_output)" "printguard-secret-test-token" "Deployment output should not expose the PrintGuard API token" || true
+    assert_file_has_exact_line ".env" "PRINTGUARD_CPU_LIMIT=3.0" "Regeneration should preserve the PrintGuard CPU limit" || true
+    assert_file_has_exact_line ".env" "PRINTGUARD_MEMORY_LIMIT=3gb" "Regeneration should preserve the PrintGuard memory limit" || true
+    assert_file_has_exact_line ".env" "PRINTGUARD_CPU_REQUEST=1.0" "Regeneration should preserve the PrintGuard CPU request" || true
+    assert_file_has_exact_line ".env" "PRINTGUARD_MEMORY_REQUEST=1gb" "Regeneration should preserve the PrintGuard memory request" || true
+
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive --include-obico-ml --include-printguard 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" "Provider selections should be enabled with existing external URLs" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__Enabled=true" "Provider selection should enable Obico without replacing its external URL" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__ObicoApiUrl=https://obico.example.test" "Enabling Obico should preserve its existing external URL" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__Enabled=true" "Provider selection should enable PrintGuard without replacing its external URL" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__ApiUrl=https://printguard.example.test" "Enabling PrintGuard should preserve its existing external URL" || true
+
+    capture_output "PFARM__Obico__Enabled=true timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --regenerate-config 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" "Explicit provider environment overrides should survive regeneration" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__Enabled=true" "Explicit PFARM environment variable should override provider deployment selection" || true
+
+    local legacy_dir="$TEST_TEMP_DIR/provider-legacy-config"
+    mkdir -p "$legacy_dir"
+    cd "$legacy_dir"
+    write_base_config ".deploy-config"
+    cat >> ".deploy-config" << 'EOF'
+DEPLOY_OBICO_ML=yes
+DEPLOY_PRINTGUARD=no
+EOF
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --regenerate-config 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" "Legacy provider configuration without a saved URL should regenerate" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__Enabled=true" "Legacy Obico deployment selection should enable the app integration" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__ObicoApiUrl=http://obico-ml-api:3333" "Legacy Obico configuration should retain the bundled service URL default" || true
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
+test_obico_runtime_platform_guard() {
+    start_test "bundled Obico runtime platform validation"
+
+    local failures_before=$TESTS_FAILED
+    local helper_script="$TEST_TEMP_DIR/obico-platform-helper.sh"
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -euo pipefail
+source "$DEPLOY_SCRIPT"
+unset DOCKER_DEFAULT_PLATFORM
+print_error() { printf '%s\n' "\$*"; }
+print_info() { printf '%s\n' "\$*"; }
+print_warning() { printf '%s\n' "\$*"; }
+print_success() { :; }
+print_header() { :; }
+
+docker() {
+    if [[ "\${1:-}" != "info" ]]; then
+        printf 'unexpected docker invocation: %s\n' "\$*" >&2
+        return 2
+    fi
+    printf '%s' "\${MOCK_DOCKER_INFO:-}"
+    return "\${MOCK_DOCKER_STATUS:-0}"
+}
+
+case "\$1" in
+    explicit-arm64)
+        DEPLOY_OBICO_ML=yes
+        DOCKER_DEFAULT_PLATFORM=linux/arm64
+        if validate_obico_runtime_platform; then
+            exit 1
+        fi
+        ;;
+    explicit-amd64)
+        DEPLOY_OBICO_ML=yes
+        DOCKER_DEFAULT_PLATFORM=linux/amd64
+        validate_obico_runtime_platform
+        ;;
+    explicit-x86_64)
+        DEPLOY_OBICO_ML=yes
+        DOCKER_DEFAULT_PLATFORM=linux/x86_64
+        validate_obico_runtime_platform
+        ;;
+    explicit-arm)
+        DEPLOY_OBICO_ML=yes
+        DOCKER_DEFAULT_PLATFORM=linux/arm/v7
+        if validate_obico_runtime_platform; then
+            exit 1
+        fi
+        ;;
+    docker-info-arm64)
+        DEPLOY_OBICO_ML=yes
+        MOCK_DOCKER_INFO=linux/arm64
+        if validate_obico_runtime_platform; then
+            exit 1
+        fi
+        ;;
+    disabled-provider)
+        DEPLOY_OBICO_ML=no
+        MOCK_DOCKER_STATUS=1
+        validate_obico_runtime_platform true
+        ;;
+    unknown-warning)
+        DEPLOY_OBICO_ML=yes
+        MOCK_DOCKER_STATUS=1
+        validate_obico_runtime_platform
+        ;;
+    unknown-strict)
+        DEPLOY_OBICO_ML=yes
+        MOCK_DOCKER_STATUS=1
+        if validate_obico_runtime_platform true; then
+            exit 1
+        fi
+        ;;
+    custom-image-arm64)
+        DEPLOY_OBICO_ML=yes
+        DOCKER_DEFAULT_PLATFORM=linux/arm64
+        ENV_FILE=\$(mktemp)
+        printf 'OBICO_ML_IMAGE=example/obico-ml-api:arm64\n' > "\$ENV_FILE"
+        validate_obico_runtime_platform true
+        rm -f "\$ENV_FILE"
+        ;;
+    pinned-image-arm64)
+        DEPLOY_OBICO_ML=yes
+        DOCKER_DEFAULT_PLATFORM=linux/arm64
+        ENV_FILE=\$(mktemp)
+        printf 'OBICO_ML_IMAGE=%s\n' "\$OBICO_ML_IMAGE_DEFAULT" > "\$ENV_FILE"
+        if validate_obico_runtime_platform true; then
+            exit 1
+        fi
+        rm -f "\$ENV_FILE"
+        ;;
+    shell-image-precedence)
+        DEPLOY_OBICO_ML=yes
+        OBICO_ML_IMAGE=example/shell-override:arm64
+        ENV_FILE=\$(mktemp)
+        printf 'OBICO_ML_IMAGE=example/env-file-override:arm64\n' > "\$ENV_FILE"
+        effective_obico_ml_image
+        rm -f "\$ENV_FILE"
+        ;;
+    valid-ipv6-registry-port)
+        DEPLOY_OBICO_ML=yes
+        OBICO_ML_IMAGE='[2001:db8::1]:5000/example/obico-ml-api:Custom_Tag'
+        effective_obico_ml_image
+        ;;
+    invalid-image-shell-syntax)
+        DEPLOY_OBICO_ML=yes
+        OBICO_ML_IMAGE='example/obico-ml-api:custom;touch /tmp/obico-image-injected'
+        if validate_obico_runtime_platform; then
+            exit 1
+        fi
+        ;;
+    invalid-image-newline)
+        DEPLOY_OBICO_ML=yes
+        OBICO_ML_IMAGE=\$'example/obico-ml-api:custom\nINJECTED=yes'
+        if validate_obico_runtime_platform; then
+            exit 1
+        fi
+        ;;
+    *)
+        exit 2
+        ;;
+esac
+EOF
+    chmod +x "$helper_script"
+
+    assert_exit_code 0 "'$helper_script' explicit-arm64" \
+        "An explicit ARM64 runtime target should reject bundled Obico" || true
+    assert_exit_code 0 "'$helper_script' explicit-amd64" \
+        "An explicit AMD64 runtime target should allow bundled Obico" || true
+    assert_exit_code 0 "'$helper_script' explicit-x86_64" \
+        "Docker's x86_64 architecture name should allow the AMD64-only image" || true
+    assert_exit_code 0 "'$helper_script' explicit-arm" \
+        "A non-AMD64 runtime target should reject the pinned Obico image" || true
+    assert_exit_code 0 "'$helper_script' docker-info-arm64" \
+        "Docker engine architecture should detect ARM64 when no override is set" || true
+    assert_exit_code 0 "'$helper_script' disabled-provider" \
+        "Disabling bundled Obico should bypass platform detection" || true
+    assert_exit_code 0 "'$helper_script' unknown-warning" \
+        "Unknown runtime platform should warn but allow config-only validation" || true
+    assert_exit_code 0 "'$helper_script' unknown-strict" \
+        "Unknown runtime platform should fail strict deployment validation" || true
+    assert_exit_code 0 "'$helper_script' custom-image-arm64" \
+        "An explicitly selected custom image should not inherit the pinned image's platform restriction" || true
+    assert_exit_code 0 "'$helper_script' pinned-image-arm64" \
+        "A persisted pinned image must still enforce the AMD64-only platform restriction" || true
+    capture_output "'$helper_script' shell-image-precedence"
+    assert_contains "$(get_output)" "example/shell-override:arm64" \
+        "An explicit shell image override should take precedence over the .env value" || true
+    capture_output "'$helper_script' valid-ipv6-registry-port"
+    assert_contains "$(get_output)" "[2001:db8::1]:5000/example/obico-ml-api:Custom_Tag" \
+        "A custom image with an IPv6 registry and port should remain valid" || true
+    capture_output "'$helper_script' invalid-image-shell-syntax"
+    assert_equals "0" "$(get_output_exit_code)" \
+        "A custom image containing shell syntax should be rejected" || true
+    assert_contains "$(get_output)" "OBICO_ML_IMAGE must be a single-line Docker image reference" \
+        "The custom image validation error should remain visible to the caller" || true
+    assert_exit_code 0 "'$helper_script' invalid-image-newline" \
+        "A custom image containing a newline should be rejected" || true
+
+    local regen_dir="$TEST_TEMP_DIR/obico-arm64-regenerate"
+    mkdir -p "$regen_dir"
+    cd "$regen_dir"
+    write_base_config ".deploy-config"
+    cat >> ".deploy-config" << 'EOF'
+DEPLOY_OBICO_ML=yes
+DEPLOY_PRINTGUARD=no
+EOF
+    printf 'existing env content\n' > ".env"
+    cp ".deploy-config" "$TEST_TEMP_DIR/obico-arm64-config.before"
+    cp ".env" "$TEST_TEMP_DIR/obico-arm64-env.before"
+
+    capture_output "DOCKER_DEFAULT_PLATFORM=linux/arm64 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --regenerate-config 2>&1"
+    assert_not_equals "0" "$(get_output_exit_code)" \
+        "Regeneration should reject bundled Obico for an ARM64 runtime target" || true
+    if ! cmp -s ".deploy-config" "$TEST_TEMP_DIR/obico-arm64-config.before"; then
+        fail_test "Rejected ARM64 regeneration must not modify .deploy-config"
+    fi
+    if ! cmp -s ".env" "$TEST_TEMP_DIR/obico-arm64-env.before"; then
+        fail_test "Rejected ARM64 regeneration must not modify .env"
+    fi
+
+    printf 'OBICO_ML_IMAGE=example/obico-ml-api:arm64\n' > ".env"
+    capture_output "DOCKER_DEFAULT_PLATFORM=linux/arm64 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --regenerate-config 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" \
+        "Regeneration should allow a custom Obico image on an ARM64 runtime target" || true
+    assert_file_has_exact_line ".env" "OBICO_ML_IMAGE=example/obico-ml-api:arm64" \
+        "Regeneration should preserve the custom Obico image override" || true
+
+    printf 'OBICO_ML_IMAGE=%s\n' "ghcr.io/thespaghettidetective/obico-ml-api-cpu@sha256:e1b1c5b4cfc517ed884cad24e4a709d31b935ea49dab45ff60d31a62f4cb86ee" > ".env"
+    capture_output "DOCKER_DEFAULT_PLATFORM=linux/amd64 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --regenerate-config 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" \
+        "Regeneration should accept the pinned image on an AMD64 runtime target" || true
+    if grep -q '^OBICO_ML_IMAGE=' ".env"; then
+        fail_test "Regeneration should not persist the pinned default image as an operator override"
+    fi
+
+    printf 'OBICO_ML_IMAGE=example/env-file-override:arm64\n' > ".env"
+    capture_output "OBICO_ML_IMAGE=example/shell-override:arm64 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --regenerate-config 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" \
+        "Regeneration should accept an explicit custom shell image override" || true
+    assert_file_has_exact_line ".env" "OBICO_ML_IMAGE=example/shell-override:arm64" \
+        "Regeneration should prefer and preserve the explicit shell image over the .env value" || true
+
+    local injection_marker="$TEST_TEMP_DIR/obico-image-injected"
+    cp ".env" "$TEST_TEMP_DIR/obico-image-env.before"
+    capture_output "OBICO_ML_IMAGE='example/obico-ml-api:custom; touch $injection_marker' DOCKER_DEFAULT_PLATFORM=linux/amd64 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --regenerate-config 2>&1"
+    assert_not_equals "0" "$(get_output_exit_code)" \
+        "Regeneration should reject a custom image containing shell syntax" || true
+    if [ -e "$injection_marker" ]; then
+        fail_test "Rejected custom image shell syntax must not execute a command"
+    fi
+    if ! cmp -s ".env" "$TEST_TEMP_DIR/obico-image-env.before"; then
+        fail_test "Rejected custom image shell syntax must not modify .env"
+    fi
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
 # Test configuration loading displays monitoring settings
 test_config_loading_display() {
     start_test "configuration loading displays monitoring settings"
@@ -859,11 +1294,14 @@ run_all_tests() {
     setup
 
     test_worker_normalization_is_bash_3_2_compatible
+    test_provider_endpoint_defaults_without_docker
     test_monitoring_config_persistence
     test_cli_flag_override
+    test_provider_selection_persistence_and_overrides
     test_config_loading_display
     test_go2rtc_interactive_default_uses_persisted_value
     test_legacy_distributed_slicing_config_migrates_worker_defaults
+    test_obico_runtime_platform_guard
     test_explicit_worker_disable_remains_disabled
     test_disabled_slicing_defaults_missing_worker_settings
     test_disabled_worker_defaults_missing_count

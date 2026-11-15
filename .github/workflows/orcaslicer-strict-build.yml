@@ -48,7 +48,7 @@ jobs:
       image_ref: ${{ steps.publish.outputs.image_ref }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Check dispatch input (disable_slicer_builds)
         id: check
@@ -247,7 +247,7 @@ jobs:
 
       - name: Upload publication evidence
         if: steps.check.outputs.skip != 'true' && steps.gate.outputs.publish == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: pinned-orca-publication-${{ env.ORCASLICER_VERSION }}
           path: pinned-worker-evidence/pinned-orca-publication.json
@@ -285,7 +285,7 @@ jobs:
       packages: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
@@ -379,7 +379,7 @@ jobs:
 
       - name: Upload smoke evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: pinned-orca-smoke
           path: pinned-worker-evidence/pinned-orca-smoke.json

@@ -114,12 +114,6 @@ struct PrinterDetailView: View {
                 emergencyStopFillsAvailableWidth: fillsWidth,
                 onSelect: { kind in handleRunAction(kind) }
             )
-            if !printer.isOnline {
-                Text("Printer offline. Use the physical safety switch if needed.")
-                    .font(.caption)
-                    .foregroundStyle(Color.pfTextSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
         .frame(maxWidth: .infinity, alignment: fillsWidth ? .center : .trailing)
         .padding(.horizontal)
@@ -171,6 +165,15 @@ struct PrinterDetailView: View {
                             let task = Task { await viewModel.loadPrinter() }
                             activeTasks.append(task)
                         }
+                }
+            }
+            .sheet(item: $viewModel.pendingNFCTagLink) { tag in
+                NFCTagLinkView(
+                        uid: tag.uid,
+                        scannedData: viewModel.nfcTagLinkData,
+                        spoolService: services.spoolService
+                ) { spool in
+                        viewModel.completeNFCTagLink(to: spool)
                 }
             }
             .alert("Scan Error", isPresented: .constant(viewModel.nfcScanError != nil)) {
@@ -339,11 +342,8 @@ struct PrinterDetailView: View {
 
             Spacer(minLength: 12)
 
-            if let baseURL = serverRegistry.activeServer?.baseURL {
-                Link(
-                    destination: baseURL.appendingPathComponent("printers")
-                        .appendingPathComponent(printerId.uuidString.lowercased())
-                ) {
+            if let nativeWebURL = viewModel.nativeWebURL {
+                Link(destination: nativeWebURL) {
                     Text("Open in web ↗")
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Color.pfTextSecondary)
@@ -352,6 +352,7 @@ struct PrinterDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("printer.detail.web")
+                .accessibilityHint("Opens the printer's native web interface.")
             }
         }
         .padding(.horizontal, 16)
@@ -424,7 +425,10 @@ struct PrinterDetailView: View {
         controlsComposition = composition
         viewModel.isViewActive = true
         viewModel.setSnapshotPollingAllowed(isStatusPageForeground)
-        viewModel.configure(printerService: composition?.printerService ?? services.printerService)
+        viewModel.configure(
+            printerService: composition?.printerService ?? services.printerService,
+            spoolService: services.spoolService
+        )
         #if canImport(UIKit)
         if let nfc = services.nfcService {
             viewModel.configureNFCScanner(nfc)
@@ -688,7 +692,10 @@ struct PrinterDetailView: View {
     // MARK: - Main Content
 
     private func controlsAvailable(for printer: Printer) -> Bool {
-        PrinterControlsAccess.isEntryVisible(for: printer)
+        PrinterControlsAccess.isEntryVisible(
+            for: printer,
+            hasControlsOwner: controlsViewModel?.printer.id == printer.id
+        )
     }
 
     /// An offline visit fetches setup capabilities only for Moonraker printers,
@@ -842,7 +849,8 @@ struct PrinterDetailView: View {
             onAction: { handleFilamentAction($0) },
             showsAllActions: true,
             spoolDetailsByID: spoolLookup.spoolsByID,
-            spoolLookupMessage: spoolLookup.statusMessage
+            spoolLookupMessage: spoolLookup.statusMessage,
+            isSpoolLookupPending: spoolLookup.isAwaitingResult
         )
         return ScrollView {
             VStack(alignment: .leading, spacing: 10) {
@@ -1505,6 +1513,10 @@ struct PrinterDetailView: View {
                     }
                 )
                 .id(cameraReloadToken)
+            } else if printer.cameraAccessMode == .streamOnly,
+                      viewModel.canShowLivestream,
+                      !viewModel.showLivestream {
+                streamOnlySnapshotPreview(printer: printer, maxMediaHeight: maxMediaHeight)
             } else if let data = viewModel.snapshotData {
                 snapshotImage(from: data, maxHeight: maxMediaHeight)
             } else if CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl) {
@@ -1513,7 +1525,11 @@ struct PrinterDetailView: View {
                 noCameraPlaceholder()
             }
             #else
-            if let data = viewModel.snapshotData {
+            if printer.cameraAccessMode == .streamOnly,
+               viewModel.canShowLivestream,
+               !viewModel.showLivestream {
+                streamOnlySnapshotPreview(printer: printer, maxMediaHeight: maxMediaHeight)
+            } else if let data = viewModel.snapshotData {
                 snapshotImage(from: data, maxHeight: maxMediaHeight)
             } else if CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl) {
                 authenticatedSnapshotImage(printerId: printer.id)
@@ -1541,6 +1557,19 @@ struct PrinterDetailView: View {
             unsupportedCameraPlaceholder()
         case .none:
             noCameraPlaceholder()
+        }
+    }
+
+    @ViewBuilder
+    private func streamOnlySnapshotPreview(printer: Printer, maxMediaHeight: CGFloat) -> some View {
+        if let data = viewModel.snapshotData {
+            snapshotImage(from: data, maxHeight: maxMediaHeight)
+                .overlay(alignment: .bottomLeading) { liveViewPausedBadge() }
+        } else if CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl) {
+            authenticatedSnapshotImage(printerId: printer.id)
+                .overlay(alignment: .bottomLeading) { liveViewPausedBadge() }
+        } else {
+            liveViewPausedPlaceholder()
         }
     }
 
@@ -1613,6 +1642,27 @@ struct PrinterDetailView: View {
         }
         .frame(height: 120)
         .frame(maxWidth: .infinity)
+    }
+
+    private func liveViewPausedPlaceholder() -> some View {
+        liveViewPausedLabel()
+            .frame(height: 120)
+            .frame(maxWidth: .infinity)
+    }
+
+    private func liveViewPausedBadge() -> some View {
+        liveViewPausedLabel()
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: Capsule())
+            .padding(8)
+    }
+
+    private func liveViewPausedLabel() -> some View {
+        Text("Live view paused")
+            .font(.subheadline)
+            .foregroundStyle(Color.pfTextSecondary)
+            .accessibilityIdentifier("printer.detail.camera.livepaused")
     }
 
     private func unsupportedCameraPlaceholder() -> some View {

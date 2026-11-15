@@ -111,7 +111,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         service.errorToThrow = NetworkError.timeout
         await model.setHeaterTarget(.hotend, target: 205)
         XCTAssertNil(model.pendingCommand)
-        XCTAssertTrue(model.lastError?.message.contains("unknown") == true)
+        XCTAssertEqual(model.lastError?.message, "Request timed out. Check the printer before retrying.")
         XCTAssertEqual(service.setTemperaturesCallCount, 2)
     }
 
@@ -393,7 +393,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
 
         XCTAssertNil(vm.pendingCommand)
         XCTAssertEqual(vm.lastError?.command, firstOwner)
-        XCTAssertTrue(vm.lastError?.message.contains("Outcome may be unknown") == true)
+        XCTAssertTrue(vm.lastError?.message.contains("Check the printer before retrying") == true)
         XCTAssertNil(vm.commandNotice, "Rejection must not leave stale success wording")
         service.errorToThrow = nil
         let motionGate = AsyncBarrier()
@@ -429,7 +429,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         XCTAssertNil(vm.pendingCommand, "The current command's failure clears pending for retry")
         XCTAssertFalse(vm.isExecuting)
         XCTAssertEqual(vm.lastError?.isRetryable, true, "The current command's error is surfaced")
-        XCTAssertTrue(vm.lastError?.message.contains("Outcome may be unknown") == true)
+        XCTAssertTrue(vm.lastError?.message.contains("Check the printer before retrying") == true)
     }
 
     func test_individualTarget_ignoresMeasurementsOtherHeaterAndPosition() async throws {

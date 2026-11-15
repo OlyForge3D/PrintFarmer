@@ -443,8 +443,18 @@ export function useConfirmBedClear() {
       // printer's (and potentially others') "X of Y" queue-summary label.
       qc.invalidateQueries({ queryKey: queueSummariesFleetQueryKey });
     },
-    onError: (error) =>
-      handleMutationError(qc, error, 'Failed to acknowledge the clear bed'),
+    onError: (error, variables) => {
+      const printerId = getReviewedStatus(variables).printerId;
+      // Any rejection leaves the reviewed state unknown; refresh it so the
+      // banner reflects why dispatch did not start.
+      qc.invalidateQueries({ queryKey: KEYS.status(printerId) });
+      return handleMutationError(
+        qc,
+        error,
+        'Failed to acknowledge the clear bed. Review the printer and confirm again.',
+        printerId
+      );
+    },
   });
 }
 
@@ -533,15 +543,23 @@ export function useAutoDispatchReadyFlow(
   const confirmFilamentOverride = async () => {
     if (!challenge) return;
 
-    const response = await confirmation.mutateAsync({
-      status: challenge.status,
-      confirmFilamentOverride: true,
-      overrideJobETag:
-        challenge.result.nextJob?.jobETag ??
-        challenge.status.nextJobETag ??
-        '',
-      filamentCheckETag: challenge.result.filamentCheckETag ?? '',
-    });
+    let response: ConfirmBedClearResult;
+    try {
+      response = await confirmation.mutateAsync({
+        status: challenge.status,
+        confirmFilamentOverride: true,
+        overrideJobETag:
+          challenge.result.nextJob?.jobETag ??
+          challenge.status.nextJobETag ??
+          '',
+        filamentCheckETag: challenge.result.filamentCheckETag ?? '',
+      });
+    } catch (error) {
+      // A rejected dispatch invalidates this consent; the operator must review
+      // the refreshed printer state and confirm bed clear again.
+      setChallenge(null);
+      throw error;
+    }
     if (response.kind === 'standard') {
       handleStandardResult(
         response.result,

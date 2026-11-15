@@ -36,10 +36,10 @@ struct ConnectionStatusPresentation: Equatable {
         switch status {
         case .connected:
             iconName = "wifi"
-            label = "Connected"
+            label = "Server connected"
             timestampText = nil
             accessibilityLabel = "Server connection: Connected. Live updates are active."
-            detailMessage = "Connected to your server. Live updates are active."
+            detailMessage = "Connected to your PrintFarmer server. Live updates are active. Individual printers can still be offline."
         case .connecting:
             iconName = "wifi"
             label = "Connecting…"
@@ -80,7 +80,7 @@ struct ConnectionStatusPresentation: Equatable {
     /// Bar background color. Color is decorative only — staleness is always
     /// carried by `label`/`accessibilityLabel` text as well.
     var barBackground: Color {
-        if label.hasPrefix("Connected") { return .pfSuccess }
+        if label.hasPrefix("Server connected") { return .pfSuccess }
         if label.hasPrefix("Connecting") { return .pfTextTertiary }
         if iconName == "wifi.slash" { return .pfErrorFill }
         return .pfWarningFill

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Card } from '@/common/components/ui/Card';
 import { Tabs } from '@/common/components/ui/Tabs';
-import { TimePeriodFilter } from '@/common/components/ui/TimePeriodFilter';
+import { HeaderActions, TimePeriodFilter, Toolbar } from '@/common/components/ui';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { TrendingUpIcon } from '@/common/components/icons/MdiIcons';
 import {
@@ -125,12 +125,14 @@ export const AnalyticsDashboardPage: React.FC = () => {
       subtitle="Comprehensive print farm performance insights"
       icon={TrendingUpIcon}
       actions={
-        <div className="flex items-center gap-3">
-          <TimePeriodFilter value={period} onChange={setPeriod} />
+        <HeaderActions className="justify-end mb-0">
           <ExportMenu days={days} />
-        </div>
+        </HeaderActions>
       }
     >
+      <Toolbar aria-label="Analytics filters">
+        <TimePeriodFilter value={period} onChange={setPeriod} />
+      </Toolbar>
       <AnalyticsDashboardContent days={days} startDate={startDate} endDate={endDate} />
     </PageTemplate>
   );

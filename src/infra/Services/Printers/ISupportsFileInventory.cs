@@ -15,7 +15,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// </remarks>
 public interface ISupportsFileInventory
 {
-    /// <summary>Enumerates provider-declared storage within bounded request, entry, depth and time budgets.</summary>
+    /// <summary>Enumerates provider-declared storage within bounded entry, depth and time budgets.</summary>
     Task<PrinterFileInventoryResult> GetFileInventoryAsync(
         string baseUrl,
         PrinterCredential? credential = null,
@@ -45,7 +45,6 @@ public enum PrinterFileInventoryReason
     MalformedResponse,
     IncompleteResponse,
     InvalidPath,
-    RequestLimit,
     EntryLimit,
     DepthLimit,
     ResponseLimit,
@@ -68,7 +67,10 @@ public sealed record PrinterFileInventoryEntry(
     DateTimeOffset? ModifiedAt = null,
     string? ProviderVersion = null,
     string? ProviderHash = null,
-    string? ModifiedValue = null);
+    string? ModifiedValue = null,
+    string? DisplayName = null,
+    PrinterPrintMetadata? Metadata = null,
+    DateTime? DetailsFetchedAtUtc = null);
 
 /// <summary>Completion applies only to this case-preserving root and relative subtree (empty means root).</summary>
 public sealed record PrinterFileInventoryCoverage(
@@ -92,7 +94,16 @@ public sealed record PrinterFileInventoryResult(
 /// <summary>Caller may reduce, but never exceed, the scan safety ceilings.</summary>
 public sealed record PrinterFileInventoryOptions
 {
-    public int MaxRequests { get; init; } = 100;
+    /// <summary>Fetches native per-file details for catalog persistence, not file bodies or thumbnails.</summary>
+    public bool IncludeFileDetails { get; init; }
+
+    /// <summary>
+    /// Previously fetched details keyed by canonical identity, from the same printer configuration and
+    /// mutation generation. Adapters must verify current listing evidence before reuse.
+    /// Force refresh supplies no cached entries.
+    /// </summary>
+    public IReadOnlyDictionary<string, PrinterFileInventoryEntry> CachedEntries { get; init; } =
+        new Dictionary<string, PrinterFileInventoryEntry>(StringComparer.Ordinal);
 
     public int MaxEntries { get; init; } = 10_000;
 
@@ -103,8 +114,6 @@ public sealed record PrinterFileInventoryOptions
     /// <summary>Rejects invalid configuration instead of silently permitting an unbounded scan.</summary>
     public void Validate()
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(MaxRequests, 1);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(MaxRequests, 100);
         ArgumentOutOfRangeException.ThrowIfLessThan(MaxEntries, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(MaxEntries, 10_000);
         ArgumentOutOfRangeException.ThrowIfNegative(MaxDepth);

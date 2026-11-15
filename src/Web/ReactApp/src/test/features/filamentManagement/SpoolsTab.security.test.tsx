@@ -100,7 +100,8 @@ vi.mock('@/common/components/modals/Modal', () => ({
   Modal: ({ children }: { children: React.ReactNode }) => children,
 }));
 
-vi.mock('@/common/components/ui', () => ({
+vi.mock('@/common/components/ui', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/common/components/ui')>(),
   Button: ({ children, onClick, disabled, 'aria-label': label }: {
     children?: React.ReactNode; onClick?: () => void; disabled?: boolean; 'aria-label'?: string;
   }) => <button onClick={onClick} disabled={disabled} aria-label={label}>{children}</button>,

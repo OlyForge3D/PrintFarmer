@@ -6,7 +6,6 @@ import {
   Button,
   Input,
   Select,
-  FormField,
   Badge,
   Tooltip,
   Table,
@@ -15,6 +14,10 @@ import {
   TableRow,
   TableHeaderCell,
   TableCell,
+  Pagination,
+  Toolbar,
+  ToolbarField,
+  FiltersDisclosure,
 } from '@/common/components/ui';
 import { AdminLoading, AdminError, AdminEmpty } from '@/common/components/admin';
 import { ShieldIcon, RefreshIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
@@ -84,6 +87,7 @@ export function LoginAuditPage({ embedded = false }: EmbeddablePageProps) {
   const handleFilterWithPageReset = (updates: Record<string, string | number | boolean>) => {
     setMany({ ...updates, page: 1 } as Parameters<typeof setMany>[0]);
   };
+  const refinementCount = [from, to, success].filter(Boolean).length;
 
   return (
     <PageTemplate
@@ -93,46 +97,75 @@ export function LoginAuditPage({ embedded = false }: EmbeddablePageProps) {
       embedded={embedded}
     >
       {/* Filter bar */}
-      <div
-        className="bg-pf-bg-1 border border-pf-border rounded-md p-4 mb-4"
-        role="search"
+      <Toolbar
         aria-label="Filter login audit entries"
+        className="bg-pf-bg-1 border border-pf-border rounded-md p-4 mb-4"
+        labelled
       >
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
-          <FormField label="From" htmlFor="audit-from">
+        <FiltersDisclosure
+        activeCount={refinementCount}
+        onReset={() => handleFilterWithPageReset({ from: '', to: '', success: '' })}
+          controls={trigger => (
+            <Toolbar.Controls>
+              <ToolbarField label="Username" htmlFor="audit-username">
+                <Input
+                  id="audit-username"
+                  className="pf-control py-0"
+                  data-role="field"
+                  type="text"
+                  value={username as string}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Partial match…"
+                  aria-label="Filter by username"
+                />
+              </ToolbarField>
+              {trigger}
+              {hasActiveFilters && (
+                <>
+                  <Toolbar.Spacer />
+                  <Button
+                    variant="ghost"
+                    control
+                    onClick={resetAll}
+                    iconLeft={<CloseIcon className="w-3.5 h-3.5" />}
+                    aria-label="Clear all filters"
+                  >
+                    Clear filters
+                  </Button>
+                </>
+              )}
+            </Toolbar.Controls>
+          )}
+        >
+          <ToolbarField label="From" htmlFor="audit-from">
             <Input
               id="audit-from"
+              className="pf-control py-0"
+              data-role="field"
               type="datetime-local"
               value={from as string}
               onChange={(e) => handleFilterWithPageReset({ from: e.target.value })}
               aria-label="Filter from date and time"
             />
-          </FormField>
+          </ToolbarField>
 
-          <FormField label="To" htmlFor="audit-to">
+          <ToolbarField label="To" htmlFor="audit-to">
             <Input
               id="audit-to"
+              className="pf-control py-0"
+              data-role="field"
               type="datetime-local"
               value={to as string}
               onChange={(e) => handleFilterWithPageReset({ to: e.target.value })}
               aria-label="Filter to date and time"
             />
-          </FormField>
+          </ToolbarField>
 
-          <FormField label="Username" htmlFor="audit-username">
-            <Input
-              id="audit-username"
-              type="text"
-              value={username as string}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Partial match…"
-              aria-label="Filter by username"
-            />
-          </FormField>
-
-          <FormField label="Status" htmlFor="audit-success">
+          <ToolbarField label="Status" htmlFor="audit-success">
             <Select
               id="audit-success"
+              className="pf-control py-0"
+              data-role="field"
               value={success as string}
               onChange={(e) => handleFilterWithPageReset({ success: e.target.value })}
               aria-label="Filter by login status"
@@ -141,23 +174,9 @@ export function LoginAuditPage({ embedded = false }: EmbeddablePageProps) {
               <option value="true">Successful</option>
               <option value="false">Failed</option>
             </Select>
-          </FormField>
-        </div>
-
-        {hasActiveFilters && (
-          <div className="mt-3 flex justify-end">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={resetAll}
-              iconLeft={<CloseIcon className="w-3.5 h-3.5" />}
-              aria-label="Clear all filters"
-            >
-              Clear filters
-            </Button>
-          </div>
-        )}
-      </div>
+          </ToolbarField>
+        </FiltersDisclosure>
+      </Toolbar>
 
       {/* Table area */}
       {isLoading ? (
@@ -177,7 +196,7 @@ export function LoginAuditPage({ embedded = false }: EmbeddablePageProps) {
       ) : (
         <>
           {/* Summary + page-size selector */}
-          <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+          <Toolbar aria-label="Login audit results controls" className="mb-3">
             <p
               className={clsx('text-sm text-pf-text-secondary', isFetching && 'opacity-60')}
               aria-live="polite"
@@ -188,26 +207,24 @@ export function LoginAuditPage({ embedded = false }: EmbeddablePageProps) {
                 : `Showing ${rangeStart}–${rangeEnd} of ${totalCount.toLocaleString()} entries`}
             </p>
 
-            <div className="flex items-center gap-2">
-              {isFetching && <RefreshIcon className="w-3.5 h-3.5 pf-animate-spin text-pf-text-tertiary" aria-hidden />}
-              <label htmlFor="audit-page-size" className="text-sm text-pf-text-secondary sr-only">
-                Rows per page
-              </label>
-              <Select
-                id="audit-page-size"
-                value={String(currentPageSize)}
-                onChange={(e) => setMany({ pageSize: Number(e.target.value), page: 1 } as Parameters<typeof setMany>[0])}
-                containerClassName="w-28"
-                aria-label="Rows per page"
-              >
-                {PAGE_SIZE_OPTIONS.map((n) => (
-                  <option key={n} value={String(n)}>
-                    {n} per page
-                  </option>
-                ))}
-              </Select>
-            </div>
-          </div>
+            <Toolbar.Spacer />
+            {isFetching && <RefreshIcon className="w-3.5 h-3.5 pf-animate-spin text-pf-text-tertiary" aria-hidden />}
+            <Select
+              id="audit-page-size"
+              className="pf-control py-0"
+              data-role="field"
+              value={String(currentPageSize)}
+              onChange={(e) => setMany({ pageSize: Number(e.target.value), page: 1 } as Parameters<typeof setMany>[0])}
+              containerClassName="w-28"
+              aria-label="Rows per page"
+            >
+              {PAGE_SIZE_OPTIONS.map((n) => (
+                <option key={n} value={String(n)}>
+                  {n} per page
+                </option>
+              ))}
+            </Select>
+          </Toolbar>
 
           <div className="overflow-x-auto rounded-md border border-pf-border">
             <Table aria-label="Login audit log">
@@ -287,34 +304,11 @@ export function LoginAuditPage({ embedded = false }: EmbeddablePageProps) {
 
           {/* Pagination controls */}
           {totalPages > 1 && (
-            <nav
-              className="flex items-center justify-between mt-4 gap-2 flex-wrap"
-              aria-label="Pagination"
-            >
-              <p className="text-sm text-pf-text-secondary">
-                Page {currentPage} of {totalPages}
-              </p>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={currentPage <= 1}
-                  onClick={() => setMany({ page: currentPage - 1 } as Parameters<typeof setMany>[0])}
-                  aria-label="Previous page"
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={currentPage >= totalPages}
-                  onClick={() => setMany({ page: currentPage + 1 } as Parameters<typeof setMany>[0])}
-                  aria-label="Next page"
-                >
-                  Next
-                </Button>
-              </div>
-            </nav>
+            <Pagination
+              page={currentPage}
+              totalPages={totalPages}
+              onPageChange={(nextPage) => setMany({ page: nextPage } as Parameters<typeof setMany>[0])}
+            />
           )}
         </>
       )}

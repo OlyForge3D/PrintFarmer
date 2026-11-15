@@ -12,6 +12,17 @@ const FORBIDDEN_PAINT_PATTERNS: Array<[string, RegExp]> = [
 ];
 
 describe('Button', () => {
+  it('only opts into control geometry when requested, preserving excluded variants', () => {
+    const { rerender } = render(<Button>Legacy</Button>);
+    expect(screen.getByRole('button')).not.toHaveClass('pf-control');
+    rerender(<Button control size="lg">Participating</Button>);
+    expect(screen.getByRole('button')).toHaveClass('pf-control');
+    expect(screen.getByRole('button')).toHaveAttribute('data-size', 'lg');
+    rerender(<Button control variant="link">Link</Button>);
+    expect(screen.getByRole('button')).not.toHaveClass('pf-control');
+    rerender(<Button control variant="unstyled">Unstyled</Button>);
+    expect(screen.getByRole('button')).not.toHaveClass('pf-control');
+  });
   describe('iconCenter prop', () => {
     it('renders icon-only button with iconCenter', () => {
       render(

@@ -1,4 +1,7 @@
-﻿using System.Net;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics.Metrics;
+using System.Globalization;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -10,6 +13,7 @@ using Farm.Infrastructure.Settings;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests.Security;
 
@@ -186,6 +190,257 @@ public sealed class OctoPrintUploadAuthorizationTests : IClassFixture<CustomWebA
             .CreatorSubject.Should().Be(fixture.UserId.ToString(), "authenticated users must never become trusted null callers");
     }
 
+    [Fact]
+    public async Task Upload_OrcaUploadAndPrintWithoutPrinterId_ReusesFileAndQueuesAfterAdmissionFailureRetry()
+    {
+        await SetApiKeyRequirementAsync(false);
+        RestrictedPrinterFixture fixture = await SeedRestrictedPrinterFixtureAsync(printerAvailable: false);
+        string gcode = OrcaGcodeContent(fixture.ModelName, nozzleDiameter: 0.4, material: "PLA");
+        string expectedHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(gcode)));
+        List<string?> measurements = [];
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Meter.Name == Farm.Web.Api.Telemetry.OctoPrintUploadMetrics.MeterName &&
+                instrument.Name == "octoprint.upload_print.queue_admissions")
+            {
+                meterListener.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
+        {
+            string? outcome = null;
+            foreach (KeyValuePair<string, object?> tag in tags)
+            {
+                if (tag.Key == "outcome")
+                {
+                    outcome = tag.Value?.ToString();
+                }
+                else
+                {
+                    throw new InvalidOperationException($"Unexpected upload metric tag: {tag.Key}");
+                }
+            }
+
+            measurements.Add(outcome);
+        });
+        listener.Start();
+
+        using HttpClient client = _factory.CreateClient();
+        using (MultipartFormDataContent unavailableForm = CreateOrcaUploadForm(gcode))
+        using (HttpResponseMessage unavailableResponse = await client.PostAsync("/api/files/local", unavailableForm))
+        {
+            string body = await unavailableResponse.Content.ReadAsStringAsync();
+            unavailableResponse.StatusCode.Should().Be(
+                HttpStatusCode.Conflict,
+                $"Orca treats a successful HTTP response as upload success, so failed queue admission must be non-2xx. Body: {body}");
+            using JsonDocument responseBody = JsonDocument.Parse(body);
+            responseBody.RootElement.GetProperty("status").GetString().Should().Be("UploadedOnly");
+            responseBody.RootElement.GetProperty("reasonCode").GetString().Should().Be("queue_admission_failed");
+            responseBody.RootElement.GetProperty("message").GetString().Should().Contain("No print job was created");
+            responseBody.RootElement.GetProperty("file").EnumerateObject()
+                .Select(property => property.Name).Should().BeEquivalentTo(["id", "fileName"]);
+        }
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Guid fileId = await db.GcodeFiles.Select(file => file.Id).SingleAsync();
+        (await db.GcodeFiles.SingleAsync(file => file.Id == fileId)).FileHash.Should().Be(expectedHash);
+        (await db.PrintJobs.CountAsync()).Should().Be(0);
+
+        Printer printer = await db.Printers.SingleAsync(candidate => candidate.Id == fixture.RestrictedPrinterId);
+        printer.IsAvailable = true;
+        await db.SaveChangesAsync();
+
+        using MultipartFormDataContent retryForm = CreateOrcaUploadForm(gcode);
+        using HttpResponseMessage retryResponse = await client.PostAsync("/api/files/local", retryForm);
+        string retryBody = await retryResponse.Content.ReadAsStringAsync();
+        retryResponse.StatusCode.Should().Be(
+            HttpStatusCode.Accepted,
+            $"Orca's multipart print=true request should queue after a compatible printer becomes available. Body: {retryBody}");
+        using JsonDocument queuedResponse = JsonDocument.Parse(retryBody);
+        queuedResponse.RootElement.GetProperty("status").GetString().Should().Be("Queued");
+        queuedResponse.RootElement.GetProperty("file").GetProperty("id").GetString().Should().Be(fileId.ToString());
+        queuedResponse.RootElement.GetProperty("file").GetProperty("extractedNozzleDiameter").GetDouble().Should().Be(0.4);
+        queuedResponse.RootElement.GetProperty("file").GetProperty("extractedMaterial").GetString().Should().Be("PLA");
+
+        Guid jobId = queuedResponse.RootElement.GetProperty("jobId").GetGuid();
+        PrintJob job = await db.PrintJobs.SingleAsync();
+        job.Id.Should().Be(jobId);
+        job.GcodeFileId.Should().Be(fileId);
+        job.AssignedPrinterId.Should().Be(fixture.RestrictedPrinterId);
+        job.EstimatedFilamentUsage.Should().Be(50000, "estimated filament quantity is advisory, not a queue-admission veto");
+        (await db.GcodeFiles.CountAsync()).Should().Be(1, "retrying identical G-code reuses the stored file");
+        measurements.Should().Contain("rejected");
+        measurements.Should().Contain("queued");
+    }
+
+    [Fact]
+    public async Task Upload_OrcaUploadAndPrintWithoutPrinterId_RejectsIncompatibleNozzle()
+    {
+        await SetApiKeyRequirementAsync(false);
+        RestrictedPrinterFixture fixture = await SeedRestrictedPrinterFixtureAsync();
+        using HttpClient client = _factory.CreateClient();
+        using MultipartFormDataContent form = CreateOrcaUploadForm(
+            OrcaGcodeContent(fixture.ModelName, nozzleDiameter: 0.6, material: "PLA"));
+        using HttpResponseMessage response = await client.PostAsync("/api/files/local", form);
+
+        string body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        using JsonDocument responseBody = JsonDocument.Parse(body);
+        JsonElement uploadedFile = responseBody.RootElement.GetProperty("file");
+        uploadedFile.EnumerateObject()
+            .Select(property => property.Name).Should().BeEquivalentTo(["id", "fileName"]);
+        AssertGenericQueueAdmissionFailure(responseBody.RootElement);
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        (await db.GcodeFiles.CountAsync()).Should().Be(1);
+        (await db.PrintJobs.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Upload_ApiKeyUserWithoutAccessToAutoMatchedPrinter_ReturnsGenericRejectionAndLogsReason()
+    {
+        await SetApiKeyRequirementAsync(false);
+        RestrictedPrinterFixture fixture = await SeedRestrictedPrinterFixtureAsync();
+        using HttpClient client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", fixture.RawApiKey);
+        LoggerFactory loggerFactory = (LoggerFactory)_factory.Services.GetRequiredService<ILoggerFactory>();
+        using CapturingWarningLoggerProvider warningProvider = new();
+        loggerFactory.AddProvider(warningProvider);
+
+        using MultipartFormDataContent form = CreateOrcaUploadForm(
+            OrcaGcodeContent(fixture.ModelName, nozzleDiameter: 0.4, material: "PLA"));
+
+        using HttpResponseMessage response = await client.PostAsync("/api/files/local", form);
+
+        string body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        using JsonDocument responseBody = JsonDocument.Parse(body);
+        AssertGenericQueueAdmissionFailure(responseBody.RootElement);
+        JsonElement file = responseBody.RootElement.GetProperty("file");
+        file.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(["id", "fileName"]);
+        body.Should().NotContain(fixture.RestrictedPrinterId.ToString());
+        body.Should().NotContain(fixture.ModelName);
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Guid fileId = Guid.Parse(file.GetProperty("id").GetString()!);
+        (await db.GcodeFiles.AnyAsync(candidate => candidate.Id == fileId)).Should().BeTrue();
+        (await db.PrintJobs.CountAsync()).Should().Be(0);
+
+        using MultipartFormDataContent unknownModelForm = CreateOrcaUploadForm(
+            OrcaGcodeContent($"{fixture.ModelName} unknown", nozzleDiameter: 0.4, material: "PLA"));
+        using HttpResponseMessage unknownModelResponse = await client.PostAsync("/api/files/local", unknownModelForm);
+        string unknownModelBody = await unknownModelResponse.Content.ReadAsStringAsync();
+        unknownModelResponse.StatusCode.Should().Be(response.StatusCode);
+        using JsonDocument unknownModelResponseBody = JsonDocument.Parse(unknownModelBody);
+        AssertGenericQueueAdmissionFailure(unknownModelResponseBody.RootElement);
+        unknownModelBody.Should().NotContain(fixture.RestrictedPrinterId.ToString());
+        unknownModelBody.Should().NotContain(fixture.ModelName);
+
+        (string Category, string Message)[] controllerWarnings = warningProvider.Warnings
+            .Where(warning => warning.Category.EndsWith("OctoPrintCompatController", StringComparison.Ordinal))
+            .ToArray();
+        controllerWarnings.Should().Contain(
+            warning => warning.Message.Contains("ReasonCode=printer_access_denied", StringComparison.Ordinal));
+        controllerWarnings.Should().NotContain(
+            warning => warning.Message.Contains(fixture.RestrictedPrinterId.ToString(), StringComparison.Ordinal) ||
+                warning.Message.Contains(fixture.ModelName, StringComparison.Ordinal) ||
+                warning.Message.Contains("micron-orca-upload.gcode", StringComparison.Ordinal) ||
+                warning.Message.Contains("G28", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Upload_OrcaUploadAndPrintWithUnknownModel_ReportsModelMismatch()
+    {
+        await SetApiKeyRequirementAsync(false);
+        RestrictedPrinterFixture fixture = await SeedRestrictedPrinterFixtureAsync();
+        string gcode = OrcaGcodeContent($"{fixture.ModelName} unknown", nozzleDiameter: 0.4, material: "PLA");
+        using HttpClient client = _factory.CreateClient();
+        using MultipartFormDataContent form = CreateOrcaUploadForm(gcode);
+        using HttpResponseMessage response = await client.PostAsync("/api/files/local", form);
+
+        string body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        using JsonDocument responseBody = JsonDocument.Parse(body);
+        AssertGenericQueueAdmissionFailure(responseBody.RootElement);
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        (await db.GcodeFiles.CountAsync()).Should().Be(1);
+        (await db.PrintJobs.CountAsync()).Should().Be(0);
+    }
+
+    private static MultipartFormDataContent CreateOrcaUploadForm(string gcode)
+    {
+        var form = new MultipartFormDataContent();
+        var fileContent = new ByteArrayContent(Encoding.UTF8.GetBytes(gcode));
+        fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        form.Add(fileContent, "file", "micron-orca-upload.gcode");
+        form.Add(new StringContent("true"), "print");
+        form.Add(new StringContent(""), "path");
+        form.Add(new StringContent("1"), "plateindex");
+        return form;
+    }
+
+    private static void AssertGenericQueueAdmissionFailure(JsonElement responseBody)
+    {
+        responseBody.GetProperty("status").GetString().Should().Be("UploadedOnly");
+        responseBody.GetProperty("reasonCode").GetString().Should().Be("queue_admission_failed");
+        responseBody.GetProperty("message").GetString()
+            .Should().Be("File uploaded, but the print request could not be queued. No print job was created.");
+        responseBody.EnumerateObject().Select(property => property.Name)
+            .Should().BeEquivalentTo(["file", "status", "reasonCode", "message"]);
+        responseBody.GetProperty("file").EnumerateObject().Select(property => property.Name)
+            .Should().BeEquivalentTo(["id", "fileName"]);
+    }
+
+    private sealed class CapturingWarningLoggerProvider : ILoggerProvider
+    {
+        private readonly ConcurrentQueue<(string Category, string Message)> _warnings = new();
+        private volatile bool _disposed;
+
+        public IReadOnlyCollection<(string Category, string Message)> Warnings => _warnings.ToArray();
+
+        public ILogger CreateLogger(string categoryName) => new CapturingWarningLogger(categoryName, _warnings, this);
+
+        public void Dispose()
+        {
+            _disposed = true;
+        }
+
+        private bool IsEnabled(LogLevel logLevel) => !_disposed && logLevel >= LogLevel.Warning;
+
+        private sealed class CapturingWarningLogger(
+            string categoryName,
+            ConcurrentQueue<(string Category, string Message)> warnings,
+            CapturingWarningLoggerProvider provider) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state)
+                where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => provider.IsEnabled(logLevel);
+
+            public void Log<TState>(
+                LogLevel logLevel,
+                EventId eventId,
+                TState state,
+                Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                if (IsEnabled(logLevel))
+                {
+                    warnings.Enqueue((categoryName, formatter(state, exception)));
+                }
+            }
+        }
+    }
+
+    private static string OrcaGcodeContent(string printerModel, double nozzleDiameter, string material) =>
+        $"; generated by OrcaSlicer 2.3.1\n; printer_model = {printerModel}\n; nozzle_diameter = {nozzleDiameter.ToString("F1", CultureInfo.InvariantCulture)}\n; filament_type = {material}\n; filament used [g] = 50000\nG28\nG1 X0 Y0 Z0.2 F1200\n";
+
     private async Task SetApiKeyRequirementAsync(bool required)
     {
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
@@ -196,7 +451,9 @@ public sealed class OctoPrintUploadAuthorizationTests : IClassFixture<CustomWebA
     private static string MinimalGcodeContent() =>
         "; generated by OctoPrintUploadAuthorizationTests\nG28\nG1 X0 Y0 Z0.2 F1200\n";
 
-    private async Task<RestrictedPrinterFixture> SeedRestrictedPrinterFixtureAsync(bool grantCallerAccess = false)
+    private async Task<RestrictedPrinterFixture> SeedRestrictedPrinterFixtureAsync(
+        bool grantCallerAccess = false,
+        bool printerAvailable = true)
     {
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -211,7 +468,14 @@ public sealed class OctoPrintUploadAuthorizationTests : IClassFixture<CustomWebA
         {
             Id = Guid.NewGuid(),
             ManufacturerId = manufacturer.Id,
-            Name = $"OctoPrint auth model {Guid.NewGuid():N}",
+            Name = $"Micron upload test model {Guid.NewGuid():N}",
+        };
+        const string orcaModelName = "Micron 180";
+        var modelAlias = new PrinterModelAlias
+        {
+            PrinterModelId = model.Id,
+            SlicerModelName = orcaModelName,
+            SlicerType = "OrcaSlicer",
         };
         var restrictedGroup = new PrinterGroup
         {
@@ -221,13 +485,23 @@ public sealed class OctoPrintUploadAuthorizationTests : IClassFixture<CustomWebA
         var restrictedPrinter = new Printer
         {
             Id = Guid.NewGuid(),
-            Name = $"OctoPrint auth printer {Guid.NewGuid():N}",
+            Name = $"Micron upload test printer {Guid.NewGuid():N}",
             ServerUrl = $"http://octoprint-auth-{Guid.NewGuid():N}",
             ManufacturerId = manufacturer.Id,
             ModelId = model.Id,
             PrinterGroupId = restrictedGroup.Id,
             IsEnabled = true,
-            IsAvailable = true,
+            IsAvailable = printerAvailable,
+        };
+        var toolhead = new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = restrictedPrinter.Id,
+            Name = "Primary",
+            Index = 0,
+            IsPrimary = true,
+            NozzleDiameter = 0.4,
+            SupportedMaterials = ["PLA"],
         };
 
         // A role distinct from the caller's, granted Submit access to the restricted group.
@@ -269,8 +543,10 @@ public sealed class OctoPrintUploadAuthorizationTests : IClassFixture<CustomWebA
 
         db.Manufacturers.Add(manufacturer);
         db.PrinterModels.Add(model);
+        db.PrinterModelAliases.Add(modelAlias);
         db.PrinterGroups.Add(restrictedGroup);
         db.Printers.Add(restrictedPrinter);
+        db.Toolheads.Add(toolhead);
         db.Roles.AddRange(otherRole, callerRole);
         db.Users.Add(callerUser);
         db.PrinterGroupAccesses.Add(new PrinterGroupAccess
@@ -312,7 +588,7 @@ public sealed class OctoPrintUploadAuthorizationTests : IClassFixture<CustomWebA
 
         await db.SaveChangesAsync();
 
-        return new RestrictedPrinterFixture(restrictedPrinter.Id, rawKey, callerUser.Id);
+        return new RestrictedPrinterFixture(restrictedPrinter.Id, rawKey, callerUser.Id, orcaModelName);
     }
 
     private static async Task<Resource> GetOrCreateResourceAsync(AppDbContext db, string name)
@@ -362,5 +638,5 @@ public sealed class OctoPrintUploadAuthorizationTests : IClassFixture<CustomWebA
     private static string ComputeSha256Hash(string rawData) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawData)));
 
-    private sealed record RestrictedPrinterFixture(Guid RestrictedPrinterId, string RawApiKey, Guid UserId);
+    private sealed record RestrictedPrinterFixture(Guid RestrictedPrinterId, string RawApiKey, Guid UserId, string ModelName);
 }

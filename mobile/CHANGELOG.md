@@ -4,7 +4,78 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Remembered scan codes (#3754)** — Scanning a non-GTIN code such as an
+  Amazon FNSKU sticker (e.g. `X0022Z40I1`) now opens barcode intake instead of
+  dead-ending. The first scan lets you pick an existing filament or create a
+  new one; PrintFarmer remembers the exact code for that filament and adds a
+  spool. Later scans of the same code offer to add another spool of that
+  filament. Remembered codes are stored in PrintFarmer, separately from the
+  Spoolman GTIN mapping, and digit-only codes are never remembered.
+
+### Fixed
+
+- **Unknown scan filament selection (#3783)** — Choose an existing filament
+  through alphabetically sorted material, matching vendor, and matching
+  filament name, rather than a flat list. Changing an earlier selection clears
+  later selections; the exact filament ID is retained.
+
+- **Scan / Add Spool saving (#3768)** — Choose an exact existing filament or
+  create one from confirmed required data before saving a spool. Save no longer
+  sends a missing filament ID or silently picks the first material/vendor match.
+  Successful creation IDs survive retry; uncertain writes require checking
+  inventory rather than blindly creating duplicates.
+
+- **Live queue and camera updates (#3684)** — Reordering the queue no longer
+  breaks live queue updates: `jobqueueupdate` now decodes the reorder payload
+  (`queuedAtUtc` timestamps, null `printerId` for unassigned jobs) as well as
+  the legacy shape. The queue list also refreshes on `queueevent`, and printer
+  detail reloads camera metadata on `camerasupdated` for that printer.
+  Undecodable queue events still trigger a refresh instead of being dropped.
+
+- **Disabled Scan spool pill (#3561, N3552-02)** — A disabled "Scan spool" pill
+  now uses the same dimmed, striped disabled chrome as other printer controls,
+  with its label still readable and without adding lockout text.
+
+- **Filament Dynamic Type (#3535, #3536)** — Remaining amount and job demand
+  stack without a separator when space is limited. Spool names scale through
+  accessibility text sizes, with the reel above the text and actions below it
+  so names and controls do not compete for horizontal space.
+
+- **Filament loading flash (#3565)** — Opening the Filament tab no longer
+  briefly reports unknown spool amounts before the inventory lookup finishes.
+  Completed missing-data and lookup-failure states remain visible.
+
+- **Stable control panel (#3565)** — Loaded controls no longer disappear and
+  reappear on printer offline/online updates; offline commands stay disabled.
+  Homing and readiness changes update buttons immediately rather than waiting
+  for another refresh. The global banner now says "Server connected", and the
+  redundant offline safety-switch footer is removed.
+
+- **Native printer web link (#3565)** — "Open in web" opens the printer's
+  configured frontend URL rather than PrintFarmer's printer page. The link is
+  hidden if there is no valid HTTP(S) frontend address. Canonical detail
+  responses preserve the sanitized URL without credentials, queries or fragments.
+
+- **Request-scoped connection errors (#3565)** — A failed control request no
+  longer claims "No internet connection" while the server banner is Connected.
+  Failures retain a short check-before-retry instruction and an accessible
+  close icon instead of the visible "Dismiss" label.
+
+- **Jog homing gate (#3565)** — Jog buttons enable only for supported axes
+  reported homed. Unknown or unhomed axes stay disabled without lockout text;
+  the same rule is checked again before dispatch. OctoPrint and PrusaLink
+  lack homing telemetry, so Home acceptance cannot enable their jog buttons.
+  VoiceOver distinguishes unknown homing from explicitly unhomed axes.
+  Accepted motor release invalidates cached homing until subsequent telemetry.
+
 ### Removed
+
+- **Remaining control acceptance disclaimers (#3565)** — Sensor targets,
+  extrusion, filament operations, motor release, firmware saves and Z-offset
+  adjustments without readback are now silent on success, like other controls.
+  Actual errors and interrupted-request warnings remain visible.
 
 - **Leftover lockout text (#3548, #3542)** — Printer detail, the Control tab
   (Move, Heat, Tune) and the filament section no longer render lockout banners,

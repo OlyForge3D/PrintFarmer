@@ -24,6 +24,16 @@ public interface IBackendCapabilityFactory
     }
 
     /// <summary>
+    /// Gets the optional bounded background enrichment client. It is never inferred from file-inventory,
+    /// download, copy or import support, so a backend without it is reported as unsupported.
+    /// </summary>
+    bool TryGetFileEnrichmentClientTyped(PrinterBackend backend, out ISupportsPrinterFileEnrichment? client)
+    {
+        client = null;
+        return false;
+    }
+
+    /// <summary>
     /// Tries to get a backend client that supports file downloads.
     /// </summary>
     /// <param name="backend">The printer backend type to get a client for.</param>

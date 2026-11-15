@@ -78,7 +78,7 @@ final class ServiceContainer: @unchecked Sendable {
     @ObservationIgnored let printerSummaryCache = PrinterSummaryCache()
     #if canImport(UIKit)
     var qrScannerService: QRSpoolScannerService?
-    var barcodeScannerService: BarcodeScannerService?
+    var barcodeScannerService: (any BarcodeScannerProtocol)?
     var nfcService: NFCService?
     #endif
 
@@ -363,10 +363,12 @@ final class ServiceContainer: @unchecked Sendable {
         signalRServiceFactory: @escaping SignalRServiceFactory = { baseURL, client in
             SignalRService(
                 serverURL: baseURL,
-                session: APIClient.makePrivateNetworkSession()
-            ) {
-                client.currentAccessToken()
-            }
+                session: APIClient.makePrivateNetworkSession(),
+                tokenProvider: { client.currentAccessToken() },
+                queueSubscriptionResourcesProvider: {
+                    try await client.get("/api/job-queue/subscription-resources")
+                }
+            )
         }
     ) {
         self.serverRegistry = serverRegistry
@@ -883,6 +885,7 @@ final class ServiceContainer: @unchecked Sendable {
              .serverUnreachable,
              .invalidResponse,
              .serverError,
+             .serverErrorMessage,
              .transportError,
              .decodingFailed,
              .staleServerResponse:
@@ -1360,10 +1363,12 @@ final class ServiceContainer: @unchecked Sendable {
         self.signalRServiceFactory = { baseURL, client in
             SignalRService(
                 serverURL: baseURL,
-                session: APIClient.makePrivateNetworkSession()
-            ) {
-                await client.currentAccessToken()
-            }
+                session: APIClient.makePrivateNetworkSession(),
+                tokenProvider: { await client.currentAccessToken() },
+                queueSubscriptionResourcesProvider: {
+                    try await client.get("/api/job-queue/subscription-resources")
+                }
+            )
         }
         self.offlineReplayProviderResolutionHook = {}
         self.farmShapeStore = FarmShapeStore()

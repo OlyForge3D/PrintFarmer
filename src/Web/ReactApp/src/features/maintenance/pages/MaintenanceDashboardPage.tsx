@@ -10,8 +10,8 @@
  *   Inventory  — Spare parts, consumables, replacement tracking
  */
 
-import { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { useContext, useEffect, useState } from 'react';
+import { UNSAFE_DataRouterContext, useBlocker, useNavigate, useSearchParams } from 'react-router';
 import { format } from 'date-fns';
 import './MaintenanceDashboardPage.css';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -25,7 +25,7 @@ import {
   DatabaseIcon,
   AlertIcon,
 } from '@/common/components/icons/MdiIcons';
-import { Button, Tabs, Badge } from '@/common/components/ui';
+import { HeaderActions, RefreshButton, Tabs, Badge } from '@/common/components/ui';
 
 import { FleetMaintenanceOverview } from '../components/FleetMaintenanceOverview';
 import { MaintenanceStatusGrid } from '../components/MaintenanceStatusGrid';
@@ -50,6 +50,27 @@ import { MaintenanceCostAnalysis } from '../components/MaintenanceCostAnalysis';
 import { PrinterUptimeChart } from '../components/PrinterUptimeChart';
 import { MaintenanceReport } from '../components/MaintenanceReport';
 import { useAdminHubParent } from '@/features/admin/utils/adminHubParentState';
+import { useAuth } from '@/features/auth/hooks/useAuth';
+import { SettingsPage } from '@/features/admin/pages/SettingsPage';
+import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
+
+function MaintenanceDraftGuard({ dirty }: { dirty: boolean }) {
+  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
+    dirty && (currentLocation.pathname !== nextLocation.pathname
+      || new URLSearchParams(nextLocation.search).get('tab') !== 'settings'));
+  return (
+    <ConfirmationModal
+      isOpen={blocker.state === 'blocked'}
+      title="Unsaved Changes"
+      message="Stay here to keep your maintenance settings edits, or discard them and leave."
+      cancelButtonText="Stay"
+      confirmButtonText="Discard Changes"
+      onCancel={() => blocker.state === 'blocked' && blocker.reset()}
+      onConfirm={() => blocker.state === 'blocked' && blocker.proceed()}
+      isDangerous
+    />
+  );
+}
 
 // ──────────────────────── Summary Stat Card ────────────────────────
 
@@ -71,30 +92,78 @@ function SummaryStat({ label, value, accent = 'default' }: SummaryStatProps) {
       <p className={`text-3xl font-bold font-bebas tracking-wide ${accentStyle[accent]}`}>
         {value}
       </p>
-      <p className="text-[11px] uppercase tracking-widest text-pf-text-tertiary mt-0.5 truncate">{label}</p>
+      <p className="text-[11px] uppercase tracking-widest text-pf-text-tertiary mt-0.5 break-words">{label}</p>
     </div>
   );
 }
 
 // ──────────────────────── Main Page ────────────────────────
 
-const MAIN_TAB_IDS = ['dashboard', 'schedule', 'library', 'inventory', 'analytics'] as const;
+const MAIN_TAB_IDS = ['dashboard', 'schedule', 'library', 'inventory', 'analytics', 'settings'] as const;
 type MainTabId = (typeof MAIN_TAB_IDS)[number];
 
 export function MaintenanceDashboardPage() {
+  const { hasPermission } = useAuth();
+  return hasPermission('maintenance', 'admin')
+    ? <MaintenanceOperationsPage />
+    : <MaintenanceSettingsOnlyPage />;
+}
+
+function MaintenanceSettingsOnlyPage() {
+  const { hasPermission } = useAuth();
+  const canEditSettings = hasPermission('system_settings', 'admin');
+  const isDataRouter = useContext(UNSAFE_DataRouterContext) !== null;
+  const [dirty, setDirty] = useState(false);
+  const parent = useAdminHubParent();
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (canEditSettings && searchParams.get('tab') !== 'settings') {
+      setSearchParams(prev => {
+        const next = new URLSearchParams(prev);
+        next.set('tab', 'settings');
+        return next;
+      }, { replace: true });
+    }
+  }, [canEditSettings, searchParams, setSearchParams]);
+  return (
+    <PageTemplate title="Maintenance" subtitle="Farm-wide maintenance settings" icon={WrenchIcon} parent={parent}>
+      {canEditSettings ? (
+        <>
+          <h2 className="mb-4 text-lg font-semibold text-pf-text-primary">Settings</h2>
+          <SettingsPage pageKey="maintenance.settings" onDirtyChange={setDirty} introText="Configure maintenance alerts and print statistics synchronization." />
+          {isDataRouter && <MaintenanceDraftGuard dirty={dirty} />}
+        </>
+      ) : <p role="alert">You don't have permission to view maintenance.</p>}
+    </PageTemplate>
+  );
+}
+
+function MaintenanceOperationsPage() {
+  const { hasPermission } = useAuth();
+  const canEditSettings = hasPermission('system_settings', 'admin');
+  const isDataRouter = useContext(UNSAFE_DataRouterContext) !== null;
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const [pendingTab, setPendingTab] = useState<string | null>(null);
   const adminHubParent = useAdminHubParent();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
-  const activeMainTab: MainTabId = MAIN_TAB_IDS.includes(tabParam as MainTabId)
+  const activeMainTab: MainTabId = MAIN_TAB_IDS.includes(tabParam as MainTabId) && (tabParam !== 'settings' || canEditSettings)
     ? (tabParam as MainTabId)
     : 'dashboard';
-  const handleMainTabChange = (tabId: string) => {
+  const commitMainTabChange = (tabId: string) => {
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
       next.set('tab', tabId);
       return next;
     });
+  };
+  const handleMainTabChange = (tabId: string) => {
+    if (!isDataRouter && settingsDirty && tabId !== 'settings') {
+      setPendingTab(tabId);
+      return;
+    }
+    commitMainTabChange(tabId);
   };
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedDayTasks, setSelectedDayTasks] = useState<UpcomingMaintenanceTask[]>([]);
@@ -152,52 +221,41 @@ export function MaintenanceDashboardPage() {
       icon={WrenchIcon}
       parent={adminHubParent}
       actions={
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={handleRefresh}
-          disabled={isAnyLoading}
-          iconLeft={
-            <RefreshIcon
-              className={`h-4 w-4 ${isAnyLoading ? 'animate-spin' : ''}`}
-            />
-          }
-        >
-          Refresh
-        </Button>
+        <HeaderActions>
+          <RefreshButton
+            aria-label="Refresh maintenance"
+            onClick={handleRefresh}
+            busy={isAnyLoading}
+          />
+        </HeaderActions>
       }
     >
       {/* ═══════════════════ Ribbon Stats ═══════════════════ */}
-      <div className="flex items-center justify-between gap-6 bg-pf-bg-1 border border-pf-border rounded-lg px-6 py-4 mb-6 overflow-x-auto">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 items-start gap-x-6 gap-y-4 bg-pf-bg-1 border border-pf-border rounded-lg px-6 py-4 mb-6 lg:[&>div+div]:border-l lg:[&>div+div]:border-pf-border">
         <SummaryStat
           label="Printers"
           value={stats?.totalPrinters ?? 0}
         />
-        <div className="w-px h-10 bg-pf-border shrink-0" />
         <SummaryStat
           label="Online"
           value={stats?.printersOnline ?? 0}
           accent="green"
         />
-        <div className="w-px h-10 bg-pf-border shrink-0" />
         <SummaryStat
           label="Alerts"
           value={totalAlerts}
           accent={criticalAlerts > 0 ? 'red' : totalAlerts > 0 ? 'amber' : 'default'}
         />
-        <div className="w-px h-10 bg-pf-border shrink-0" />
         <SummaryStat
           label="Overdue"
           value={overdueCount}
           accent={overdueCount > 0 ? 'red' : 'default'}
         />
-        <div className="w-px h-10 bg-pf-border shrink-0" />
         <SummaryStat
           label="Due Soon"
           value={dueSoonCount}
           accent={dueSoonCount > 0 ? 'amber' : 'default'}
         />
-        <div className="w-px h-10 bg-pf-border shrink-0" />
         <SummaryStat
           label="Needs Attention"
           value={stats?.printersNeedingAttention ?? 0}
@@ -207,7 +265,7 @@ export function MaintenanceDashboardPage() {
 
       {/* ═══════════════════ Main Tabs ═══════════════════ */}
       <Tabs activeTab={activeMainTab} onTabChange={handleMainTabChange} className="space-y-0">
-        <Tabs.List className="border-b border-pf-border bg-pf-bg-1 -mx-4 px-4 mb-0 overflow-x-auto">
+        <Tabs.List aria-label="Maintenance sections" className="border-b border-pf-border bg-pf-bg-1 -mx-4 px-4 mb-0 overflow-x-auto">
           <Tabs.Tab id="dashboard" icon={<WrenchIcon className="h-4 w-4" />}>
             Dashboard
           </Tabs.Tab>
@@ -228,9 +286,15 @@ export function MaintenanceDashboardPage() {
           <Tabs.Tab id="analytics" icon={<ChartIcon className="h-4 w-4" />}>
             Analytics
           </Tabs.Tab>
+          {canEditSettings && <Tabs.Tab id="settings">Settings</Tabs.Tab>}
         </Tabs.List>
 
         <Tabs.Panels>
+          {canEditSettings && (
+            <Tabs.Panel id="settings">
+              <SettingsPage pageKey="maintenance.settings" onDirtyChange={setSettingsDirty} introText="Configure maintenance alerts and print statistics synchronization." />
+            </Tabs.Panel>
+          )}
           {/* ─────────── Dashboard Tab ─────────── */}
           <Tabs.Panel id="dashboard">
             <div className="space-y-8 mt-6">
@@ -541,6 +605,21 @@ export function MaintenanceDashboardPage() {
           </Tabs.Panel>
         </Tabs.Panels>
       </Tabs>
+
+      {isDataRouter && <MaintenanceDraftGuard dirty={settingsDirty} />}
+      <ConfirmationModal
+        isOpen={pendingTab !== null}
+        title="Unsaved Changes"
+        message="Stay here to keep your maintenance settings edits, or discard them and leave."
+        cancelButtonText="Stay"
+        confirmButtonText="Discard Changes"
+        onCancel={() => setPendingTab(null)}
+        onConfirm={() => {
+          if (pendingTab) commitMainTabChange(pendingTab);
+          setPendingTab(null);
+        }}
+        isDangerous
+      />
 
       {/* Error Display */}
       {(statsError || alertsError || tasksError || componentsError) && (

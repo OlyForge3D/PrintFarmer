@@ -3,7 +3,9 @@ import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('@/common/components/ui', () => ({
+vi.mock('@/common/components/ui', async () => {
+  const { Toolbar, FiltersDisclosure } = await import('@/common/components/ui/toolbar');
+  return {
   Card: Object.assign(
     ({ children }: { children: React.ReactNode }) => <div data-testid="card">{children}</div>,
     {
@@ -29,13 +31,32 @@ vi.mock('@/common/components/ui', () => ({
   Select: ({ value, onChange, children, containerClassName, ...rest }: React.SelectHTMLAttributes<HTMLSelectElement> & { containerClassName?: string }) => (
     <select value={value} onChange={onChange} data-container-class-name={containerClassName} {...rest}>{children}</select>
   ),
+  Toolbar,
+  ToolbarField: ({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }) => (
+    <div><label htmlFor={htmlFor}>{label}</label>{children}</div>
+  ),
+  FiltersDisclosure,
+  SearchField: ({ value, onChange, onClear, label, id, placeholder }: {
+    value: string;
+    onChange: React.ChangeEventHandler<HTMLInputElement>;
+    onClear: () => void;
+    label?: string;
+    id?: string;
+    placeholder?: string;
+  }) => (
+    <span>
+      <input id={id} type="search" aria-label={label} value={value} onChange={onChange} placeholder={placeholder} />
+      {value && <button type="button" aria-label="Clear search" onClick={onClear}>Clear</button>}
+    </span>
+  ),
   Badge: ({ children, variant, size, className }: { children: React.ReactNode; variant?: string; size?: string; className?: string }) => (
     <span data-testid="badge" data-variant={variant} data-size={size} className={className}>{children}</span>
   ),
   Button: ({ children, onClick, className, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string }) => (
     <button className={className} onClick={onClick} {...rest}>{children}</button>
   ),
-}));
+  };
+});
 
 vi.mock('@/common/components/icons/MdiIcons', () => ({
   SearchIcon: ({ className }: { className?: string }) => <span data-testid="search-icon" className={className} />,
@@ -80,7 +101,7 @@ describe('LocationPrinterList', () => {
 
   it('filters by search text', () => {
     render(<LocationPrinterList printers={printers} />);
-    const searchInput = screen.getByPlaceholderText('Search printers...');
+    const searchInput = screen.getByPlaceholderText('Search printers…');
     fireEvent.change(searchInput, { target: { value: 'voron' } });
     expect(screen.getByText('Voron 2.4')).toBeInTheDocument();
     expect(screen.queryByText('Prusa MK4')).not.toBeInTheDocument();
@@ -89,10 +110,31 @@ describe('LocationPrinterList', () => {
 
   it('filters by status', () => {
     render(<LocationPrinterList printers={printers} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
     const statusFilter = screen.getByLabelText('Filter by status');
     fireEvent.change(statusFilter, { target: { value: 'offline' } });
     expect(screen.getByText('Ender 3')).toBeInTheDocument();
     expect(screen.queryByText('Prusa MK4')).not.toBeInTheDocument();
+  });
+
+  it('keeps status filters collapsed, counts active values, and resets without clearing search', () => {
+    render(<LocationPrinterList printers={printers} />);
+    const searchInput = screen.getByPlaceholderText('Search printers…');
+    fireEvent.change(searchInput, { target: { value: 'prusa' } });
+
+    const filters = screen.getByRole('button', { name: 'Filters' });
+    expect(filters).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByLabelText('Filter by status').closest('[role="region"]')).not.toBeVisible();
+    expect(searchInput).toBeVisible();
+
+    fireEvent.click(filters);
+    fireEvent.change(screen.getByLabelText('Filter by status'), { target: { value: 'online' } });
+    expect(screen.getByRole('button', { name: 'Filters (1)' })).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
+    expect(screen.getByRole('button', { name: 'Filters' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByLabelText('Filter by status')).toHaveValue('all');
+    expect(searchInput).toHaveValue('prusa');
   });
 
   it('shows empty message when no printers', () => {
@@ -102,7 +144,7 @@ describe('LocationPrinterList', () => {
 
   it('shows filter-no-match message when filters exclude all', () => {
     render(<LocationPrinterList printers={printers} />);
-    const searchInput = screen.getByPlaceholderText('Search printers...');
+    const searchInput = screen.getByPlaceholderText('Search printers…');
     fireEvent.change(searchInput, { target: { value: 'nonexistent' } });
     expect(screen.getByText('No printers match the current filters.')).toBeInTheDocument();
   });

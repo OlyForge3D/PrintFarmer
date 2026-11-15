@@ -35,6 +35,10 @@ public class CatalogService(
     private Dictionary<string, ManufacturerDto?>? _manufacturerNameCache;
     private Dictionary<(Guid ManufacturerId, string ModelName), PrinterModelDto?>? _modelNameCache;
 
+    /// <inheritdoc />
+    public Task<IReadOnlyList<ProfileTaskModelDto>> GetProfileTaskModelsAsync(IEnumerable<Guid> modelIds, CancellationToken ct = default) =>
+        _repo.GetProfileTaskModelsAsync(modelIds, ct);
+
     public async Task<(IReadOnlyList<ManufacturerDto> List, string? Etag)> GetManufacturersAsync(CancellationToken ct)
     {
         try

@@ -1,7 +1,7 @@
 import { Fragment, ReactNode } from 'react';
-import { Button, Input, Select } from '@/common/components/ui';
+import { SearchField, SortControl, Toolbar, ToolbarField } from '@/common/components/ui';
 import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
-import { type SortOrder, type ViewMode } from '../types';
+import { type FileBrowserFilterActions, type SortOrder, type ViewMode } from '../types';
 
 interface FileBrowserToolbarProps {
   search: string;
@@ -13,8 +13,11 @@ interface FileBrowserToolbarProps {
   onToggleSortOrder: () => void;
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
-  filterActions?: ReactNode;
+  filterActions?: FileBrowserFilterActions;
+  folderActions?: ReactNode;
   extraActions?: ReactNode;
+  hideSortControl?: boolean;
+  className?: string;
 }
 
 export const FileBrowserToolbar = ({
@@ -28,62 +31,56 @@ export const FileBrowserToolbar = ({
   viewMode,
   onViewModeChange,
   filterActions,
+  folderActions,
   extraActions,
+  hideSortControl = false,
+  className,
 }: FileBrowserToolbarProps) => {
-  return (
-    <div className="flex flex-col gap-3 lg:flex-row lg:items-center" data-tour="gcode-toolbar">
-      <div className="flex-1 min-w-0">
-        <label htmlFor="file-browser-search" className="sr-only">
-          Search files
-        </label>
-        <Input
+  const controls = (trigger: ReactNode) => (
+    <Toolbar.Controls>
+      <ToolbarField label="Search" htmlFor="file-browser-search" className="min-w-0 flex-1">
+        <SearchField
           id="file-browser-search"
-          type="search"
+          label="Search"
           value={search}
-          placeholder="Search files"
-          aria-label="Search files"
-          onChange={(e) => onSearchChange(e.target.value)}
-          className="min-w-[16rem]"
+          placeholder="Search files…"
+          onChange={(event) => onSearchChange(event.target.value)}
+          onClear={() => onSearchChange('')}
         />
-      </div>
+      </ToolbarField>
 
-      {filterActions && (
-        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter files by type">
-          {filterActions}
-        </div>
-      )}
+      {trigger}
+      {folderActions}
 
-      <div className="flex flex-wrap items-center justify-end gap-2 lg:flex-nowrap">
-        <label htmlFor="file-browser-sort" className="text-sm text-pf-text-secondary whitespace-nowrap">
-          Sort
-        </label>
-        <Select
+      {!hideSortControl && <ToolbarField label="Sort" htmlFor="file-browser-sort">
+        <SortControl
           id="file-browser-sort"
-          aria-label="Sort files"
+          aria-label="Sort by"
           value={sortBy}
-          onChange={(e) => onSortChange(e.target.value)}
-          className="min-w-28"
+          onChange={(event) => onSortChange(event.target.value)}
+          direction={sortOrder}
+          onDirectionChange={onToggleSortOrder}
+          directionDisabled={!sortBy}
         >
-          {sortOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </Select>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          aria-label={sortOrder === 'asc' ? 'Sort descending' : 'Sort ascending'}
-          onClick={onToggleSortOrder}
-        >
-          {sortOrder === 'asc' ? '↑' : '↓'}
-        </Button>
+            <option value="">Default order</option>
+            {sortOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+        </SortControl>
+      </ToolbarField>}
 
-        {extraActions && <Fragment>{extraActions}</Fragment>}
+      <Toolbar.Spacer />
 
-        <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={onViewModeChange} />
-      </div>
-    </div>
+      <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={onViewModeChange} />
+      {extraActions && <Toolbar.Group><Fragment>{extraActions}</Fragment></Toolbar.Group>}
+    </Toolbar.Controls>
+  );
+
+  return (
+    <Toolbar aria-label="File controls" labelled data-tour="gcode-toolbar" className={className}>
+      {filterActions ? filterActions(controls) : controls(null)}
+    </Toolbar>
   );
 };

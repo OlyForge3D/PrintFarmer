@@ -281,8 +281,8 @@ public class PasskeyControllerTests
     private static Fido2 CreateFido2() =>
         new(new Fido2Configuration
         {
-            ServerDomain = "localhost",
-            ServerName = "PrintFarmer",
+            RPID = "localhost",
+            RPName = "PrintFarmer",
             Origins = new HashSet<string> { "http://localhost:3000" },
         });
 }

@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { Button, Card, Input, Badge } from '@/common/components/ui';
-import { PlusIcon, SearchIcon } from '@/common/components/icons/MdiIcons';
+import { Button, Card, Badge } from '@/common/components/ui';
+import { SearchField, Toolbar } from '@/common/components/ui';
+import { PlusIcon } from '@/common/components/icons/MdiIcons';
 import type { LocationTreeNode } from '@/types/api';
 
 interface LocationHierarchyPanelProps {
@@ -90,7 +91,7 @@ function LocationTreeRow({
             'flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent',
             isSelected
-              ? 'bg-pf-accent-bg text-pf-accent font-semibold'
+              ? 'bg-pf-accent-bg text-[var(--pf-on-accent)] font-semibold'
               : 'text-pf-text-primary hover:bg-pf-bg-1',
           )}
           onClick={() => onSelect(node.id)}
@@ -174,16 +175,15 @@ export function LocationHierarchyPanel({
               Search rooms, zones, and placement areas.
             </p>
           </div>
-          <div className="relative">
-            <SearchIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-pf-text-secondary" />
-            <Input
+          <Toolbar aria-label="Location hierarchy filters">
+            <SearchField
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Search locations"
-              aria-label="Search locations"
-              className="pl-9"
+              onClear={() => setSearchTerm('')}
+              label="Search locations"
+              placeholder="Search locations…"
             />
-          </div>
+          </Toolbar>
         </div>
       </Card.Header>
       <Card.Body className="max-h-[68vh] overflow-y-auto p-2">
@@ -194,7 +194,7 @@ export function LocationHierarchyPanel({
             'mb-2 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent',
             selectedId === null
-              ? 'bg-pf-accent-bg text-pf-accent font-semibold'
+              ? 'bg-pf-accent-bg text-[var(--pf-on-accent)] font-semibold'
               : 'text-pf-text-primary hover:bg-pf-bg-1',
           )}
           onClick={() => onSelect(null)}

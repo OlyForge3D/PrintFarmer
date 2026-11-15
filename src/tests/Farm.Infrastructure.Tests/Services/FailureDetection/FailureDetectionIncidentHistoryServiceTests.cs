@@ -42,11 +42,13 @@ public sealed class FailureDetectionIncidentHistoryServiceTests : IDisposable
             0.9321m,
             detectedAt,
             "http://camera.local/snapshot.jpg",
+            "PrintGuard",
             autoPaused: true,
             CancellationToken.None);
 
         FailureDetectionIncident persistedIncident = await dbContext.FailureDetectionIncidents.SingleAsync();
         persistedIncident.PrinterId.Should().Be(printer.Id);
+        persistedIncident.Provider.Should().Be("PrintGuard");
         persistedIncident.JobName.Should().Be("folder/spaghetti-test.gcode");
         persistedIncident.FileName.Should().Be("spaghetti-test.gcode");
         persistedIncident.Confidence.Should().Be(0.9321m);
@@ -101,6 +103,7 @@ public sealed class FailureDetectionIncidentHistoryServiceTests : IDisposable
         incidents.Should().HaveCount(2);
         incidents[0].Id.Should().NotBeEmpty();
         incidents[0].PrinterId.Should().Be(firstPrinter.Id);
+        incidents[0].Provider.Should().Be("Obico");
         incidents[0].PrinterName.Should().Be("Filtered Printer");
         incidents[0].JobName.Should().Be("jobs/latest.gcode");
         incidents[1].JobName.Should().Be("jobs/first.gcode");

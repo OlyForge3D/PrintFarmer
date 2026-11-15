@@ -138,8 +138,6 @@ public class PrintersControllerTestConnectionTests
             backendClientFactory: Mock.Of<IBackendClientFactory>(),
             httpClientFactory: httpClientFactory,
             egressGuard: egressGuard,
-            obicoServerAssignment: Mock.Of<Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService>(),
-            settingsService: Mock.Of<Farm.Infrastructure.Settings.ISettingsService>(),
             telemetryService: Mock.Of<Farm.Infrastructure.Telemetry.IPrintFarmerTelemetryService>(),
             bedTypeService: Mock.Of<Farm.Infrastructure.Services.BedTypes.IBedTypeService>());
 

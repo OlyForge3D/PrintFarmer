@@ -53,6 +53,13 @@ final class PrinterDetailSpoolLookup {
     private(set) var state: State = .idle
     @ObservationIgnored private var requestGeneration: UInt64 = 0
 
+    var isAwaitingResult: Bool {
+        switch state {
+        case .idle, .loading: return true
+        case .loaded, .failed: return false
+        }
+    }
+
     var spoolsByID: [Int: SpoolmanSpool] {
         guard case .loaded(let spools, _) = state else { return [:] }
         return spools

@@ -34,6 +34,13 @@ public interface IStoragePathService
     string GetSnapshotStorageDirectory();
 
     /// <summary>
+    /// Get the dedicated root for printer-file catalog thumbnails. It must not overlap the
+    /// G-code library or model upload roots, so library file APIs cannot read or write it.
+    /// In multi-instance deployments, mount it on storage shared by every API instance.
+    /// </summary>
+    string GetPrinterFileThumbnailDirectory();
+
+    /// <summary>
     /// Ensure all storage directories exist.
     /// </summary>
     Task EnsureDirectoriesExistAsync();

@@ -74,8 +74,7 @@ export function canCancel(args: {
 }
 
 export function canEmergencyStop(args: { isOnline: boolean; isEnabled?: boolean; support: PrinterSupport }): boolean {
-  const isEnabled = args.isEnabled ?? true;
-  return isEnabled && args.isOnline && args.support.supportsControlOperations;
+  return args.isOnline && args.support.supportsControlOperations;
 }
 
 export function canDisableMotors(args: { isOnline: boolean; isEnabled?: boolean; isPrinting: boolean; support: PrinterSupport }): boolean {

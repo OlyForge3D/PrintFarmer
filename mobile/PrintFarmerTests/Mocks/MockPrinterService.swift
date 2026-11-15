@@ -51,6 +51,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var getStatusCalledWith: UUID?
     var listCameraUrlsCalled = false
     var getCameraUrlCalledWith: UUID?
+    var getCameraUrlCallCount = 0
     var getSnapshotCalledWith: UUID?
     var getSnapshotCallCount = 0
     var listPrintersCallCount = 0
@@ -85,6 +86,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var moveToCalledWith: (printerId: UUID, x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?)?
     var extrudeCalledWith: (printerId: UUID, distanceMm: Double, feedrateMmPerMinute: Int)?
     var disableMotorsCalledWith: UUID?
+    var beforeDisableMotors: (@Sendable () async -> Void)?
     var turnOffHeatersCallCount = 0
     var turnOffHeatersCalledWith: UUID?
     var saveZOffsetCalledWith: (printerId: UUID, offsetMm: Double, saveToFirmware: Bool, reviewedRowVersion: String)?
@@ -161,6 +163,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
 
     func getCameraUrl(id: UUID) async throws -> PrinterCameraUrl {
         getCameraUrlCalledWith = id
+        getCameraUrlCallCount += 1
         if let error = errorToThrow { throw error }
         guard let cameraUrl = cameraUrlToReturn else { throw NetworkError.notFound }
         return cameraUrl
@@ -316,6 +319,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
 
     func disableMotors(printerId: UUID) async throws -> CommandResult {
         disableMotorsCalledWith = printerId
+        if let beforeDisableMotors { await beforeDisableMotors() }
         if let error = errorToThrow { throw error }
         return commandResultToReturn
     }
@@ -431,6 +435,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         getStatusCalledWith = nil
         listCameraUrlsCalled = false
         getCameraUrlCalledWith = nil
+        getCameraUrlCallCount = 0
         getSnapshotCalledWith = nil
         getSnapshotCallCount = 0
         snapshotHandler = nil

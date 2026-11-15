@@ -37,24 +37,134 @@ Main overview page showing all printers with real-time status.
 - One-click print controls
 - Auto-refresh on status changes
 
+### Printer service status
+
+Administrators use the **In Service / Out of Service** control in the action area
+of compact cards, detailed cards and the table, or beside identity in the details sidebar.
+Other users see a read-only status. It is the existing `IsEnabled` setting,
+not a second monitoring flag.
+Cards and table actions show a green filled power plug for In Service and a neutral
+outline plug for Out of Service. The plug is first in the table's **Actions** column;
+there is no separate Service column. Authorized users can toggle the glyph; other users see status only.
+The operational **Status** column is unchanged; the former **Last Updated**
+column has been removed.
+
+Both card styles place **Open in Browser** at the far right of the header and
+the remaining actions in a two-column right-hand grid, without an overflow menu.
+Compact cards place **Open details sidebar** immediately before the browser action.
+Their single-row header matches the detailed header height while retaining 44px
+header controls. Both main action grids use uniform 44px square controls in
+row-major order: service status, camera, auto-dispatch, files, history and edit.
+History remains capability-gated; Tags remains compact-only after the shared actions.
+Auto-dispatch shares the other actions' ghost hover treatment in both states,
+while its enabled state retains the accent-colored, filled bolt.
+Unavailable browser actions retain their explanatory tooltip. Both card styles show
+the printer's configured IP address beneath its manufacturer when available.
+Out of Service preserves the existing disabled-printer behavior: the printer is
+excluded from monitoring and dispatch, and is not commanded to power off.
+Offline Out of Service printers do not show the yellow troubleshooting action;
+unexpectedly offline In Service printers retain it. Maintenance remains a separate setting.
+Sorting does not hide printers. The default order in all three views is active
+(printing or paused), pending, error, ready/other, maintenance, then offline.
+Within each group, names sort A-Z ignoring case, with printer ID breaking ties.
+An offline printer stays in the offline group regardless of service status.
+Pending takes precedence over active, and maintenance over error, matching mobile.
+Explicit saved sort choices remain in effect.
+Emergency stop remains available for an online Out of Service printer when
+its backend supports control operations. Service status is not a physical
+safety interlock, and a sent stop command does not prove the printer has stopped.
+
+A printer with an assigned or active job cannot be moved Out of Service. The
+operator must review and resolve that work first; PrintFarmer does not pause or
+cancel it. Concurrent job assignments and service changes use a shared revision
+barrier so neither can silently bypass this check. Externally observed active
+jobs remain recorded even on an Out of Service printer and require operator
+review; this does not authorize dispatch. If an older expected-offline record is migrated while a job is still
+active, the printer is not disabled and the job appears under **Operational
+issues** with a link to the printer. That issue clears when the job is no longer
+active, is unassigned, or is reassigned to another printer. Older expected-offline records without active work migrate to Out of
+Service; printers without such a record retain their existing status.
+
+The conversion is one-way: down-migration leaves `IsEnabled` unchanged and
+restores an empty expected-offline column, not historical suppression or
+timestamps. Restore a pre-upgrade backup to recover the original intent.
+SQLite conversion is exercised locally; PostgreSQL and SQL Server migrations
+require provider-backed validation before deployment.
+
+The Admin Control Center presents **Operational issues** as compact, grouped
+type/severity disclosures rather than repeated warning cards. Totals and
+severity stay visible; critical errors start expanded. Expand a group for
+per-printer links. The backends health tile reflects only printers In Service;
+missing data and failed refreshes are not an all-clear.
+
 ### Files Page
 `/files` separates owned local assets from files observed on printers.
 
 - **Local library** (`/files`): upload and organize models and G-code, search,
   tag, preview, slice models, and queue local G-code. Use `?type=models` or
-  `?type=gcode` to filter by file type.
+  `?type=gcode` to filter by file type. Prusa binary G-code (`.bgcode`) uploads
+  show slicer metadata and an embedded PNG or JPEG thumbnail. QOI-only
+  thumbnails and unsupported block compression are omitted; malformed or
+  oversized files (over 1 MiB per metadata block, 2 MiB per thumbnail block,
+  64 header blocks, or 16 MiB of header data) show no metadata.
 - **On printers** (`/files?source=printers`): browse remote file metadata,
   availability and freshness, and act on one or several selected files. Add
-  `&printer=<printerId>` to scope the catalog to one printer.
+  `&printer=<printerId>` to scope the catalog to one printer. Filters appear
+  directly without a duplicate source heading and description. **Printer** and
+  **Path search** share a responsive toolbar with the view buttons and refresh.
+  Availability and freshness remain file metadata, not filter dropdowns;
+  old `availability` and `freshness` URL parameters do not filter this view.
 
+**Local library** and **On printers** use the shared themed tabs. The selected
+source stays URL-driven, and only its content is mounted.
 Both sources share the same compact card grid and 12px table, with the same
 file, status, and action glyphs. Selecting a card or file name opens a details
 panel (docked on wide screens, an overlay on narrow ones; <kbd>Esc</kbd> closes
 it and returns focus). The panel shows a larger preview, type, size, path,
 source, print time, and layer height. Values the source cannot provide are shown
-as **Unavailable**. File dates display as dates only; hover for the full
+as **Unknown** (or an accessible dash). File dates display as dates only; hover for the full
 timestamp. Details-panel actions are icon-only buttons; hover or focus them to
 see their names.
+
+Tables share their border, header, row spacing, selection styling, and dense
+action buttons. Local library omits **Type** and On printers omits **Status**
+from the table; these values remain in file details (and on cards).
+
+#### Local-library folders
+
+The folder-glyph **Folders** toolbar button reveals a compact row with the
+**Folder** dropdown and folder actions in both list and grid views. It starts
+collapsed; the button is glyph-only with an accessible **Folders** name.
+An active folder highlights the button, and its tooltip shows the selected path.
+Control labels sit above their inputs, matching **On printers**.
+Collapsing preserves the filter. The **Type** dropdown replaces the All, 3D Models, G-Code, and Other
+buttons. **All folders** shows the whole library; **Root** shows only files
+assigned to `/`. Choosing another folder shows its direct files, not descendants,
+with filtering applied before server pagination and totals. The dropdown combines
+model and G-code folders; the inline breadcrumb appears when a folder is selected
+and links back to ancestors or All folders.
+Changing folder resets the page and clears the selection and details panel.
+
+**New folder** creates a child of the current folder (Root when All folders is
+selected) in both libraries. Select files and use **Move to folder...** to choose
+their destination. These controls require create permission for the affected
+libraries. Model and G-code operations are separate requests: partial failures are
+reported, not rolled back. After an incomplete move, review the refreshed library
+and reselect remaining files before retrying. Folder-load errors also offer retry.
+
+#### Print settings
+
+The **Print settings** section presents time, layer height/count, nozzle size,
+temperatures, infill, supports, filament weight, and slicer identity. A
+**Filament by tool** table keeps each reported tool's color, material, and weight
+aligned; missing values stay unknown rather than borrowing another tool's data.
+Additional supplied native fields appear under **Other reported fields**.
+Moonraker, OctoPrint, and PrusaLink use one native-first background pipeline with
+bounded G-code/BGCode fallback. No missing settings or material values are guessed.
+Saved database metadata remains visible independently of thumbnail availability.
+The panel distinguishes collecting, retained earlier details, and failed reads.
+Explicit zero and false remain visible where valid. Full display names do not
+replace the short filename used by file actions.
 
 On-printer files offer two distinct actions:
 
@@ -81,15 +191,45 @@ applies to (for example, `Copy 2 of 3 selected`).
   batch. The server still checks each file. Results are reported per file; a
   delete whose outcome is unknown is never resent automatically.
 
-Remote previews load lazily, only for visible items on printers whose backend
-supports them. They are fetched only when the printer is idle, cached per file
-version, and labelled with their capture date. Indexing itself remains
-metadata-only.
+Preview records and images load lazily from PrintFarmer's local database and
+storage for visible items. Browsing or opening details never contacts a
+printer. Metadata and thumbnails are acquired in bounded background slices only
+when the printer is confirmed idle. Saved images survive restarts and remain
+readable while the printer is busy or offline. API replicas must share the
+database and Gcode storage volume; the default thumbnail capacity is 512 MiB.
+At capacity, healthy images are retained and metadata collection continues.
+See [storage setup and limits](PRINTER_FILE_CATALOG_API.md#shared-thumbnail-storage-and-upgrade-requirements).
 
-Per-printer automatic discovery, scan status, and **Refresh now** live in the
+Per-printer automatic discovery, scan status, and **Force refresh** live in the
 **Files** section of the printer's Edit dialog. Those changes apply immediately
 and are not part of the form save. Global discovery cadence and budgets remain
 under Admin Settings > Files.
+
+The icon-only **Force refresh** control, to the right of the table/card view
+toggle on **On printers**, scans every online printer you can manage with bounded
+parallelism. The catalog's `maxConcurrentIo` sets the client pool size: two by
+default, configurable from one to 16 under Admin Settings > Files. The database
+still enforces the shared I/O budget across API replicas and background work.
+Both refresh controls retain accessible names and tooltips, show a busy
+indicator, and cannot be activated again until refresh and cache reload finish.
+An observed server scan also keeps the affected control inactive.
+
+Both controls bypass automatic-discovery switches, schedule, and backoff for
+inventory, and mark background enrichment due. They still require a
+confirmed-idle printer and a free I/O slot; idle status is checked again during
+the scan and before publication. The client retries only a confirmed
+`source_busy` response, within a two-minute capacity-wait window. This is separate
+from the scan's own two-minute budget. Other failures, including timeouts with an
+unknown outcome, are not automatically replayed. Success means a complete
+listing was published, not merely scheduled; failures name the printer and
+reason without stopping the remaining printers.
+
+Images are reacquired later by the background pipeline, not by opening the
+panel or waiting for force refresh. A complete listing does not guarantee every
+image is ready. Same-source images remain visible while revalidation is pending.
+Files pinned by unfinished operations retain their action revision; enrichment
+does not change that revision. Automatic discovery must be enabled for the
+background enrichment pass.
 
 The printer-file dialog links to the printer-scoped catalog. The React G-code harvest
 wizard, management page, progress UI, and harvest-filtered library view are
@@ -817,7 +957,7 @@ import type { Model, ModelTag } from '@/types/models';
 import type { JobStatus, HistoryJob } from '@/types/queue';
 
 // Component props
-import type { ModelGridViewProps } from '@/types/components';
+import type { ModelListViewProps } from '@/types/components';
 
 // API types
 import type { Printer, GcodeFile } from '@/types/api';

@@ -306,4 +306,79 @@ describe('SlicerProfilesPage worker-backed library', () => {
     expect(screen.queryByText(/OrcaSlicer worker unavailable/)).not.toBeInTheDocument();
     expect(screen.queryByText('No profiles match your filters.')).not.toBeInTheDocument();
   });
+
+  it.each(['Name', 'Type', 'Description', 'Created', 'Updated'])('cycles custom %s and keeps selected profile IDs', async label => {
+    const profiles = [
+      { ...customProfile, id: 'z', name: 'Zeta', profileType: 'process' as const, description: 'Zebra', createdAt: '2026-02-01', updatedAt: '2026-02-02' },
+      { ...customProfile, id: 'a', name: 'Alpha', profileType: 'filament' as const, description: 'Apple', createdAt: '2026-01-01', updatedAt: '2026-01-02' },
+    ];
+    vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
+      profiles, totalCount: 2, machineProfileCount: 0, processProfileCount: 1, filamentProfileCount: 1,
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole('tab', { name: /My Profiles/ }));
+    await screen.findByText('Zeta');
+    await user.click(screen.getByLabelText('Select Zeta'));
+    const table = screen.getByRole('table');
+    const order = () => within(table).getAllByRole('row').slice(1).map(row => within(row).getAllByRole('cell')[1].textContent);
+    const header = within(table).getByRole('columnheader', { name: label });
+    const button = within(header).getByRole('button', { name: label });
+    expect(header).toHaveAttribute('aria-sort', 'none');
+    await user.click(button);
+    expect(header).toHaveAttribute('aria-sort', 'ascending');
+    expect(order()).toEqual(['Alpha', 'Zeta']);
+    expect(screen.getByLabelText('Select Zeta')).toBeChecked();
+    button.focus();
+    await user.keyboard(' ');
+    expect(header).toHaveAttribute('aria-sort', 'descending');
+    expect(order()).toEqual(['Zeta', 'Alpha']);
+    await user.keyboard('{Enter}');
+    expect(header).toHaveAttribute('aria-sort', 'none');
+    expect(order()).toEqual(['Zeta', 'Alpha']);
+    expect(profiles.map(profile => profile.id)).toEqual(['z', 'a']);
+  });
+
+  it('sorts the entire library before paging and resets to page one on every sort change', async () => {
+    const machineProfiles = Array.from({ length: 30 }, (_, index) => ({
+      name: `Machine ${String(29 - index).padStart(2, '0')}`,
+      manufacturer: 'PrintersForAnts',
+      nozzleDiameter: 30 - index,
+    }));
+    vi.mocked(slicerProfilesService.getLibraryHierarchy).mockResolvedValue({
+      ...hierarchyFixture,
+      byHierarchy: {
+        PrintersForAnts: {
+          ...hierarchyFixture.byHierarchy.PrintersForAnts,
+          models: { 'Micron 180': { ...hierarchyFixture.byHierarchy.PrintersForAnts.models['Micron 180'], machineProfiles } },
+        },
+      },
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('Machine 29');
+    const firstName = () => within(screen.getByRole('table')).getAllByRole('row')[1].querySelector('td')?.textContent;
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(screen.getByText('Page 2 of 2')).toBeInTheDocument();
+    expect(firstName()).toBe('Machine 04');
+    await user.click(screen.getByRole('button', { name: 'Name' }));
+    expect(screen.getByText('Page 1 of 2')).toBeInTheDocument();
+    expect(firstName()).toBe('Machine 00');
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(firstName()).toBe('Machine 25');
+    await user.click(screen.getByRole('button', { name: 'Name' }));
+    expect(screen.getByText('Page 1 of 2')).toBeInTheDocument();
+    expect(firstName()).toBe('Machine 29');
+    await user.click(screen.getByRole('button', { name: 'Name' }));
+    expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute('aria-sort', 'none');
+    expect(firstName()).toBe('Machine 29');
+    await user.click(screen.getByRole('button', { name: 'Layer/Nozzle' }));
+    expect(firstName()).toBe('Machine 00');
+    await user.click(screen.getByRole('button', { name: 'Layer/Nozzle' }));
+    expect(firstName()).toBe('Machine 29');
+    expect(machineProfiles[0].name).toBe('Machine 29');
+    for (const label of ['Engine', 'Flags']) {
+      expect(screen.getByRole('columnheader', { name: label })).not.toHaveAttribute('aria-sort');
+    }
+  });
 });

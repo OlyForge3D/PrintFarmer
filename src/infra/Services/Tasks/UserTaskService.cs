@@ -69,8 +69,21 @@ public class UserTaskService(
     }
 
     /// <inheritdoc />
-    public async Task<UserTaskDto> CreateOrUpdateProfileImportTaskAsync(CreateProfileImportTaskDto dto, CancellationToken ct = default)
+    public Task<UserTaskDto> CreateOrUpdateProfileImportTaskAsync(CreateProfileImportTaskDto dto, CancellationToken ct = default) =>
+        CreateOrUpdateProfileImportTaskAsync(
+            new CreateProfileImportTaskBatchDto(dto.PrinterModelId, dto.PrinterModelName, dto.ManufacturerName, [dto.PrinterId]), ct);
+
+    /// <inheritdoc />
+    public async Task<UserTaskDto> CreateOrUpdateProfileImportTaskAsync(CreateProfileImportTaskBatchDto dto, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(dto);
+        ArgumentNullException.ThrowIfNull(dto.PrinterIds);
+        if (dto.PrinterIds.Count == 0)
+        {
+            throw new ArgumentException("At least one printer is required.", nameof(dto));
+        }
+
+        dto = dto with { PrinterIds = dto.PrinterIds.Distinct().ToArray() };
         using ProfileImportTaskGateLease gateLease = await AcquireProfileImportTaskGateAsync(ProfileImportEntityType, dto.PrinterModelId, ct);
 
         for (int attempt = 0; attempt < MaxProfileImportWriteAttempts; attempt++)
@@ -114,16 +127,18 @@ public class UserTaskService(
 
     private async Task<UserTaskDto?> TryMergeProfileImportTaskAsync(
         UserTask existingTask,
-        CreateProfileImportTaskDto dto,
+        CreateProfileImportTaskBatchDto dto,
         CancellationToken ct)
     {
         List<Guid> relatedPrinterIds = ParseRelatedEntityIds(existingTask.RelatedEntityIdsJson);
-        if (relatedPrinterIds.Contains(dto.PrinterId))
+        HashSet<Guid> seen = relatedPrinterIds.ToHashSet();
+        List<Guid> additionalPrinterIds = dto.PrinterIds.Where(seen.Add).ToList();
+        if (additionalPrinterIds.Count == 0)
         {
             return MapToDto(existingTask);
         }
 
-        relatedPrinterIds.Add(dto.PrinterId);
+        relatedPrinterIds.AddRange(additionalPrinterIds);
         existingTask.RelatedEntityIdsJson = JsonSerializer.Serialize(relatedPrinterIds);
         int count = relatedPrinterIds.Count;
         existingTask.Description = $"{count} printer{(count == 1 ? string.Empty : "s")} waiting for slicer profiles";
@@ -155,7 +170,7 @@ public class UserTaskService(
     }
 
     private async Task<UserTaskDto?> TryInsertProfileImportTaskAsync(
-        CreateProfileImportTaskDto dto,
+        CreateProfileImportTaskBatchDto dto,
         UserTask? recoverySource,
         CancellationToken ct)
     {
@@ -448,7 +463,7 @@ public class UserTaskService(
         return new ShiftPlanDto(groups, DateTime.UtcNow);
     }
 
-    private static UserTask CreateProfileImportTask(CreateProfileImportTaskDto dto)
+    private static UserTask CreateProfileImportTask(CreateProfileImportTaskBatchDto dto)
     {
         DateTime now = DateTime.UtcNow;
         return new UserTask
@@ -458,7 +473,7 @@ public class UserTaskService(
             EntityType = ProfileImportEntityType,
             EntityId = dto.PrinterModelId,
             Title = $"Import slicer profiles for {dto.ManufacturerName} {dto.PrinterModelName}",
-            Description = "1 printer waiting for slicer profiles",
+            Description = $"{dto.PrinterIds.Count} printer{(dto.PrinterIds.Count == 1 ? string.Empty : "s")} waiting for slicer profiles",
             Status = UserTaskStatus.Pending,
             Priority = UserTaskPriority.High,
             CreatedAt = now,
@@ -469,7 +484,7 @@ public class UserTaskService(
                 manufacturerName = dto.ManufacturerName,
                 printerModelName = dto.PrinterModelName
             }),
-            RelatedEntityIdsJson = JsonSerializer.Serialize(new List<Guid> { dto.PrinterId })
+            RelatedEntityIdsJson = JsonSerializer.Serialize(dto.PrinterIds)
         };
     }
 

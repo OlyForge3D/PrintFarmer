@@ -10,16 +10,30 @@ gh issue view <number>
 
 For more information, see GitHub CLI documentation: https://cli.github.com/manual/gh_issue
 
+## Native Design Authority
+
+For native UI work, use [PRODUCT.md](PRODUCT.md) and [DESIGN.md](DESIGN.md)
+with the SwiftUI source as the platform-specific product and design authority.
+The design document captures incumbent components rather than authorizing a
+redesign. Follow the UI shape and review ceremony in
+[`../.squad/ceremonies.md`](../.squad/ceremonies.md) and
+[`../.squad/ralph-instructions.md`](../.squad/ralph-instructions.md).
+Source-only review does not replace simulator, accessibility or device evidence.
+
 ## Simulator Testing
 
 Use the shared resolver, not a name-only destination. The approved default is
 **iOS 26.5 (23F77)** under **Xcode 26.6 build 17F113**; runtime preferences
 cannot approve another build. Install that runtime in Xcode Settings >
 Components and create a matching available simulator in Window > Devices and
-Simulators. The shared resolver rejects other Xcode versions and builds. Xcode
-26.6 build 17F113, `xcrun`, and
-Python 3 are required. `GITHUB_ENV` is optional; `--udid` emits only the local
-destination on stdout and diagnostics on stderr.
+Simulators. The default resolver mode rejects other Xcode versions and builds. Xcode
+26.6 build 17F113 is unsupported on macOS 27 or later; use macOS 26.2-26.x
+for pinned test evidence. The resolver checks this before simulator discovery.
+For explicitly local exploration on macOS 27, see the separate
+[Xcode 27.2 workflow](README.md#local-exploration-on-macos-27); it cannot
+replace CI, release, or snapshot-acceptance evidence. `xcrun` and Python 3 are
+required. `GITHUB_ENV` is optional; `--udid` emits only the local destination
+on stdout and diagnostics on stderr.
 
 From the repository root, run the focused snapshot class with retained evidence:
 
@@ -31,11 +45,11 @@ cd mobile
   run_dir="$(mktemp -d "$PWD/build/snapshots.XXXXXX")"
   xcodebuild -version | tee "$run_dir/xcode.log"
   git rev-parse HEAD | tee "$run_dir/commit.log"
-  xcrun simctl list runtimes -j > "$run_dir/runtimes.json"
-  xcrun simctl list devices available -j > "$run_dir/devices.json"
   simulator_udid="$(../scripts/ci/resolve-ios-simulator.sh --udid 2>"$run_dir/destination.log")" ||
     { cat "$run_dir/destination.log" >&2; exit 1; }
   cat "$run_dir/destination.log"
+  xcrun simctl list runtimes -j > "$run_dir/runtimes.json"
+  xcrun simctl list devices available -j > "$run_dir/devices.json"
   python3 scripts/run-tests.py -- test -project PrintFarmer.xcodeproj -scheme PrintFarmer \
     -destination "platform=iOS Simulator,id=$simulator_udid" \
     -only-testing:PrintFarmerTests/PrinterDetailControlsSnapshotTests \
@@ -50,6 +64,12 @@ For all unit tests use `-only-testing:PrintFarmerTests`; select
 `PrintFarmerUITests/<Suite>` explicitly for XCUI. Run the same snapshot command
 with `export IOS_SIMULATOR_DEVICE_FAMILY=iPad` inside the subshell for separate
 iPad-host evidence; never reuse iPhone results as iPad certification.
+
+PR CI preserves the full iPhone unit suite and adds a focused
+`Filament accessibility (iPad)` unit leg using the same approved toolchain.
+Its `ios-filament-ipad-results` artifact retains the result bundle, runner logs,
+events/timing and ten AX1–AX5 card attachments at 320/700pt with destination
+metadata. The eight XCUI shards run after both unit legs succeed.
 
 For environmental drift, compare identical test/reference blobs with the same
 pinned Xcode, runtime/build, host family, scale and locale. Not every failure is
@@ -66,6 +86,12 @@ in the unit CI job. Retain the sibling `.events.jsonl` and `.timing.json` along 
 the `.xcresult` and text log. A forced stop returns 124 and may leave a partial
 bundle; the log/event stream remain usable. See the
 [timeout policy](docs/xcui-timeout-diagnosis.md#runner-finalization-policy-2583).
+For each `xcodebuild` child process, the runner appends
+`safe.bareRepository=all` to that process's Git-config environment. SwiftPM
+resolves packages from bare Git repository caches, which Git otherwise rejects
+when the caller's `safe.bareRepository` setting is `explicit`. Existing
+`GIT_CONFIG_*` entries are preserved, and the runner's own environment is not
+changed.
 
 ## Session Completion
 

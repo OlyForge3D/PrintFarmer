@@ -226,6 +226,35 @@ final class APIClientTests: XCTestCase {
 
     // MARK: - JWT Token Injection
 
+    // MARK: - Remembered scan-code wire contract
+
+    /// The server serializes `ScanCodeAliasLookupState` as PascalCase strings
+    /// (global `JsonStringEnumConverter`, no naming policy). Decode literal
+    /// server payloads through the production client so a casing drift fails.
+    func testCodeAliasLookupDecodesServerPascalCaseStates() async throws {
+        let service = BarcodeIntakeService(apiClient: apiClient)
+
+        mockAPIClient.stubResponse(json: """
+        {"code":"X0022Z40I1","state":"Found","alias":{"id":3,"code":"X0022Z40I1","filamentId":8,\
+        "filament":{"id":8,"name":"Matte Black","material":"PLA"}}}
+        """)
+        let found = try await service.lookupCodeAlias(code: "X0022Z40I1")
+        XCTAssertEqual(found.state, .found)
+        XCTAssertEqual(found.filament?.id, 8)
+
+        mockAPIClient.stubResponse(json: #"{"code":"X0022Z40I1","state":"NotRemembered","alias":null}"#)
+        let missing = try await service.lookupCodeAlias(code: "X0022Z40I1")
+        XCTAssertEqual(missing.state, .notRemembered)
+        XCTAssertNil(missing.filament)
+
+        mockAPIClient.stubResponse(json: """
+        {"code":"X0022Z40I1","state":"FilamentMissing","alias":{"id":3,"code":"X0022Z40I1","filamentId":99,"filament":null}}
+        """)
+        let deleted = try await service.lookupCodeAlias(code: "X0022Z40I1")
+        XCTAssertEqual(deleted.state, .filamentMissing)
+        XCTAssertNil(deleted.filament)
+    }
+
     func testRequestIncludesAuthorizationHeader() async throws {
         let token = "test-jwt-token-123"
         await apiClient.setAuthenticatedSession(
@@ -560,6 +589,26 @@ final class APIClientTests: XCTestCase {
                 XCTAssertEqual(code, 500)
             } else {
                 XCTFail("Expected .serverError, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
+    func testServiceUnavailableResponsePreservesServerMessage() async {
+        let message = "The connected Spoolman server does not support NFC tag APIs."
+        mockAPIClient.stubResponse(json: #"{"message":"The connected Spoolman server does not support NFC tag APIs."}"#, statusCode: 503)
+
+        do {
+            let _: [Printer] = try await apiClient.get("/api/spoolman/tags/scan")
+            XCTFail("Expected NetworkError.serverErrorMessage")
+        } catch let error as NetworkError {
+            if case .serverErrorMessage(let code, let actualMessage) = error {
+                XCTAssertEqual(code, 503)
+                XCTAssertEqual(actualMessage, message)
+                XCTAssertEqual(error.localizedDescription, message)
+            } else {
+                XCTFail("Expected .serverErrorMessage, got \(error)")
             }
         } catch {
             XCTFail("Unexpected error type: \(error)")
@@ -1121,20 +1170,22 @@ final class APIClientTests: XCTestCase {
         let session = MockURLProtocol.makeSession()
         let url = URL(string: "https://mock.invalid/cancel")!
 
-        let entryLatch = DispatchSemaphore(value: 0)
-        let releaseLatch = DispatchSemaphore(value: 0)
-        let stopLatch = DispatchSemaphore(value: 0)
+        let entryBarrier = AsyncBarrier()
+        let releaseHandler = DispatchSemaphore(value: 0)
+        let stopBarrier = AsyncBarrier()
         let completions = CompletionLog()
-        let barrierTimeout: DispatchTime = .now() + .seconds(10)
+        defer {
+            entryBarrier.close()
+            stopBarrier.close()
+            completions.close()
+        }
 
-        session.onStopLoading = { stopLatch.signal() }
+        session.onStopLoading = { stopBarrier.signal() }
         session.onCompletion = { delivered in completions.record(delivered: delivered) }
 
         session.requestHandler = { request in
-            entryLatch.signal()
-            if releaseLatch.wait(timeout: barrierTimeout) == .timedOut {
-                throw URLError(.timedOut)
-            }
+            entryBarrier.signal()
+            releaseHandler.wait()
             return (TestData.httpResponse(url: request.url, statusCode: 200), Data("late".utf8))
         }
 
@@ -1142,25 +1193,15 @@ final class APIClientTests: XCTestCase {
             try await session.urlSession.data(from: url).0
         }
 
-        // Handler is provably parked inside startLoading.
-        let entered: Bool = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                cont.resume(returning: entryLatch.wait(timeout: barrierTimeout) != .timedOut)
-            }
-        }
-        XCTAssertTrue(entered, "Handler must enter startLoading before cancellation.")
+        // The handler has entered startLoading and cannot return before release.
+        await entryBarrier.waitUntilArrived()
 
-        // Cancel while the handler is parked, then wait until stopLoading fences.
+        // Cancel while the handler is inside startLoading, then wait for the fence.
         task.cancel()
-        let fenced: Bool = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                cont.resume(returning: stopLatch.wait(timeout: barrierTimeout) != .timedOut)
-            }
-        }
-        XCTAssertTrue(fenced, "stopLoading() must fence the load after cancellation.")
+        await stopBarrier.waitUntilArrived()
 
-        // Release the parked handler; its terminal callback must be suppressed.
-        releaseLatch.signal()
+        // Release the handler; its terminal callback must be suppressed.
+        releaseHandler.signal()
 
         do {
             let data = try await task.value
@@ -1170,12 +1211,7 @@ final class APIClientTests: XCTestCase {
         }
 
         // The handler's terminal callback must reach the fence and be suppressed.
-        let sawTerminal: Bool = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                cont.resume(returning: completions.terminalLatch.wait(timeout: barrierTimeout) != .timedOut)
-            }
-        }
-        XCTAssertTrue(sawTerminal, "The handler's terminal callback must reach the lifecycle fence.")
+        await completions.waitUntilTerminal()
         XCTAssertEqual(completions.deliveredCount(), 0, "stopLoading() must suppress the terminal callback after cancellation.")
         XCTAssertEqual(completions.suppressedCount(), 1, "Exactly one terminal callback must be fenced/suppressed.")
         XCTAssertEqual(session.capturedRequests.count, 1)
@@ -1228,19 +1264,27 @@ private final class OrderedEventLog: @unchecked Sendable {
 }
 
 /// Records the delivered/suppressed outcome of each terminal `MockURLProtocol`
-/// callback via the session's `onCompletion` seam. `terminalLatch` lets a test
-/// causally await the fenced terminal decision with a fail-fast timeout.
+/// callback via the session's `onCompletion` seam. `terminalBarrier` lets a test
+/// causally await the fenced terminal decision without wall-clock timing.
 private final class CompletionLog: @unchecked Sendable {
     private let lock = NSLock()
     private var delivered = 0
     private var suppressed = 0
-    let terminalLatch = DispatchSemaphore(value: 0)
+    private let terminalBarrier = AsyncBarrier()
 
     func record(delivered isDelivered: Bool) {
         lock.lock()
         if isDelivered { delivered += 1 } else { suppressed += 1 }
         lock.unlock()
-        terminalLatch.signal()
+        terminalBarrier.signal()
+    }
+
+    func waitUntilTerminal() async {
+        await terminalBarrier.waitUntilArrived()
+    }
+
+    func close() {
+        terminalBarrier.close()
     }
 
     func deliveredCount() -> Int {

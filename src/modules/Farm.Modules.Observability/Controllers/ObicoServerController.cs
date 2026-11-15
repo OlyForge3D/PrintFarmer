@@ -1,10 +1,8 @@
-﻿using System.Net;
-using System.Text.Json;
+﻿using System.Data;
 using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
-using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.FailureDetection;
 using Microsoft.AspNetCore.Authorization;
@@ -24,23 +22,17 @@ namespace Farm.Modules.Observability.Controllers;
 [RequirePermission(PrintFarmerPermissions.Integrations.ManageObico)]
 public class ObicoServerController : ControllerBase
 {
-    private const string UpstreamHealthProbeSnapshotUrl = "http://printfarmer.local/obico-health-probe.jpg";
-    private const string VettedEgressClientName = "VettedEgress";
-
     private readonly AppDbContext _dbContext;
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IEgressGuard _egressGuard;
+    private readonly IObicoConnectivityProbe _connectivityProbe;
     private readonly ILogger<ObicoServerController> _logger;
 
     public ObicoServerController(
         AppDbContext dbContext,
-        IHttpClientFactory httpClientFactory,
-        IEgressGuard egressGuard,
+        IObicoConnectivityProbe connectivityProbe,
         ILogger<ObicoServerController> logger)
     {
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-        _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-        _egressGuard = egressGuard ?? throw new ArgumentNullException(nameof(egressGuard));
+        _connectivityProbe = connectivityProbe ?? throw new ArgumentNullException(nameof(connectivityProbe));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -55,7 +47,13 @@ public class ObicoServerController : ControllerBase
             .OrderBy(s => s.Name)
             .ToListAsync(ct);
 
-        return Ok(servers.Select(ToDto).ToList());
+        Dictionary<Guid, int> activeCounts = await _dbContext.PrinterServiceStates
+            .Where(state => state.ObicoServerId != null)
+            .GroupBy(state => state.ObicoServerId!.Value)
+            .Select(group => new { ServerId = group.Key, Count = group.Count() })
+            .ToDictionaryAsync(group => group.ServerId, group => group.Count, ct);
+
+        return Ok(servers.Select(server => ToDto(server, activeCounts.GetValueOrDefault(server.Id))).ToList());
     }
 
     /// <summary>
@@ -72,7 +70,7 @@ public class ObicoServerController : ControllerBase
             return NotFound($"Obico server with ID {id} not found");
         }
 
-        return Ok(ToDto(server));
+        return Ok(ToDto(server, await CountActivePrintsAsync(id, ct)));
     }
 
     /// <summary>
@@ -86,6 +84,11 @@ public class ObicoServerController : ControllerBase
         if (!ModelState.IsValid)
         {
             return BadRequest(ModelState);
+        }
+
+        if (dto.MaxConcurrentAnalyses is <= 0)
+        {
+            return BadRequest("Concurrent print capacity must be greater than zero.");
         }
 
         // Validate URL format
@@ -146,6 +149,11 @@ public class ObicoServerController : ControllerBase
         if (!ModelState.IsValid)
         {
             return BadRequest(ModelState);
+        }
+
+        if (dto.MaxConcurrentAnalyses is <= 0)
+        {
+            return BadRequest("Concurrent print capacity must be greater than zero.");
         }
 
         ObicoServer? server = await _dbContext.ObicoServers.FindAsync([id], ct);
@@ -239,7 +247,7 @@ public class ObicoServerController : ControllerBase
             "[ObicoServer] Updated Obico server: {ServerId} ({ServerName})",
             server.Id, LogSanitizer.Sanitize(server.Name));
 
-        return Ok(ToDto(server));
+        return Ok(ToDto(server, await CountActivePrintsAsync(id, ct)));
     }
 
     /// <summary>
@@ -251,31 +259,38 @@ public class ObicoServerController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteServerAsync(Guid id, CancellationToken ct)
     {
-        ObicoServer? server = await _dbContext.ObicoServers
-            .Include(s => s.PrinterServiceStates)
-            .FirstOrDefaultAsync(s => s.Id == id, ct);
-
-        if (server == null)
+        return await _dbContext.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
-            return NotFound($"Obico server with ID {id} not found");
-        }
+            // Allocation uses the same isolation: no print may acquire a slot between
+            // this capacity check and deletion of the server's cascading references.
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            ObicoServer? server = await _dbContext.ObicoServers
+                .FirstOrDefaultAsync(s => s.Id == id, ct);
 
-        // Check if any printers are assigned to this server
-        if (server.PrinterServiceStates.Count > 0)
-        {
-            return BadRequest(
-                $"Cannot delete Obico server '{server.Name}' because {server.PrinterServiceStates.Count} printer(s) are assigned to it. " +
-                "Please reassign or remove the printers first.");
-        }
+            if (server == null)
+            {
+                return (IActionResult)NotFound($"Obico server with ID {id} not found");
+            }
 
-        _dbContext.ObicoServers.Remove(server);
-        await _dbContext.SaveChangesAsync(ct);
+            int activePrints = await CountActivePrintsAsync(id, ct);
+            if (activePrints > 0)
+            {
+                return BadRequest(
+                    $"Cannot delete Obico server '{server.Name}' because {activePrints} held print reservation(s) use it. " +
+                    "Let active prints finish, restore printer connectivity to confirm inactivity, or explicitly opt out of monitoring. " +
+                    "The next monitoring scan releases confirmed inactive or opted-out reservations.");
+            }
 
-        _logger.LogInformation(
-            "[ObicoServer] Deleted Obico server: {ServerId} ({ServerName})",
-            server.Id, LogSanitizer.Sanitize(server.Name));
+            _dbContext.ObicoServers.Remove(server);
+            await _dbContext.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
 
-        return NoContent();
+            _logger.LogInformation(
+                "[ObicoServer] Deleted Obico server: {ServerId} ({ServerName})",
+                server.Id, LogSanitizer.Sanitize(server.Name));
+
+            return NoContent();
+        });
     }
 
     /// <summary>
@@ -310,188 +325,20 @@ public class ObicoServerController : ControllerBase
     /// </summary>
     private async Task<ObicoServerHealthDto> ValidateServerConnectivityAsync(ObicoServer server, CancellationToken ct)
     {
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        List<string> errors = [];
-
-        try
-        {
-            EgressCheckResult egressCheck = await _egressGuard.CheckAsync(server.Url, ct);
-            if (!egressCheck.IsAllowed)
-            {
-                errors.Add(egressCheck.DenyReason ?? "Configured server URL is not allowed");
-                stopwatch.Stop();
-                return new ObicoServerHealthDto
-                {
-                    Healthy = false,
-                    LatencyMs = stopwatch.ElapsedMilliseconds,
-                    ErrorMessage = string.Join("; ", errors)
-                };
-            }
-
-            using HttpClient httpClient = _httpClientFactory.CreateClient(VettedEgressClientName);
-            httpClient.Timeout = TimeSpan.FromSeconds(10);
-
-            // Reuse the exact address the egress guard just vetted rather than letting the
-            // outbound connection re-resolve the hostname independently — otherwise a
-            // DNS-rebinding attacker could swap the record between the check above and this
-            // connection. The original hostname is preserved via the Host header for
-            // virtual-hosting/TLS SNI correctness.
-            if (egressCheck.ResolvedAddress is not null && egressCheck.Uri is not null)
-            {
-                Uri pinnedUri = EgressGuard.CreatePinnedUri(egressCheck.Uri, egressCheck.ResolvedAddress);
-                httpClient.BaseAddress = new Uri(pinnedUri.ToString().TrimEnd('/') + "/");
-                httpClient.DefaultRequestHeaders.Host = egressCheck.Uri.IsDefaultPort
-                    ? egressCheck.Uri.Host
-                    : $"{egressCheck.Uri.Host}:{egressCheck.Uri.Port}";
-            }
-            else
-            {
-                httpClient.BaseAddress = new Uri(server.Url.TrimEnd('/') + "/");
-            }
-
-            if (!string.IsNullOrWhiteSpace(server.ApiKey))
-            {
-                httpClient.DefaultRequestHeaders.Authorization =
-                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", server.ApiKey);
-            }
-
-            (bool validated, string? upstreamError) = await TryValidateUpstreamPredictionEndpointAsync(httpClient, ct);
-            if (!validated)
-            {
-                string? legacyError = await TryValidateLegacyPredictionEndpointAsync(httpClient, ct);
-                if (!string.IsNullOrWhiteSpace(legacyError))
-                {
-                    errors.Add(legacyError);
-                }
-            }
-            else if (!string.IsNullOrWhiteSpace(upstreamError))
-            {
-                errors.Add(upstreamError);
-            }
-        }
-        catch (UriFormatException)
-        {
-            errors.Add("Configured server URL is invalid");
-        }
-        catch (HttpRequestException)
-        {
-            errors.Add("Connection failed");
-        }
-        catch (TaskCanceledException)
-        {
-            errors.Add("Request timeout — server did not respond within 10 seconds");
-        }
-        catch (Exception)
-        {
-            errors.Add("Unexpected health-check failure");
-        }
-        finally
-        {
-            stopwatch.Stop();
-        }
-
+        ObicoConnectivityResult result = await _connectivityProbe.ProbeAsync(server.Url, server.ApiKey, ct);
         return new ObicoServerHealthDto
         {
-            Healthy = errors.Count == 0,
-            LatencyMs = stopwatch.ElapsedMilliseconds,
-            ErrorMessage = errors.Count > 0 ? string.Join("; ", errors) : null
+            Healthy = result.Healthy,
+            LatencyMs = result.LatencyMs,
+            ErrorMessage = result.ErrorMessage
         };
     }
 
-    /// <summary>
-    /// Probes the upstream self-hosted contract (`GET /p/`) and validates the `detections` payload shape.
-    /// </summary>
-    private async Task<(bool validated, string? error)> TryValidateUpstreamPredictionEndpointAsync(HttpClient httpClient, CancellationToken ct)
-    {
-        try
-        {
-            string requestPath = $"p/?img={Uri.EscapeDataString(UpstreamHealthProbeSnapshotUrl)}";
-            HttpResponseMessage response = await httpClient.GetAsync(requestPath, ct);
-            string responseBody = await response.Content.ReadAsStringAsync(ct);
+    private Task<int> CountActivePrintsAsync(Guid serverId, CancellationToken ct) =>
+        _dbContext.PrinterServiceStates.CountAsync(
+            state => state.ObicoServerId == serverId, ct);
 
-            if (!response.IsSuccessStatusCode)
-            {
-                if (ObicoSnapshotFallbackDetector.ShouldFallbackToLegacyUpload(response.StatusCode) ||
-                    ObicoSnapshotFallbackDetector.ShouldFallbackBecauseSnapshotWasUnreachable(response.StatusCode, responseBody))
-                {
-                    return (false, null);
-                }
-
-                return (true, $"Prediction endpoint /p/ returned HTTP {(int)response.StatusCode}");
-            }
-
-            if (HasDetectionsArray(responseBody))
-            {
-                return (true, null);
-            }
-
-            return (false, null);
-        }
-        catch (HttpRequestException)
-        {
-            return (true, "Cannot reach prediction endpoint /p/");
-        }
-    }
-
-    /// <summary>
-    /// Preserves compatibility with older multipart upload contracts when the upstream GET contract is unavailable.
-    /// </summary>
-    private static async Task<string?> TryValidateLegacyPredictionEndpointAsync(HttpClient httpClient, CancellationToken ct)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Post, "p/")
-        {
-            Content = new StringContent(string.Empty)
-        };
-        using HttpResponseMessage response = await httpClient.SendAsync(request, ct);
-
-        bool endpointReachable = response.IsSuccessStatusCode ||
-            response.StatusCode == HttpStatusCode.BadRequest ||
-            response.StatusCode == HttpStatusCode.UnsupportedMediaType;
-
-        return endpointReachable
-            ? null
-            : $"Prediction endpoint /p/ returned HTTP {(int)response.StatusCode}";
-    }
-
-    /// <summary>
-    /// Detects the upstream self-hosted response shape without depending on exact property casing.
-    /// </summary>
-    private static bool HasDetectionsArray(string responseBody)
-    {
-        if (string.IsNullOrWhiteSpace(responseBody))
-        {
-            return false;
-        }
-
-        try
-        {
-            using JsonDocument document = JsonDocument.Parse(responseBody);
-            return TryGetPropertyIgnoreCase(document.RootElement, "detections", out JsonElement detectionsElement)
-                && detectionsElement.ValueKind == JsonValueKind.Array;
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Finds a JSON property without requiring exact casing.
-    /// </summary>
-    private static bool TryGetPropertyIgnoreCase(JsonElement element, string propertyName, out JsonElement value)
-    {
-        JsonElement? match = element.ValueKind == JsonValueKind.Object
-            ? element.EnumerateObject()
-                .Where(property => string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
-                .Select(property => (JsonElement?)property.Value)
-                .FirstOrDefault()
-            : null;
-
-        value = match ?? default;
-        return match.HasValue;
-    }
-
-    private static ObicoServerDto ToDto(ObicoServer server)
+    private static ObicoServerDto ToDto(ObicoServer server, int activePrintCount = 0)
     {
         return new ObicoServerDto
         {
@@ -501,6 +348,7 @@ public class ObicoServerController : ControllerBase
             IsEnabled = server.IsEnabled,
             HasApiKey = !string.IsNullOrEmpty(server.ApiKey),
             MaxConcurrentAnalyses = server.MaxConcurrentAnalyses,
+            ActivePrintCount = activePrintCount,
             CreatedAt = server.CreatedAt,
             UpdatedAt = server.UpdatedAt
         };
@@ -526,6 +374,9 @@ public sealed class ObicoServerDto
     public bool HasApiKey { get; init; }
 
     public int MaxConcurrentAnalyses { get; init; }
+
+    /// <summary>Held reservations, including legacy pins awaiting confirmed print activity.</summary>
+    public int ActivePrintCount { get; init; }
 
     public DateTime CreatedAt { get; init; }
 

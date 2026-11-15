@@ -4,14 +4,15 @@ namespace Farm.Backend.Plugin.Moonraker;
 
 internal static class MoonrakerOnlineStatusClassifier
 {
-    public static bool? ResolveKlippyReady(JsonElement statusObj)
+    public static bool? ResolveKlippyReady(JsonElement statusObj, bool? previousReady = null)
     {
         if (TryGetWebhooksState(statusObj, out string? webhooksState))
         {
             return string.Equals(webhooksState, "ready", StringComparison.OrdinalIgnoreCase);
         }
 
-        return HasPrinterObjectStatus(statusObj) ? true : null;
+        // Incremental object updates do not prove recovery after an explicit shutdown.
+        return HasPrinterObjectStatus(statusObj) && previousReady != false ? true : null;
     }
 
     private static bool TryGetWebhooksState(JsonElement statusObj, out string? webhooksState)

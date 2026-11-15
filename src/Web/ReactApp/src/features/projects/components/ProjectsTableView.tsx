@@ -4,6 +4,8 @@ import { Button } from '@/common/components/ui/Button';
 import { ProgressBar } from '@/common/components/ui/ProgressBar';
 import { DeleteIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
 import type { PrintProjectListDto } from '@/types/api';
+import { TableHeaderCell } from '@/common/components/ui/Table';
+import { useTableSort } from '@/common/hooks/useTableSort';
 
 // Status badge color mapping — use string keys to avoid TDZ in production builds
 const statusVariantMap: Record<string, 'default' | 'primary' | 'success' | 'warning' | 'error'> = {
@@ -37,24 +39,35 @@ export const ProjectsTableView: React.FC<ProjectsTableViewProps> = ({
   onProjectClick,
   onDelete,
 }) => {
+  const { headerProps, sortDataByValues } = useTableSort<'name' | 'status' | 'progress' | 'files' | 'prints' | 'cost' | 'due' | 'created'>();
+  const sortedProjects = sortDataByValues(projects, {
+    name: project => project.name,
+    status: project => statusLabelMap[project.status],
+    progress: project => project.progressPercent,
+    files: project => project.totalFiles,
+    prints: project => project.totalPrints,
+    cost: project => project.estimatedTotalCost != null && project.estimatedTotalCost > 0 ? project.estimatedTotalCost : null,
+    due: project => project.dueDate ? new Date(project.dueDate).getTime() : null,
+    created: project => new Date(project.createdAt).getTime(),
+  });
   return (
     <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-x-auto flex-1">
       <table className="w-full text-sm" role="table" aria-label="Projects list">
         <thead>
           <tr className="border-b border-pf-border bg-pf-bg-2 sticky top-0">
-            <th scope="col" className="px-4 py-3 text-left font-semibold text-pf-text-primary">Name</th>
-            <th scope="col" className="px-4 py-3 text-left font-semibold text-pf-text-primary">Status</th>
-            <th scope="col" className="px-4 py-3 text-left font-semibold text-pf-text-primary">Progress</th>
-            <th scope="col" className="px-4 py-3 text-center font-semibold text-pf-text-primary">Files</th>
-            <th scope="col" className="px-4 py-3 text-center font-semibold text-pf-text-primary">Prints</th>
-            <th scope="col" className="px-4 py-3 text-right font-semibold text-pf-text-primary">Est. Cost</th>
-            <th scope="col" className="px-4 py-3 text-left font-semibold text-pf-text-primary">Due Date</th>
-            <th scope="col" className="px-4 py-3 text-left font-semibold text-pf-text-primary">Created</th>
+            <TableHeaderCell {...headerProps('name')} className="px-4 py-3 text-left font-semibold text-pf-text-primary">Name</TableHeaderCell>
+            <TableHeaderCell {...headerProps('status')} className="px-4 py-3 text-left font-semibold text-pf-text-primary">Status</TableHeaderCell>
+            <TableHeaderCell {...headerProps('progress')} className="px-4 py-3 text-left font-semibold text-pf-text-primary">Progress</TableHeaderCell>
+            <TableHeaderCell {...headerProps('files')} className="px-4 py-3 text-center font-semibold text-pf-text-primary">Files</TableHeaderCell>
+            <TableHeaderCell {...headerProps('prints')} className="px-4 py-3 text-center font-semibold text-pf-text-primary">Prints</TableHeaderCell>
+            <TableHeaderCell {...headerProps('cost')} className="px-4 py-3 text-right font-semibold text-pf-text-primary">Est. Cost</TableHeaderCell>
+            <TableHeaderCell {...headerProps('due')} className="px-4 py-3 text-left font-semibold text-pf-text-primary">Due Date</TableHeaderCell>
+            <TableHeaderCell {...headerProps('created')} className="px-4 py-3 text-left font-semibold text-pf-text-primary">Created</TableHeaderCell>
             <th scope="col" className="px-4 py-3 w-16"><span className="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-pf-border">
-          {projects.map((project) => (
+          {sortedProjects.map((project) => (
             <tr
               key={project.id}
               onClick={() => onProjectClick(project)}

@@ -1,4 +1,5 @@
 ﻿using System.Security.Claims;
+using Farm.Infrastructure.Contracts.FileManagement;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services;
 using Farm.Slicer.Module.Api.Filters;
@@ -199,6 +200,31 @@ public class Model3DFilesController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to list 3D models");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to list models");
+        }
+    }
+
+    /// <summary>
+    /// Lists the fields needed to select a 3D model for slicing.
+    /// </summary>
+    /// <param name="ct">Cancellation token for the request.</param>
+    [HttpGet("picker")]
+    [Authorize(Policy = "LibrarySync")]
+    [ProducesResponseType(typeof(IReadOnlyList<Model3DPickerDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListPickerModelsAsync(CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<Model3DPickerDto> models = await _modelService.ListPickerModelsAsync(ct);
+            return Ok(models);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to list 3D model picker entries");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to list models");
         }
     }
@@ -453,35 +479,26 @@ public class Model3DFilesController(
     /// Bulk deletes multiple 3D models by their IDs.
     /// </summary>
     /// <param name="request">Request containing model IDs to delete.</param>
+    /// <returns>
+    /// Removed, not-removed, and distinct requested counts plus one typed outcome per distinct ID.
+    /// Per-item failures are reported in <c>results</c> with HTTP 200.
+    /// </returns>
     [HttpDelete]
     [RequirePermission("slicer_engines:admin")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(DeleteModelsResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult> DeleteModelsAsync([FromBody] DeleteModelsRequest request)
+    public async Task<ActionResult<DeleteModelsResponse>> DeleteModelsAsync([FromBody] DeleteModelsRequest request)
     {
         if (request?.Ids is null || request.Ids.Count == 0)
         {
             return BadRequest("At least one model ID is required");
         }
 
-        int deleted = 0;
-        int errors = 0;
-
-        foreach (Guid id in request.Ids)
-        {
-            try
-            {
-                await _modelService.DeleteModelAsync(id, CancellationToken.None);
-                deleted++;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to delete model {Id} during bulk delete", id);
-                errors++;
-            }
-        }
-
-        return Ok(new { deleted, errors, total = request.Ids.Count });
+        // CancellationToken.None, as for single deletes: stored files are removed before each record, so
+        // abandoning the loop on client disconnect must not leave a half-processed item unreported.
+        IReadOnlyList<BulkDeleteItemResult> results = await _modelService.DeleteModelsAsync(request.Ids, CancellationToken.None);
+        int deleted = results.Count(r => r.RecordRemoved);
+        return Ok(new DeleteModelsResponse(deleted, results.Count - deleted, results.Count, results));
     }
 
     /// <summary>

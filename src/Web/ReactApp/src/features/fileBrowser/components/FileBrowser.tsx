@@ -1,9 +1,12 @@
-import { useImperativeHandle, ReactNode, type Ref } from 'react';
+import { useId, useImperativeHandle, useState, ReactNode, type Ref } from 'react';
 import { FileBrowserToolbar } from './FileBrowserToolbar';
 import { GridView } from './GridView';
 import { ExplorerView } from './ExplorerView';
 import { useFileBrowser } from '../useFileBrowser';
-import { type ColumnDef, type FileItem, type UseFileBrowserConfig, type ViewMode } from '../types';
+import { Button, ToolbarField } from '@/common/components/ui';
+import { getErrorMessage } from '@/common/utils/apiErrors';
+import { FolderIcon } from '@/common/components/icons/MdiIcons';
+import { type ColumnDef, type FileBrowserFilterActions, type FileItem, type UseFileBrowserConfig, type ViewMode } from '../types';
 
 interface FileBrowserProps<TDomain> {
   config: UseFileBrowserConfig<TDomain>;
@@ -12,8 +15,14 @@ interface FileBrowserProps<TDomain> {
   renderItemActions?: (file: FileItem) => ReactNode;
   renderMetadata?: (file: FileItem) => ReactNode;
   renderCard?: (file: FileItem, isSelected: boolean, onToggle: () => void) => ReactNode;
-  filterActions?: ReactNode;
+  filterActions?: FileBrowserFilterActions;
   extraToolbarActions?: ReactNode;
+  /** Place selected-file actions after the filter toolbar instead of inside it. */
+  extraToolbarActionsPlacement?: 'toolbar' | 'below';
+  toolbarClassName?: string;
+  renderFolderNavigation?: (
+    path: string, onNavigate: (path: string) => void, controls: { id: string; expanded: boolean },
+  ) => ReactNode;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
   /** Opt-in dense presentation: auto-fill grid of small cards and a 12px table. */
@@ -38,12 +47,17 @@ export function FileBrowser<TDomain>({
     renderCard,
     filterActions,
     extraToolbarActions,
+    extraToolbarActionsPlacement = 'toolbar',
+    toolbarClassName,
+    renderFolderNavigation,
     viewMode,
     onViewModeChange,
     compact = false,
     ref,
   }: FileBrowserProps<TDomain>) {
     const browser = useFileBrowser({ ...config, viewMode, onViewModeChange });
+    const folderControlsId = useId();
+    const [foldersExpanded, setFoldersExpanded] = useState(false);
 
     useImperativeHandle(ref, () => ({
       refetch: browser.refetch,
@@ -59,18 +73,49 @@ export function FileBrowser<TDomain>({
         aria-busy={isBusy}
       >
         <FileBrowserToolbar
+          className={toolbarClassName}
           search={browser.search}
           onSearchChange={browser.setSearch}
           sortBy={browser.sortBy}
           sortOrder={browser.sortOrder}
           sortOptions={sortOptions}
+          hideSortControl={browser.viewMode === 'explorer' && sortOptions.every(option =>
+            columns.some(column => column.sortable && (column.sortKey ?? column.key) === option.value))}
           onSortChange={(value) => browser.setSort(value)}
           onToggleSortOrder={() => browser.setSort(browser.sortBy)}
           viewMode={browser.viewMode}
           onViewModeChange={browser.setViewMode}
           filterActions={filterActions}
-          extraActions={extraToolbarActions}
+          folderActions={renderFolderNavigation ? (
+            <ToolbarField label="Folders" htmlFor={`${folderControlsId}-toggle`}>
+              <Button id={`${folderControlsId}-toggle`} control
+                variant={browser.currentPath ? 'primary' : 'secondary'}
+                className="pf-control--icon" aria-label="Folders"
+                iconCenter={<span aria-hidden="true"><FolderIcon className="h-4 w-4" /></span>}
+                aria-expanded={foldersExpanded} aria-controls={folderControlsId}
+                onClick={() => setFoldersExpanded(expanded => !expanded)}
+                title={`Folders: ${browser.currentPath === '/' ? 'Root' : browser.currentPath || 'All folders'}`}
+              />
+            </ToolbarField>
+          ) : undefined}
+          extraActions={extraToolbarActionsPlacement === 'toolbar' ? extraToolbarActions : undefined}
         />
+        {extraToolbarActionsPlacement === 'below' && extraToolbarActions && (
+          <div role="group" aria-label="Selected file actions" className="pf-inline-form">
+            {extraToolbarActions}
+          </div>
+        )}
+
+        {renderFolderNavigation?.(browser.currentPath, (path) => {
+          browser.clearSelection();
+          browser.navigate(path);
+        }, { id: folderControlsId, expanded: foldersExpanded })}
+        {browser.error && (
+          <div role="alert" className="flex items-center gap-2 text-sm text-pf-error">
+            {getErrorMessage(browser.error, 'Failed to load files')}
+            <Button size="sm" variant="secondary" onClick={() => void browser.refetch()}>Retry files</Button>
+          </div>
+        )}
 
         <div className="sr-only" aria-live="polite">
           {browser.selectedIds.length} item{browser.selectedIds.length === 1 ? '' : 's'} selected
@@ -97,6 +142,7 @@ export function FileBrowser<TDomain>({
           />
         ) : (
           <ExplorerView
+            showFolderNavigation={!renderFolderNavigation}
             folders={browser.folders}
             files={browser.files}
             selectedIds={browser.selectedIds}
@@ -113,7 +159,7 @@ export function FileBrowser<TDomain>({
             renderActions={renderItemActions}
             sortBy={browser.sortBy}
             sortOrder={browser.sortOrder}
-            onSort={(key) => browser.setSort(key)}
+            onSort={browser.cycleSort}
             page={browser.page}
             totalPages={browser.totalPages}
             onPageChange={browser.setPage}

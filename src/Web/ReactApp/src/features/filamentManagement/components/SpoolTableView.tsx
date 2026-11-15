@@ -1,7 +1,7 @@
-import { Button } from '@/common/components/ui';
+import { Button, Table, TableHead, TableBody, TableRow, TableHeaderCell } from '@/common/components/ui';
+import { nextTableSort, type SortDirection } from '@/common/hooks/useTableSort';
 import { Checkbox } from '@/common/components/ui/Checkbox';
-import { ArrowUpIcon, ArrowDownIcon, EditIcon, CopyIcon, DeleteIcon, TagIcon } from '@/common/components/icons/MdiIcons';
-import { SelectableRow } from '@/common/components/Table/SelectableRow';
+import { EditIcon, CopyIcon, DeleteIcon, TagIcon } from '@/common/components/icons/MdiIcons';
 import type { SpoolmanSpoolDto, SpoolTableColumn } from '@/features/filamentManagement/types';
 
 interface SpoolTableViewProps {
@@ -11,7 +11,7 @@ interface SpoolTableViewProps {
   allSelected: boolean;
   sortField: string;
   sortDir: 'asc' | 'desc';
-  onSort: (field: string, dir: 'asc' | 'desc') => void;
+  onSort: (field: string | null, dir: SortDirection) => void;
   onToggleSelect: (id: number) => void;
   onToggleSelectAll: () => void;
   onEdit: (s: SpoolmanSpoolDto) => void;
@@ -39,10 +39,9 @@ export function SpoolTableView({
   const visibleColumns = tableColumns.filter(c => c.visible);
 
   return (
-    <div className="overflow-x-auto relative">
-      <table className="min-w-full text-sm">
-        <thead>
-          <tr className="text-left bg-pf-bg-2">
+      <Table className="text-sm">
+        <TableHead>
+          <tr className="text-left">
             <th className="px-3 py-2 w-10">
               <Checkbox
                 checked={allSelected}
@@ -52,33 +51,28 @@ export function SpoolTableView({
             </th>
             {visibleColumns.map(c => {
               const isSorted = sortField === c.id;
-              const ariaSort: 'ascending' | 'descending' | undefined = isSorted ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined;
               return (
-                <th
+                <TableHeaderCell
                   key={c.id}
                   data-col-id={c.id}
-                  className={`px-3 py-2 font-medium ${c.sortable ? 'cursor-pointer select-none' : ''}`}
-                  onClick={() => {
-                    if (!c.sortable) return;
-                    onSort(c.id, isSorted ? (sortDir === 'asc' ? 'desc' : 'asc') : 'asc');
+                  sortable={c.sortable}
+                  sortKey={c.id}
+                  sortDirection={isSorted ? sortDir : null}
+                  onSort={key => {
+                    const next = nextTableSort({ column: sortField, direction: sortDir }, key);
+                    onSort(next.column, next.direction);
                   }}
-                  {...(ariaSort ? { 'aria-sort': ariaSort } : {})}
                 >
-                  <span className="inline-flex items-center gap-1">
-                    {c.label}
-                    {c.sortable && isSorted && (
-                      sortDir === 'asc' ? <ArrowUpIcon className="h-3 w-3" /> : <ArrowDownIcon className="h-3 w-3" />
-                    )}
-                  </span>
-                </th>
+                  {c.label}
+                </TableHeaderCell>
               );
             })}
             <th className="px-3 py-2 font-medium w-16">Actions</th>
           </tr>
-        </thead>
-        <tbody>
+        </TableHead>
+        <TableBody>
           {spools.map(spool => (
-            <SelectableRow key={spool.id} className="border-t border-pf-border" isSelected={selectedIds.has(spool.id)}>
+            <TableRow key={spool.id} isHoverable isSelected={selectedIds.has(spool.id)}>
               <td className="px-3 py-2">
                 <Checkbox
                   checked={selectedIds.has(spool.id)}
@@ -105,10 +99,9 @@ export function SpoolTableView({
                   </Button>
                 </div>
               </td>
-            </SelectableRow>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
-    </div>
+        </TableBody>
+      </Table>
   );
 }

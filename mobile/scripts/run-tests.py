@@ -232,10 +232,33 @@ def summarize_attempts(tests, retry_failed_tests):
     ]
 
 
+def xcodebuild_environment(environ=None):
+    """Append the SwiftPM bare-repository allowance to xcodebuild's environment."""
+    child_env = (os.environ if environ is None else environ).copy()
+    raw_count = child_env.get("GIT_CONFIG_COUNT", "0")
+    if not raw_count.isascii() or not raw_count.isdigit():
+        raise ValueError(
+            "GIT_CONFIG_COUNT must be a non-negative integer; "
+            f"got {raw_count!r}"
+        )
+    count = int(raw_count)
+    key_name = f"GIT_CONFIG_KEY_{count}"
+    value_name = f"GIT_CONFIG_VALUE_{count}"
+    if key_name in child_env or value_name in child_env:
+        raise ValueError(
+            f"Refusing to overwrite existing {key_name} or {value_name}"
+        )
+    child_env[key_name] = "safe.bareRepository"
+    child_env[value_name] = "all"
+    child_env["GIT_CONFIG_COUNT"] = str(count + 1)
+    return child_env
+
+
 def run_invocation(command, stream_path, timing_path, invocation_timeout,
                    finalization_timeout, flush_seconds, poll_seconds, started,
                    budgets, attempt):
     """Run one xcodebuild process under the caller's shared wall-clock/idle budgets."""
+    child_env = xcodebuild_environment()
     with stream_path.open("x"), timing_path.open("x"):
         pass
     events = TestEvents()
@@ -244,7 +267,7 @@ def run_invocation(command, stream_path, timing_path, invocation_timeout,
     interrupted = None
     process_started = time.monotonic()
     try:
-        process = subprocess.Popen(command, start_new_session=True)
+        process = subprocess.Popen(command, env=child_env, start_new_session=True)
     except OSError as exc:
         error = str(exc)
         events.stream_error = error

@@ -127,10 +127,6 @@ vi.mock('@/features/notifications/pages/NotificationPreferencesPage', () => ({
 vi.mock('@/features/admin/pages/SettingsPage', () => ({
   SettingsPage: () => <div data-testid="legacy-settings-page"><p>body</p></div>,
 }));
-vi.mock('@/features/settings/components/FarmSettingsSection', () => ({
-  FarmSettingsSection: () => <div data-testid="farm-settings-section">Farm Settings</div>,
-}));
-
 // Power Monitors is a standalone admin page, not a shell tab. Only its data
 // layer is faked — it renders its own real PageTemplate, which is what the
 // back-link assertion measures.

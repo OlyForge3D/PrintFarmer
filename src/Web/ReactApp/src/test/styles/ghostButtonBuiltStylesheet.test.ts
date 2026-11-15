@@ -271,6 +271,66 @@ function validateButtonShadowCascade(css: string): string[] {
   return violations;
 }
 
+function validateToolbarCascade(css: string): string[] {
+  const violations: string[] = [];
+  const layerOrder = findLayerOrder(css);
+  const componentsIndex = layerOrder.indexOf('components');
+  const utilitiesIndex = layerOrder.indexOf('utilities');
+  const componentBlocks = findLayerBlocks(css, 'components');
+  const toolbarRules = [...css.matchAll(/\.pf-toolbar\s*\{([^{}]*)\}/g)].map((match) => ({
+    index: match.index,
+    declarations: parseDeclarations(match[1]),
+  }));
+
+  if (componentsIndex < 0 || utilitiesIndex < 0 || componentsIndex >= utilitiesIndex) {
+    violations.push(
+      `expected components before utilities in built layer order; found ${layerOrder.join(', ')}`,
+    );
+  }
+
+  if (toolbarRules.length === 0) {
+    violations.push('expected a built .pf-toolbar layout rule; found none');
+  }
+
+  for (const rule of toolbarRules) {
+    const isInComponents = componentBlocks.some(
+      (block) => rule.index > block.openBrace && rule.index < block.closeBrace,
+    );
+    if (!isInComponents) {
+      violations.push(
+        `.pf-toolbar layout rule at built stylesheet offset ${rule.index} is outside @layer components`,
+      );
+    }
+
+    for (const [property, value] of [
+      ['flex-wrap', 'wrap'],
+      ['margin-block-end', '1rem'],
+      ['inline-size', '100%'],
+      ['container-type', 'inline-size'],
+    ]) {
+      if (rule.declarations.get(property) !== value) {
+        violations.push(
+          `.pf-toolbar layout rule must declare ${property}:${value}; found ${rule.declarations.get(property) ?? 'nothing'}`,
+        );
+      }
+    }
+  }
+
+  if (!/\.mb-0\s*\{/.test(css)) {
+    violations.push('expected the built .mb-0 utility to override toolbar margins');
+  }
+
+  const broadControlSelector =
+    /\.pf-(?:toolbar|header-actions|inline-form)(?![-\w])[^{}]*?(?:\s+|[>+~])(?::is\(\s*)?(?:button|input|select)\b[^{}]*\{/g;
+  for (const match of css.matchAll(broadControlSelector)) {
+    violations.push(
+      `toolbar wrapper unexpectedly styles descendant controls: ${match[0].slice(0, 120)}`,
+    );
+  }
+
+  return violations;
+}
+
 async function buildIndexStylesheet(outDir: string): Promise<string> {
   const execFileAsync = promisify(execFile);
   await execFileAsync(process.execPath, [
@@ -381,6 +441,33 @@ describe('built stylesheet ghost cascade (#1122)', () => {
 
     expect(
       violations.some((violation) => violation.includes('outside @layer components')),
+      violations.join('\n'),
+    ).toBe(true);
+  });
+
+  it('keeps toolbar layout defaults below utilities and preserves margin utilities', () => {
+    const violations = validateToolbarCascade(builtCss);
+    expect(violations, violations.join('\n')).toEqual([]);
+  });
+
+  it('detects unlayered toolbar layout defaults', () => {
+    const leakedRule = '.pf-toolbar{margin-block-end:1rem}';
+    const violations = validateToolbarCascade(`${builtCss}${leakedRule}`);
+
+    expect(
+      violations.some((violation) => violation.includes('outside @layer components')),
+      violations.join('\n'),
+    ).toBe(true);
+  });
+
+  it('detects broad descendant control selectors on toolbar wrappers', () => {
+    const broadRule =
+      ':is(.pf-toolbar,.pf-header-actions,.pf-inline-form) :is(button,input,select){' +
+      'min-block-size:2.25rem}';
+    const violations = validateToolbarCascade(`${builtCss}${broadRule}`);
+
+    expect(
+      violations.some((violation) => violation.includes('unexpectedly styles descendant controls')),
       violations.join('\n'),
     ).toBe(true);
   });

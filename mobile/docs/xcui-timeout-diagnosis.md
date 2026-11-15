@@ -1,5 +1,48 @@
 ## XCUI timeout diagnosis (#2573)
 
+### Farm card disappearance invalidation (#3620)
+
+The unsearched control-idle Farm scroll in run `40986691357` aborted app
+PID `35087` after a 21-second main-thread stall. Its crash was attached under
+a later Filament test, but launch/capture times and the app console correlate
+it with the first Farm swipe. The main thread was committing SwiftUI lazy
+subview placements; the earlier retained control crash was placing them.
+
+Controlled local checks on iOS 26.5 (23F77), using **Xcode 27.2 (27B52) for
+exploration only**, reproduced the stall with the original card lifecycle.
+Removing the redundant accessibility representation did not prevent it.
+Disabling media loading, or keeping loading but removing disappearance-time
+media clearing, allowed the same unsearched Prusa MK4 #1 control to reach detail.
+
+`PrinterCardMediaModel.cancel()` now invalidates only its non-observed request
+revision. A disappearing lazy card must not clear the image, request or ETA
+that its layout is still using. A new load clears those rendered values, and
+revision/task-cancellation guards continue to reject late thumbnail and ETA
+responses. The `.task` remains responsible for cancelling its async children.
+Media loading, card appearance, search/return behavior and watchdog enforcement
+are unchanged.
+
+Both thumbnail and ETA presentation are qualified by the current request, so
+retained media cannot accompany a changed job or service before its new load.
+Focused lifecycle tests prove cancellation does not invalidate observed media,
+including a non-nil ETA, late responses cannot publish, and a replacement load
+clears retained media while its thumbnail and ETA responses are still blocked.
+The existing same-card scroll control remains the runtime regression. Xcode
+27.2 results do not certify pinned Xcode 26.6 CI or golden snapshots; the local
+pinned toolchain cannot connect XCTest on macOS 27.2 (see #3627).
+
+The iPad control failure was separate: the OR/`firstMatch` scroll query selected
+the horizontal filter row (`farm.root`, frame `(0,94,1032,44)`), while the
+same target card was hittable at `(685,640,331,80)` and Scan began at `y=1304`.
+Its 16 responsive swipes followed by tap-point rejection were not watchdog
+evidence. Qualifying the scroll query by its target-card descendant selects the
+printer viewport; the existing viewport containment and Scan/keyboard clearance
+guards remain unchanged. Failure attachments retain scalar geometry for diagnosis.
+The control always synthesizes at least one swipe on either device family and
+records its count, stopping immediately when the same card is reachable, within
+the original 16-swipe bound. A visible initial card can no longer bypass the
+scroll gesture.
+
 ### Filament detail query stall (iPhone shard 3)
 
 Run `39143583699`, job `117727392869`, failed at
@@ -197,7 +240,10 @@ round upward to a whole minute. A polling deadline cannot interrupt an in-flight
 remote accessibility operation; XCTest's watchdog is the separate backstop.
 Destination discovery timeouts and Actions step ceilings serve different purposes.
 
-From `mobile/`, use an explicit stable simulator UDID:
+From `mobile/`, use an explicit stable simulator UDID approved through the
+shared resolver. Invoking `run-tests.py` directly does not run the resolver or
+check host compatibility. The [local-only Xcode 27.2 workflow](../README.md#local-exploration-on-macos-27)
+is exploratory and does not qualify as pinned evidence:
 
 ```bash
 set -o pipefail

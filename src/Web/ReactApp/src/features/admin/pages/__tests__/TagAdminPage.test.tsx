@@ -46,6 +46,9 @@ async function startEditingResin(user: ReturnType<typeof userEvent.setup>) {
   const nameCell = screen.getAllByText('Resin')[0];
   const row = nameCell.closest('tr') as HTMLElement;
   await user.click(within(row).getByRole('button', { name: /^edit$/i }));
+  // Edit mode focuses and selects the name input in a requestAnimationFrame; wait for it so
+  // that deferred select-all cannot land mid-typing and replace the text being entered.
+  await waitFor(() => expect(screen.getByDisplayValue('Resin')).toHaveFocus());
 }
 
 async function saveCurrentEdit(user: ReturnType<typeof userEvent.setup>) {
@@ -53,8 +56,32 @@ async function saveCurrentEdit(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
+  it('keeps keyboard edit targets aligned with sorted rows and restores incoming order', async () => {
+    vi.mocked(apiClient.getTags).mockResolvedValue([
+      resin,
+      { ...resin, id: 'tag-2', name: 'ABS', description: 'ABS prints' },
+    ]);
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('ABS');
+    const rows = () => screen.getAllByRole('row').slice(1);
+    const button = screen.getByRole('button', { name: 'Tag Name' });
+    await user.click(button);
+    expect(rows()[0]).toHaveTextContent('ABS');
+    await user.keyboard('{ArrowDown}e');
+    expect(screen.getByDisplayValue('ABS')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    await user.click(button);
+    expect(rows()[0]).toHaveTextContent('Resin');
+    await user.click(button);
+    expect(button.closest('th')).toHaveAttribute('aria-sort', 'none');
+    expect(rows()[0]).toHaveTextContent('Resin');
+    expect(apiClient.getTags).toHaveBeenCalledTimes(1);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    Element.prototype.scrollIntoView = vi.fn();
     vi.mocked(apiClient.getTags).mockResolvedValue([resin]);
     vi.mocked(apiClient.get3DModels).mockResolvedValue([]);
     vi.mocked(apiClient.getGcodeFilesQuery).mockResolvedValue({
@@ -96,7 +123,9 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     renderPage();
     await screen.findAllByText('Resin');
 
-    await user.click(screen.getByRole('button', { name: /add tag/i }));
+    const addTagButton = screen.getByRole('button', { name: /add tag/i });
+    expect(addTagButton.closest('.pf-header-actions')).toBeInTheDocument();
+    await user.click(addTagButton);
 
     const preview = screen.getByLabelText('Tag preview: Tag Preview');
     expect(preview).toHaveAttribute('data-pf-radius', 'full');
@@ -148,7 +177,8 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
 
     await startEditingResin(user);
     const nameInput = screen.getByDisplayValue('Resin');
-    await user.type(nameInput, ' updated');
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Resin updated');
     await saveCurrentEdit(user);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/network unreachable/i);
@@ -291,7 +321,9 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     await user.click(within(row).getByRole('button', { name: /^edit$/i }));
 
     const nameInput = screen.getByDisplayValue('Unversioned');
-    await user.type(nameInput, ' updated');
+    await waitFor(() => expect(nameInput).toHaveFocus());
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Unversioned updated');
     await saveCurrentEdit(user);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/refresh the page/i);

@@ -76,13 +76,17 @@ export function ColorFamilySelect({ value, onChange, options, placeholder = 'All
     <div className="relative w-auto">
       <Button
         ref={btnRef}
+        id={id}
         type="button"
+        aria-label={label}
         aria-haspopup="listbox"
         data-open={open ? 'true' : 'false'}
         disabled={disabled}
         onClick={() => { if (disabled) return; setOpen(o => !o); if (!open) setActiveIdx( value ? (families.indexOf(value) + 1) : 0 ); }}
         onKeyDown={disabled ? undefined : onKeyDown}
-        className="w-40 border rounded-sm p-2 text-sm bg-pf-bg-0 text-pf-text-primary border-pf-border focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-pf-accent transition disabled:bg-pf-disabled disabled:cursor-not-allowed appearance-none flex items-center justify-between gap-2"
+        data-role="field"
+        data-size="md"
+        className="pf-control w-40 border rounded-sm px-3 py-0 text-sm bg-pf-bg-0 text-pf-text-primary border-pf-border focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-pf-accent transition disabled:bg-pf-disabled disabled:cursor-not-allowed appearance-none flex items-center justify-between gap-2"
         variant="unstyled"
         iconRight={open ? <ChevronUpIcon className="w-4 h-4 opacity-60" ariaLabel="" /> : <ChevronDownIcon className="w-4 h-4 opacity-60" ariaLabel="" />}
       >

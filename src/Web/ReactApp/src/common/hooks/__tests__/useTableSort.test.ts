@@ -1,6 +1,6 @@
 import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
-import { useTableSort } from '../useTableSort';
+import { compareTableValues, useTableSort } from '../useTableSort';
 
 interface TestData {
   name: string;
@@ -9,11 +9,49 @@ interface TestData {
 }
 
 describe('useTableSort', () => {
+  it('compares raw numeric, date, boolean and text values without bringing missing values first descending', () => {
+    expect(compareTableValues(2, 10, 'asc')).toBeLessThan(0);
+    expect(compareTableValues(Date.parse('2026-01-01'), Date.parse('2026-10-01'), 'desc')).toBeGreaterThan(0);
+    expect(compareTableValues(false, true, 'asc')).toBeLessThan(0);
+    expect(compareTableValues('Beta', 'Alpha', 'asc')).toBeGreaterThan(0);
+    for (const direction of ['asc', 'desc'] as const) {
+      expect(compareTableValues(null, 10, direction)).toBeGreaterThan(0);
+      expect(compareTableValues(undefined, 'Alpha', direction)).toBeGreaterThan(0);
+      expect(compareTableValues(Number.NaN, 10, direction)).toBeGreaterThan(0);
+      expect(compareTableValues(0, null, direction)).toBeLessThan(0);
+      expect(compareTableValues(null, undefined, direction)).toBe(0);
+    }
+  });
+
   const mockData: TestData[] = [
     { name: 'Beta', value: 20, date: new Date('2024-01-02') },
     { name: 'Alpha', value: 10, date: new Date('2024-01-01') },
     { name: 'Gamma', value: 30, date: new Date('2024-01-03') },
   ];
+
+  it('sorts selected raw values with stable ties and missing values last, then restores the same input array', () => {
+    const rows = [
+      { id: 'ten', value: 10 },
+      { id: 'missing', value: null },
+      { id: 'two', value: 2 },
+      { id: 'two-again', value: 2 },
+      { id: 'invalid', value: Number.NaN },
+    ];
+    const selectors = { value: (row: typeof rows[number]) => row.value };
+    const { result } = renderHook(() => useTableSort<'value'>());
+    expect(result.current.sortDataByValues(rows, selectors)).toBe(rows);
+    expect(result.current.headerProps('value').sortDirection).toBeNull();
+    act(() => result.current.headerProps('value').onSort('value'));
+    expect(result.current.sortDataByValues(rows, selectors).map(row => row.id))
+      .toEqual(['two', 'two-again', 'ten', 'missing', 'invalid']);
+    expect(result.current.headerProps('value').sortDirection).toBe('asc');
+    act(() => result.current.handleSort('value'));
+    expect(result.current.sortDataByValues(rows, selectors).map(row => row.id))
+      .toEqual(['ten', 'two', 'two-again', 'missing', 'invalid']);
+    act(() => result.current.handleSort('value'));
+    expect(result.current.sortDataByValues(rows, selectors)).toBe(rows);
+    expect(rows.map(row => row.id)).toEqual(['ten', 'missing', 'two', 'two-again', 'invalid']);
+  });
 
   it('should initialize with no sorting', () => {
     const { result } = renderHook(() => useTableSort<'name' | 'value'>());
@@ -60,6 +98,21 @@ describe('useTableSort', () => {
       result.current.handleSort('name');
     });
     expect(result.current.sortState.direction).toBe(null);
+  });
+
+  it('applies batched clicks atomically and preserves descending ties', () => {
+    const { result } = renderHook(() => useTableSort<'name' | 'value'>());
+    act(() => {
+      result.current.handleSort('value');
+      result.current.handleSort('value');
+    });
+    expect(result.current.sortState).toEqual({ column: 'value', direction: 'desc' });
+    const data = [{ ...mockData[0], value: 10 }, mockData[1], mockData[2]];
+    expect(result.current.sortData(data, { value: (a, b) => a.value - b.value }).map(item => item.name))
+      .toEqual(['Gamma', 'Beta', 'Alpha']);
+    act(() => result.current.handleSort('value'));
+    expect(result.current.sortState).toEqual({ column: null, direction: null });
+    expect(result.current.sortData(data, { value: (a, b) => a.value - b.value })).toBe(data);
   });
 
   it('should sort data ascending', () => {

@@ -96,10 +96,10 @@ export function ResetPasswordPage() {
             <div className="flex items-center gap-2">
               <PrintFarmerLogo size={32} className="mr-2" />
               <span className="text-xl font-bold tracking-tight text-pf-accent">PRINTFARMER</span>
-              <span className="text-xl font-semibold text-pf-text-primary flex items-center ml-3">
+              <h1 className="text-xl font-semibold text-pf-text-primary flex items-center ml-3">
               <CheckCircleIcon className="h-5 w-5 mr-2" />
                 Password Reset
-              </span>
+              </h1>
             </div>
             <Button
               variant="subtle"
@@ -138,10 +138,10 @@ export function ResetPasswordPage() {
           <div className="flex items-center gap-2">
             <PrintFarmerLogo size={32} className="mr-2" />
             <span className="text-xl font-bold tracking-tight text-pf-accent">PRINTFARMER</span>
-            <span className="text-xl font-semibold text-pf-text-primary flex items-center ml-3">
+            <h1 className="text-xl font-semibold text-pf-text-primary flex items-center ml-3">
               <LockIcon className="h-5 w-5 mr-2" />
               Reset Password
-            </span>
+            </h1>
           </div>
           <Button
             type="button"
@@ -195,13 +195,14 @@ export function ResetPasswordPage() {
                 required
                 disabled={isLoading}
                 minLength={8}
+                className="pr-12"
               />
               <Button
                 type="button"
                 onClick={() => setShowNewPassword(!showNewPassword)}
                 variant="subtle"
                 size="sm"
-                className="absolute right-3 top-1/2 -translate-y-1/2 !p-0 !h-auto"
+                className="absolute right-1 top-1/2 !h-11 !w-11 !p-0 -translate-y-1/2"
                 aria-label={showNewPassword ? 'Hide password' : 'Show password'}
                 disabled={isLoading}
               >
@@ -221,13 +222,14 @@ export function ResetPasswordPage() {
                 required
                 disabled={isLoading}
                 minLength={8}
+                className="pr-12"
               />
               <Button
                 type="button"
                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                 variant="subtle"
                 size="sm"
-                className="absolute right-3 top-1/2 -translate-y-1/2 !p-0 !h-auto"
+                className="absolute right-1 top-1/2 !h-11 !w-11 !p-0 -translate-y-1/2"
                 aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
                 disabled={isLoading}
               >

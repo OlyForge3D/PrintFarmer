@@ -88,6 +88,13 @@ services:
       - PFARM__NetworkDiscovery__DiscoverySubnets=${PFARM__NetworkDiscovery__DiscoverySubnets:-}
       - PFARM__Go2Rtc__Enabled=${PFARM__Go2Rtc__Enabled:-false}
       - PFARM__Go2Rtc__BaseUrl=${PFARM__Go2Rtc__BaseUrl:-http://go2rtc:1984}
+      - PFARM__Obico__Enabled=${PFARM__Obico__Enabled:-false}
+      - PFARM__Obico__ObicoApiUrl=${PFARM__Obico__ObicoApiUrl:-}
+      - PFARM__PrintGuardShadow__Enabled=${PFARM__PrintGuardShadow__Enabled:-false}
+      - PFARM__PrintGuardShadow__ApiUrl=${PFARM__PrintGuardShadow__ApiUrl:-}
+      - PFARM__PrintGuardShadow__ApiToken=${PFARM__PrintGuardShadow__ApiToken:-}
+      - PFARM__PrintGuardShadow__RequestTimeoutSeconds=${PFARM__PrintGuardShadow__RequestTimeoutSeconds:-5}
+      - PFARM__PrintGuardShadow__CaptureTimeoutSeconds=${PFARM__PrintGuardShadow__CaptureTimeoutSeconds:-5}
       # Required JWT signing key (32+ bytes) for auth configuration.
       # No default is provided: an unset value must fail compose rendering
       # rather than silently booting the API with a committed secret.
@@ -108,6 +115,7 @@ services:
       - Security__DevModeBypassAuth=${DEVMODE_BYPASS_AUTH:-false}
       - GCODE_STORAGE_PATH=/app/gcode
       - MODEL_UPLOAD_PATH=/app/models
+      - PRINTER_FILE_THUMBNAIL_PATH=/data/printer-file-thumbnails
       - DATAPROTECTION_KEYS_PATH=/app/data-protection-keys
     volumes:
       - ${EXTERNAL_APP_DATA_PATH:-.volumes/printfarmer-app-data}:/data

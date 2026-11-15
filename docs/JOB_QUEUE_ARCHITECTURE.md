@@ -617,6 +617,23 @@ exception text.
 
 ---
 
+### Recurring idle-window queue observations
+
+Maintenance shift-plan compilation reads fresh immutable job facts for all
+candidate printers in sequential batches of at most 500 distinct printer IDs.
+The SQL projection includes only printer-occupying states from the shared
+occupancy policy, plus `Queued` and `Assigned`; it does not materialize tracked
+job entities, G-code navigations, or terminal history. Generic queue-history
+queries are unchanged.
+
+Batching does not relax maintenance eligibility. Occupying jobs exclude their
+printer; queued/assigned jobs close its window immediately, even without an
+ETA. Ready/preconfirmed gates, scorer ordering and failures, operator-recovery
+exclusions, and original-input watermarks retain their existing semantics.
+Batch failures propagate before any windows are returned, so the compiler
+does not receive authoritative absence evidence from a failed maintenance
+source. With no applicable alerts, that source still skips idle evaluation.
+
 ## Components Overview
 
 ### 1. JobQueueController (`/api/job-queue`)

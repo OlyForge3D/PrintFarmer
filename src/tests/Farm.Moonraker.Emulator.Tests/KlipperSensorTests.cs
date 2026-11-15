@@ -214,7 +214,8 @@ public sealed class KlipperSensorTests : IClassFixture<ReadyPrinterFactory>
 
     public static TheoryData<string, string, string> SensorCases => new()
     {
-        { "temperature_sensor endstop", """{"temperature":23.4,"measured_min_temp":23.4,"measured_max_temp":23.4}""", """{"temperature":32.5}""" },
+        { "temperature_sensor endstop", """{"temperature":23.4,"humidity":42.0,"measured_min_temp":23.4,"measured_max_temp":23.4}""", """{"temperature":32.5}""" },
+        { "temperature_sensor endstop", """{"temperature":23.4,"humidity":42.0,"measured_min_temp":23.4,"measured_max_temp":23.4}""", """{"humidity":53.1}""" },
         { "temperature_fan chamber_heater", """{"temperature":24,"target":0,"speed":0,"rpm":0}""", """{"temperature":35,"speed":0.7,"rpm":2100}""" },
         { "heater_generic chamber", """{"temperature":24,"target":0,"power":0}""", """{"temperature":45,"power":0.6}""" },
         { "heater_fan hotend", """{"speed":0,"rpm":null}""", """{"speed":1}""" },
@@ -267,7 +268,7 @@ public sealed class KlipperSensorTests : IClassFixture<ReadyPrinterFactory>
         parameters[1].GetDouble().Should().Be(initialTime + 5);
         JsonElement delta = parameters[0];
         delta.EnumerateObject().Select(property => property.Name).Should().Equal(name);
-        string expectedDelta = name == "temperature_sensor endstop"
+        string expectedDelta = update == """{"temperature":32.5}"""
             ? """{"temperature":32.5,"measured_max_temp":32.5}"""
             : update;
         AssertJson(expectedDelta, delta.GetProperty(name));

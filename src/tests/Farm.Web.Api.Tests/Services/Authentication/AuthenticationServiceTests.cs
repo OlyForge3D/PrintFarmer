@@ -7,6 +7,8 @@ using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Email;
 using Farm.Infrastructure.Services.RateLimiting;
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -28,6 +30,7 @@ public class AuthenticationServiceTests
     private readonly Mock<IRateLimitService> _mockRateLimitService;
     private readonly Mock<IAccountLockoutService> _mockAccountLockoutService;
     private readonly Mock<Farm.Infrastructure.Services.Authentication.IAuthAuditService> _mockAuthAuditService;
+    private readonly Mock<ITokenRevocationService> _mockTokenRevocationService;
     private readonly AuthenticationService _service;
 
     public AuthenticationServiceTests()
@@ -40,6 +43,7 @@ public class AuthenticationServiceTests
         _mockRateLimitService = new Mock<IRateLimitService>();
         _mockAccountLockoutService = new Mock<IAccountLockoutService>();
         _mockAuthAuditService = new Mock<Farm.Infrastructure.Services.Authentication.IAuthAuditService>();
+        _mockTokenRevocationService = new Mock<ITokenRevocationService>();
 
         // Setup configuration defaults for JWT
         _mockConfiguration.Setup(c => c["Jwt:Key"]).Returns("ThisIsASuperSecureKeyForTestingPurposesOnly12345678");
@@ -54,7 +58,8 @@ public class AuthenticationServiceTests
             _mockEmailService.Object,
             _mockRateLimitService.Object,
             _mockAccountLockoutService.Object,
-            _mockAuthAuditService.Object
+            _mockAuthAuditService.Object,
+            _mockTokenRevocationService.Object
         );
     }
 
@@ -217,6 +222,68 @@ public class AuthenticationServiceTests
             It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Theory]
+    [InlineData("wrapped-database")]
+    [InlineData("wrapped-timeout")]
+    [InlineData("invalid-operation")]
+    [InlineData("disposed")]
+    [InlineData("database")]
+    [InlineData("update")]
+    [InlineData("timeout")]
+    [InlineData("internal-cancellation")]
+    [InlineData("unexpected")]
+    public async Task ChangePasswordAsync_PostCommitAuditFailure_HandlesOnlyExpectedFailures(string scenario)
+    {
+        Exception failure = CreateAuditFailure(scenario);
+        User user = CreateTestUser();
+        _mockUsersRepository.Setup(r => r.GetUserEntityAsync(user.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(user);
+        _mockPasswordHashing.Setup(p => p.VerifyPassword("currentpass", user.PasswordHash))
+            .Returns(true);
+        _mockPasswordHashing.Setup(p => p.HashPassword("newpass"))
+            .Returns("$new$hashed$password$");
+        _mockTokenRevocationService
+            .Setup(service => service.RevokeAllUserTokensAsync(
+            user.Id, user.Id, "Password changed by user", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        _mockAuthAuditService.Setup(service => service.LogPasswordChangeAsync(
+            user.Id, "unknown", null, null, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(failure);
+
+        if (scenario is "unexpected" or "invalid-operation" or "disposed")
+        {
+            Exception? propagated = await Record.ExceptionAsync(() => _service.ChangePasswordAsync(user.Id, "currentpass", "newpass"));
+            Assert.Same(failure, propagated);
+            return;
+        }
+        bool result = await _service.ChangePasswordAsync(user.Id, "currentpass", "newpass");
+
+        result.Should().BeTrue();
+        user.PasswordHash.Should().Be("$new$hashed$password$");
+        VerifyAuditFailureLogged(failure);
+    }
+
+    [Fact]
+    public async Task ChangePasswordAsync_WhenRevocationFails_PropagatesWithoutWritingPasswordAudit()
+    {
+        User user = CreateTestUser();
+        _mockUsersRepository.Setup(r => r.GetUserEntityAsync(user.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(user);
+        _mockPasswordHashing.Setup(p => p.VerifyPassword("currentpass", user.PasswordHash))
+            .Returns(true);
+        _mockPasswordHashing.Setup(p => p.HashPassword("newpass"))
+            .Returns("$new$hashed$password$");
+        _mockTokenRevocationService
+            .Setup(service => service.RevokeAllUserTokensAsync(
+            user.Id, user.Id, "Password changed by user", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("revocation store unavailable"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _service.ChangePasswordAsync(user.Id, "currentpass", "newpass"));
+        _mockAuthAuditService.Verify(service => service.LogPasswordChangeAsync(
+            It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact]
     public async Task InitiatePasswordResetAsync_WhenRateLimited_ReturnsTrueWithoutEmailSend()
     {
@@ -329,6 +396,74 @@ public class AuthenticationServiceTests
         _mockAuthAuditService.Verify(s => s.LogPasswordResetAsync(
             user.Id, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    [Theory]
+    [InlineData("wrapped-database")]
+    [InlineData("wrapped-timeout")]
+    [InlineData("invalid-operation")]
+    [InlineData("disposed")]
+    [InlineData("database")]
+    [InlineData("update")]
+    [InlineData("timeout")]
+    [InlineData("internal-cancellation")]
+    [InlineData("unexpected")]
+    public async Task ResetPasswordAsync_PostCommitAuditFailure_HandlesOnlyExpectedFailures(string scenario)
+    {
+        Exception failure = CreateAuditFailure(scenario);
+        User user = CreateTestUser();
+        PasswordResetToken token = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            Token = "validtoken",
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddHours(1),
+        };
+        _mockUsersRepository.Setup(r => r.GetByEmailAsync(user.Email, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(user);
+        _mockUsersRepository.Setup(r => r.GetPasswordResetTokenAsync(token.Token, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(token);
+        _mockPasswordHashing.Setup(p => p.HashPassword("newPass")).Returns("hashed-new");
+        _mockTokenRevocationService
+            .Setup(service => service.RevokeAllUserTokensAsync(
+                user.Id, user.Id, "Password reset", "127.0.0.1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        _mockAuthAuditService.Setup(service => service.LogPasswordResetAsync(
+                user.Id, "127.0.0.1", null, null, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(failure);
+
+        if (scenario is "unexpected" or "invalid-operation" or "disposed")
+        {
+            Exception? propagated = await Record.ExceptionAsync(() => _service.ResetPasswordAsync(token.Token, user.Email, "newPass", "127.0.0.1"));
+            Assert.Same(failure, propagated);
+            return;
+        }
+        bool result = await _service.ResetPasswordAsync(token.Token, user.Email, "newPass", "127.0.0.1");
+
+        result.Should().BeTrue();
+        user.PasswordHash.Should().Be("hashed-new");
+        token.IsUsed.Should().BeTrue();
+        VerifyAuditFailureLogged(failure);
+    }
+
+    private static Exception CreateAuditFailure(string scenario) => scenario switch
+    {
+        "wrapped-database" => new InvalidOperationException("Provider wrapper.", new SqliteException("Audit store unavailable.", 14)),
+        "wrapped-timeout" => new InvalidOperationException("Provider wrapper.", new TimeoutException("Audit store timeout.")),
+        "disposed" => new ObjectDisposedException("audit-store"),
+        "database" => new SqliteException("Audit store unavailable.", 14),
+        "update" => new DbUpdateException("Audit store unavailable."),
+        "timeout" => new TimeoutException("Audit store unavailable."),
+        "internal-cancellation" => new OperationCanceledException("Audit store cancelled."),
+        "unexpected" => new ArgumentException("Audit implementation fault."),
+        _ => new InvalidOperationException("Audit store unavailable.")
+    };
+
+    private void VerifyAuditFailureLogged(Exception failure) =>
+        _mockLogger.Verify(logger => logger.Log(
+            LogLevel.Error, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(),
+            It.Is<Exception>(exception => ReferenceEquals(exception, failure)),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
 
     #endregion
 
@@ -743,9 +878,14 @@ public class AuthenticationServiceTests
             .Returns(true);
         _mockPasswordHashing.Setup(p => p.HashPassword(It.IsAny<string>()))
             .Returns("$new$hashed$password$");
-        _mockUsersRepository.Setup(r => r.UpdatePasswordAsync(
-                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
+        _mockTokenRevocationService
+            .Setup(service => service.RevokeAllUserTokensAsync(
+                user.Id,
+                user.Id,
+                "Password changed by user",
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
         _mockAuthAuditService.Setup(s => s.LogPasswordChangeAsync(
                 It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -755,6 +895,15 @@ public class AuthenticationServiceTests
 
         // Assert
         result.Should().BeTrue();
+        user.PasswordHash.Should().Be("$new$hashed$password$");
+        _mockTokenRevocationService.Verify(
+            service => service.RevokeAllUserTokensAsync(
+                user.Id,
+                user.Id,
+                "Password changed by user",
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     #endregion

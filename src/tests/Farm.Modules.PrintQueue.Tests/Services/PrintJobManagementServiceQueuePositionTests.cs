@@ -268,7 +268,7 @@ public class PrintJobManagementServiceQueuePositionTests
         spoolman.Setup(value => value.GetSpoolByIdAsync(42, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SpoolmanSpoolDto(42, "PLA spool", "PLA", 1000, null, false));
         Mock<IJobDispatchService> dispatch = new();
-        dispatch.Setup(value => value.DispatchReviewedJobAsync(
+        dispatch.Setup(value => value.DispatchBedClearConfirmedJobAsync(
                 moved.Id,
                 printerId,
                 QueueActorIdentity.AutoDispatch,

@@ -63,7 +63,8 @@ public interface IProfilesService
     /// <summary>Fetches the full profile hierarchy from OrcaSlicer worker.</summary>
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="ct">Cancellation token.</param>
-    Task<AllProfilesResponseDto?> GetWorkerProfilesHierarchyAsync(HttpClient httpClient, CancellationToken ct);
+    /// <param name="engineVersion">Optional exact engine version to query.</param>
+    Task<AllProfilesResponseDto?> GetWorkerProfilesHierarchyAsync(HttpClient httpClient, CancellationToken ct, string? engineVersion = null);
 
     /// <summary>
     /// Fetches profile hierarchy from OrcaSlicer worker filtered to only include

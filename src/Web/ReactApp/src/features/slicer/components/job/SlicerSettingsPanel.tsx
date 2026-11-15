@@ -18,7 +18,14 @@ export interface SlicerSettings {
   wallLoops: number;
   supportEnabled: boolean;
   supportType: string;
-  bedAdhesionType: 'none' | 'brim' | 'raft' | 'skirt';
+  /**
+   * `profile` means the selected profile's adhesion is not one Simple choice:
+   * either a combination (e.g. skirt + brim) or values inherited from a parent
+   * that could not be resolved. The profile's own keys are sliced unchanged.
+   */
+  bedAdhesionType: 'none' | 'brim' | 'raft' | 'skirt' | 'profile';
+  /** Label for the `profile` adhesion state, e.g. "Profile: skirt + brim". */
+  bedAdhesionProfileLabel?: string;
 }
 
 interface SlicerSettingsPanelProps {
@@ -43,7 +50,7 @@ interface SlicerSettingsPanelProps {
   onValidationChange?: (isValid: boolean) => void;
 }
 
-const BED_ADHESION_OPTIONS: { value: SlicerSettings['bedAdhesionType']; label: string }[] = [
+const BED_ADHESION_OPTIONS: { value: Exclude<SlicerSettings['bedAdhesionType'], 'profile'>; label: string }[] = [
   { value: 'none', label: 'None' },
   { value: 'skirt', label: 'Skirt' },
   { value: 'brim', label: 'Brim' },
@@ -652,13 +659,22 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
         <label htmlFor={bedAdhesionId} className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
           Bed Adhesion
         </label>
-        <p id={bedAdhesionDescId} className="text-xs text-pf-text-secondary">Extra first-layer lines for better bed grip.</p>
+        <p id={bedAdhesionDescId} className="text-xs text-pf-text-secondary">
+          {settings.bedAdhesionType === 'profile'
+            ? "Sliced with the profile's own adhesion settings. Choose an option to replace them."
+            : 'Extra first-layer lines for better bed grip.'}
+        </p>
         <Select
           id={bedAdhesionId}
           value={settings.bedAdhesionType}
           onChange={(e) => updateSetting('bedAdhesionType', e.target.value as SlicerSettings['bedAdhesionType'])}
           aria-describedby={bedAdhesionDescId}
         >
+          {settings.bedAdhesionType === 'profile' && (
+            <option value="profile" disabled>
+              {settings.bedAdhesionProfileLabel ?? 'Profile-controlled'}
+            </option>
+          )}
           {BED_ADHESION_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}

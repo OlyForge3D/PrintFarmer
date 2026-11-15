@@ -18,6 +18,16 @@ Authorization: Bearer <token>
 
 Tokens are obtained via login and typically stored in secure HttpOnly cookies.
 
+Passkey login requires a currently active account; disabled accounts receive
+neither an access token nor a refresh token. The main API checks persisted account
+status on every bearer authentication, including SignalR connection requests.
+Previously issued access tokens are rejected once the account is deactivated.
+Recognized database/store failures are logged with their original exception and
+fail authentication closed. Unrecognized or untyped infrastructure failures
+propagate as server errors and never authorize the token. Caller cancellation
+and unrelated programming errors also propagate rather than becoming
+account-rejection responses.
+
 Controller actions fail closed through a global authorization fallback policy.
 Only explicitly reviewed actions opt out, including authentication and first-run
 setup flows, health and capability probes, browser thumbnail resources, and
@@ -44,6 +54,42 @@ See [bootstrap configuration](GETTING_STARTED.md#first-administrator-bootstrap-p
 when the host environment is `Development`. The effective bypass state is logged
 at startup, and a configured bypass is ignored in every other environment.
 
+## Spoolman NFC tags
+
+`POST /api/spoolman/tags/scan` resolves an NFC UID against Spoolman's persistent
+tag mapping. It accepts `{ "uid": "E0040108662F6FBC" }` and optional
+`format`/`payloadB64` fields. Scans are non-mutating: an unknown UID returns
+null matches and does not create a tag binding or spool. A known UID resolves
+to at most one spool or filament. Tag-link operations use the existing
+`spoolman:admin` permission:
+
+| Route | Request | Result |
+| --- | --- | --- |
+| `POST /api/spoolman/spools/{id}/tag` | `{ "uid": "E0040108662F6FBC" }` | `204` when linked |
+| `DELETE /api/spoolman/spools/{id}/tag/{uid}` | — | `204` when unlinked |
+
+CoreNFC UIDs are sent as uppercase hexadecimal in the byte order returned by
+the platform. For ISO15693, this is the canonical E0-first UID; readers that
+report a different order must normalize at their device boundary. UID identity
+is separate from NDEF contents and spool/printer/tray context.
+
+OpenPrintTag scans send only the payload from an
+`application/vnd.openprinttag` NDEF MIME record as base64 with
+`format: "openprinttag"`. The Scan API never creates a mapping implicitly;
+unknown tags require an explicit link or a user-confirmed create-and-link flow.
+Filament-linked tags open spool intake for that filament and retain their
+filament binding. The iOS writer emits CBOR using the OpenPrintTag
+specification source pinned at
+[`060e420`](https://github.com/OpenPrintTag/openprinttag-specification/tree/060e420892d66c062c8af440c97701aab96bac79).
+The specification has no separate wire-version field. OpenPrintTag writing is
+for NFC-V/ISO15693 tags; legacy OpenSpool and prior PrintFarmer tag content
+remain readable.
+
+An attached Spoolman instance must provide the tag scan and link endpoints. An
+older Spoolman deployment returns an explicit endpoint error; PrintFarmer does
+not treat that failure as an unknown UID or silently fall back to embedded
+payload identity.
+
 ## Response Format
 
 All API responses use camelCase JSON (for TypeScript compatibility):
@@ -61,6 +107,14 @@ Connection credentials and private service addresses are write-only configuratio
 Printer, slicer, worker, queue, artifact, capability, and real-time response
 contracts never return API keys, usernames, passwords, worker keys, internal
 paths, backend endpoints, or private service URLs.
+
+`GET /api/printers` includes `ipAddress` for each accessible printer when its
+stored connection URL has a numeric IPv4 or IPv6 host. The value is only the
+normalized address (IPv6 without brackets), never a URL, port, path, query,
+fragment or embedded credentials. Hostnames are not resolved during list
+requests; hostname-only, missing, invalid and non-HTTP(S) addresses return no IP
+value. The field is independent of online status and does not restore the
+suppressed `backendUrl`, `originalServerUrl` or credentials.
 
 ## User Printer-Control Preference
 
@@ -1755,6 +1809,41 @@ GET /api/catalog/models?manufacturerId=mfg-uuid
 
 ## 3D Model API
 
+### List Models for Slicer Pickers
+
+```http
+GET /api/3d-models/picker
+Authorization: Bearer <token>
+```
+
+Returns only the fields needed by the New Slice Job picker (`id`, `name`,
+`fileName`, `fileType`, and `uploadedAt`). It includes valid models from the
+shared library, ordered by upload time descending, and uses the same
+`LibrarySync` authorization policy as the full model-list endpoint. The dedicated
+projection avoids loading model metadata or tags for picker requests; Desktop
+exchange tokens must carry `LibrarySync`.
+
+The local in-memory SQLite comparison below measures the service call plus JSON
+serialization, after five warmups and across 20 requests per size. Command counts
+include only the model and tag queries used by each list; unrelated host background
+queries are excluded. Response bytes are uncompressed UTF-8 JSON.
+
+| Models | List | Queries/request | JSON bytes | Latency p50/p95 (ms) | Managed allocation p50/p95 (bytes) |
+|---:|---|---:|---:|---:|---:|
+| 10 | Full | 21 | 8,781 | 1.754 / 2.377 | 558,568 / 565,536 |
+| 10 | Picker | 1 | 1,731 | 0.197 / 0.369 | 86,976 / 91,016 |
+| 100 | Full | 201 | 87,801 | 13.712 / 16.200 | 4,638,304 / 4,646,656 |
+| 100 | Picker | 1 | 17,301 | 0.447 / 0.473 | 148,936 / 152,064 |
+| 1,000 | Full | 2,001 | 878,001 | 117.624 / 201.081 | 44,699,176 / 45,873,072 |
+| 1,000 | Picker | 1 | 173,001 | 1.345 / 2.373 | 897,400 / 906,336 |
+
+These are local comparative measurements, not end-to-end HTTP or browser timings.
+The database was in-memory SQLite; PostgreSQL, SQL Server, network transfer, and
+browser rendering were not measured. Managed allocation deltas use process-wide
+GC counters, so background runtime activity can add noise and the values are not
+isolated per-request allocation profiles. The harness is
+`src/tests/Farm.Slicer.Module.Tests/Integration/Model3DPickerBenchmarkEvidenceTests.cs`.
+
 ### Upload a Model
 
 ```http
@@ -1817,6 +1906,111 @@ validation, storage, cancellation, or database commit fails.
 ```
 
 The updated ETag is also returned in the `ETag` response header.
+
+### Add Local-Library G-code Files to a Project
+
+The Files page's Add to Project action sends one
+`POST /api/projects/{id}/files` with the complete nonempty array of file requests.
+All request fields are forwarded, including material, filament, quantity,
+notes and plate metadata. Empty client selections return `[]` without a request
+(the endpoint itself rejects an empty list with `400 Bad Request`).
+
+The existing endpoint skips missing G-code IDs, files already in the project
+and repeated IDs within the batch. Its response is the actual added DTO array,
+with no guaranteed ordering; the success notification counts those DTOs, not
+selected IDs, including zero when everything was skipped. On success the client
+invalidates the `['projects']` and `['project', projectId]` query keys.
+
+Unlike the former serial single-file requests, the batch uses at most one
+database save, not independently committed per-file additions. HTTP failures
+propagate to the existing error notification, leave the modal open and do not
+trigger success invalidations or automatic singleton retries. True single-file
+callers retain their singleton helper.
+
+For 50 selections this reduces POST count from 50 to 1 (98% fewer requests),
+not a measured wall-clock speedup.
+
+### Bulk Delete Local-Library Files
+
+The Files page sends at most one bulk request per source. It never replays
+single deletes after an unknown transport outcome.
+
+```http
+DELETE /api/3d-models
+Content-Type: application/json
+
+{ "ids": ["model-uuid-1", "model-uuid-2"] }
+```
+
+```http
+DELETE /api/gcode-files
+Content-Type: application/json
+
+{ "fileIds": ["gcode-uuid-1", "gcode-uuid-2"] }
+```
+
+| Route | Permission | Empty list |
+|---|---|---|
+| `DELETE /api/3d-models` | `slicer_engines:admin` | `400 Bad Request` |
+| `DELETE /api/gcode-files` | `gcode_library:admin` | `400 Bad Request` |
+
+Both routes return `200 OK` with the existing count fields plus an additive
+`results` array. That array contains one entry per distinct requested ID, in
+request order:
+
+```json
+{
+  "deleted": 1,
+  "errors": 1,
+  "total": 2,
+  "results": [
+    { "id": "model-uuid-1", "status": "Deleted" },
+    { "id": "model-uuid-2", "status": "NotFound" }
+  ]
+}
+```
+
+The G-code route returns `{ "deleted", "totalRequested", "results" }`, where
+`totalRequested` is the distinct ID count.
+
+| `status` | Meaning |
+|---|---|
+| `Deleted` | Record and stored files removed |
+| `DeletedCleanupIncomplete` | Record removed; stored-file cleanup did not finish |
+| `NotFound` | No deletable record exists |
+| `Blocked` | Intentionally not deleted |
+| `Failed` | Delete did not take effect; record retained |
+| `Unknown` | Server cannot prove whether the delete took effect |
+
+The optional `reason` is one of `ActiveJobs`, `UnsafePath`, `StorageFailed`,
+`DatabaseFailed`, `FilesRemovedRecordRetained`, `CommitOutcomeUnknown`,
+`FileCleanupFailed`, or `ThumbnailCleanupFailed`. Reasons never contain
+storage paths or exception text.
+
+Source-specific semantics:
+
+- **G-code:** The service loads the files, counts active jobs, and clears
+  historical job references with set-based queries. It then removes all
+  eligible records in one owned transaction and deletes the stored files after
+  the commit. A file used by active queue jobs is `Blocked` (`ActiveJobs`)
+  without blocking the other files. Direct part-output mappings are removed;
+  project-file mappings cascade as before. A failed save rolls back and keeps
+  every stored file. An exception from the commit call itself is reported as
+  `Unknown` (`CommitOutcomeUnknown`).
+- **3D models:** The service loads valid models with one chunked query.
+  Missing or invalid IDs are `NotFound`. Each model then keeps the existing
+  single-delete order: it removes the stored files first, then removes and
+  saves the record. Saves happen one model at a time because file deletion
+  cannot join a database transaction. The operation is not cancelled when the
+  client disconnects. A storage failure retains the record
+  (`Failed`/`StorageFailed`). A database failure after the files are removed
+  is `Failed` (`FilesRemovedRecordRetained`). After a save failure the record
+  is re-read; if it still cannot be resolved, the result is `Unknown`
+  (`CommitOutcomeUnknown`).
+
+Query-count evidence comes from SQLite in-memory tests only: G-code bulk delete
+issues 3 SELECTs and 1 commit for 1, 10, or 100 files. That evidence does not
+establish production-provider latency.
 
 ## Settings API
 

@@ -12,10 +12,10 @@ enum PrinterControlsAccess {
             && model.matchesComposition(composition)
     }
 
-    /// Controls are hidden only when the printer is offline; while printing
-    /// they remain visible with unavailable controls disabled.
-    static func isEntryVisible(for printer: Printer) -> Bool {
-        printer.isOnline
+    /// Once loaded, retain the panel through connectivity changes. Command
+    /// eligibility still requires the printer to be online.
+    static func isEntryVisible(for printer: Printer, hasControlsOwner: Bool = false) -> Bool {
+        printer.isOnline || hasControlsOwner
     }
 
     static func blockedReason(

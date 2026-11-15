@@ -25,6 +25,8 @@ public class DiscoveryHeartbeatMonitorService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // No implementation type: this monitor's assembly is not the external discovery service's build,
+        // and the heartbeat carries no remote version, so the inventory reports "Unknown".
         _serviceMonitor.Register(
             ServiceId,
             "Printer Discovery",

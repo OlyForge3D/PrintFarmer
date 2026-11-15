@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Alert } from "@/common/components/ui/Alert";
 import { Badge } from "@/common/components/ui/Badge";
-import { Button } from "@/common/components/ui/Button";
+import { Toolbar, RefreshButton, Pagination } from "@/common/components/ui/toolbar";
 import { Spinner } from "@/common/components/ui/Spinner";
 import { apiClient } from "@/services/api";
 import type { DispatchHistoryDto, DispatchHistoryPageDto } from "@/types/api";
@@ -62,12 +62,6 @@ export default function DispatchLogTab({ dateFrom, dateTo }: { dateFrom: Date | 
     fetchData(1);
   }, [fetchData]); // re-fetch whenever dateFrom/dateTo change (fetchData dep)
 
-  const handlePrev = () => {
-    if (page > 1) fetchData(page - 1);
-  };
-  const handleNext = () => {
-    if (page < totalPages) fetchData(page + 1);
-  };
 
   if (loading && items.length === 0) {
     return (
@@ -98,14 +92,13 @@ export default function DispatchLogTab({ dateFrom, dateTo }: { dateFrom: Date | 
   return (
     <div className="flex flex-col h-full">
       {/* Summary bar */}
-      <div className="shrink-0 p-4 border-b border-pf-border bg-pf-bg-1 flex items-center justify-between">
+      <Toolbar aria-label="Dispatch log controls" className="shrink-0 p-4 border-b border-pf-border bg-pf-bg-1">
         <span className="text-sm text-pf-text-secondary">
           {totalCount} dispatch event{totalCount !== 1 ? "s" : ""}
         </span>
-        <Button variant="ghost" size="sm" onClick={() => fetchData(page)} loading={loading}>
-          Refresh
-        </Button>
-      </div>
+        <Toolbar.Spacer />
+        <RefreshButton onClick={() => fetchData(page)} busy={loading} />
+      </Toolbar>
 
       {/* Table */}
       <div className="flex-1 overflow-auto bg-pf-bg-1">
@@ -151,16 +144,8 @@ export default function DispatchLogTab({ dateFrom, dateTo }: { dateFrom: Date | 
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="shrink-0 p-3 border-t border-pf-border bg-pf-bg-1 flex items-center justify-between">
-          <Button variant="ghost" size="sm" onClick={handlePrev} disabled={page <= 1}>
-            ← Previous
-          </Button>
-          <span className="text-sm text-pf-text-secondary">
-            Page {page} of {totalPages}
-          </span>
-          <Button variant="ghost" size="sm" onClick={handleNext} disabled={page >= totalPages}>
-            Next →
-          </Button>
+        <div className="shrink-0 p-3 border-t border-pf-border bg-pf-bg-1">
+          <Pagination page={page} totalPages={totalPages} onPageChange={fetchData} />
         </div>
       )}
     </div>

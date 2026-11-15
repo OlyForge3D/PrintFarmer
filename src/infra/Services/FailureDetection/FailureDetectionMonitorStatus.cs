@@ -3,7 +3,7 @@
 namespace Farm.Infrastructure.Services.FailureDetection;
 
 /// <summary>
-/// Provides runtime snapshots of spaghetti-detection monitoring state.
+/// Provides runtime snapshots of failure-detection monitoring state.
 /// </summary>
 public interface IFailureDetectionMonitorStatus
 {
@@ -38,11 +38,6 @@ public sealed record FailureDetectionMonitorStatusDto
     /// Gets the configured scan interval, in seconds.
     /// </summary>
     public int ScanIntervalSeconds { get; init; }
-
-    /// <summary>
-    /// Gets whether auto-pause is enabled.
-    /// </summary>
-    public bool AutoPauseOnFailure { get; init; }
 
     /// <summary>
     /// Gets the number of printers opted into failure detection.
@@ -126,12 +121,13 @@ public sealed record FailureDetectionPrinterStatusDto
     public string? FileName { get; init; }
 
     /// <summary>
-    /// Gets whether the printer is using a pooled or global Obico target.
+    /// Gets the selected failure-detection provider source: none, pooled, global,
+    /// printguard, or multiple.
     /// </summary>
     public string DetectionSource { get; init; } = "none";
 
     /// <summary>
-    /// Gets the friendly pooled-server name or global target URL.
+    /// Gets a friendly description of the selected provider target or targets.
     /// </summary>
     public string? DetectionTarget { get; init; }
 
@@ -156,14 +152,60 @@ public sealed record FailureDetectionPrinterStatusDto
     public decimal? LastConfidence { get; init; }
 
     /// <summary>
-    /// Gets whether the most recent detected failure auto-paused the print.
-    /// </summary>
-    public bool? LastAutoPaused { get; init; }
-
-    /// <summary>
     /// Gets when the most recent failure was detected.
     /// </summary>
     public DateTime? LastFailureDetectedAt { get; init; }
+
+    /// <summary>
+    /// Gets the independent status of each provider selected for this printer.
+    /// </summary>
+    public FailureDetectionProviderStatusDto[] Providers { get; init; } = [];
+}
+
+/// <summary>
+/// Runtime analysis details for one failure-detection provider.
+/// </summary>
+public sealed record FailureDetectionProviderStatusDto
+{
+    /// <summary>
+    /// Gets the provider name.
+    /// </summary>
+    public string Provider { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the current provider state.
+    /// </summary>
+    public string State { get; init; } = "disabled";
+
+    /// <summary>
+    /// Gets the provider-specific explanation for its current state.
+    /// </summary>
+    public string Reason { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets when the provider was last analyzed.
+    /// </summary>
+    public DateTime? LastAnalyzedAt { get; init; }
+
+    /// <summary>
+    /// Gets the last provider outcome.
+    /// </summary>
+    public string LastOutcome { get; init; } = "none";
+
+    /// <summary>
+    /// Gets the most recent provider score.
+    /// </summary>
+    public decimal? LastConfidence { get; init; }
+
+    /// <summary>
+    /// Gets when the provider most recently detected a failure.
+    /// </summary>
+    public DateTime? LastFailureDetectedAt { get; init; }
+
+    /// <summary>
+    /// Gets whether this result was paired with another provider's analysis of the same captured frame.
+    /// </summary>
+    public string AnalysisMode { get; init; } = "unpaired";
 }
 
 /// <summary>
@@ -197,6 +239,11 @@ public sealed class FailureDetectionMonitorStatusStore : IFailureDetectionMonito
     private static FailureDetectionMonitorStatusDto Clone(FailureDetectionMonitorStatusDto snapshot) =>
         snapshot with
         {
-            Printers = snapshot.Printers.Select(status => status with { }).ToArray()
+            Printers = snapshot.Printers
+                .Select(status => status with
+                {
+                    Providers = status.Providers.Select(provider => provider with { }).ToArray(),
+                })
+                .ToArray()
         };
 }

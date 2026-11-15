@@ -1,6 +1,7 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrinterFileCatalogPage, PrinterFileScanStatus } from '@/types/api';
 import { PrinterFileDiscoverySection } from '@/features/printers/components/PrinterFileDiscoverySection';
@@ -45,7 +46,7 @@ function renderSection(onSubmit = vi.fn((event: SubmitEvent) => event.preventDef
       </form>
     </QueryClientProvider>,
   );
-  return { onSubmit };
+  return { onSubmit, queryClient };
 }
 
 function statusValue(term: string) {
@@ -77,6 +78,8 @@ describe('PrinterFileDiscoverySection', () => {
   });
 
   it('applies the automatic-discovery toggle immediately without submitting the printer form', async () => {
+    let complete!: () => void;
+    mocks.enabled.mockReturnValue(new Promise<void>(resolve => { complete = resolve; }));
     const user = userEvent.setup();
     const { onSubmit } = renderSection();
     const toggle = await screen.findByRole('checkbox', { name: 'Automatic file discovery' });
@@ -86,20 +89,99 @@ describe('PrinterFileDiscoverySection', () => {
     expect(mocks.enabled).toHaveBeenCalledTimes(1);
     expect(mocks.refresh).not.toHaveBeenCalled();
     expect(onSubmit).not.toHaveBeenCalled();
+    const refresh = screen.getByRole('button', { name: 'Force refresh' });
+    expect(refresh).toHaveAttribute('aria-disabled', 'true');
+    expect(refresh).toHaveAttribute('aria-busy', 'false');
+    await act(async () => complete());
     // The catalog (and this status) is refreshed from the server after the change.
     await waitFor(() => expect(mocks.catalog).toHaveBeenCalledTimes(2));
   });
 
-  it('requests a refresh with a non-submitting button', async () => {
+  it('keeps its icon-only button disabled through the scan and cache reload without submitting the form', async () => {
+    let complete!: () => void;
+    let reload!: (page: PrinterFileCatalogPage) => void;
+    mocks.refresh.mockReturnValue(new Promise<void>(resolve => { complete = resolve; }));
+    mocks.catalog.mockResolvedValueOnce(page())
+      .mockImplementationOnce(() => new Promise<PrinterFileCatalogPage>(resolve => { reload = resolve; }));
     const user = userEvent.setup();
-    const { onSubmit } = renderSection();
-    const refresh = await screen.findByRole('button', { name: 'Refresh now' });
+    const { onSubmit, queryClient } = renderSection();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    const refresh = await screen.findByRole('button', { name: 'Force refresh' });
     expect(refresh).toHaveAttribute('type', 'button');
+    expect(refresh).toHaveAttribute('title', expect.stringMatching(/Requires an idle printer and a free I\/O slot/));
+    expect(refresh.textContent).toBe('');
     await user.click(refresh);
-    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledWith('printer-1'));
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledWith('printer-1', true));
+    expect(refresh).toHaveAttribute('aria-disabled', 'true');
+    expect(refresh).toHaveAttribute('aria-busy', 'true');
+    await user.click(refresh);
+    await user.keyboard('{Enter} ');
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('checkbox', { name: 'Automatic file discovery' })).toBeDisabled();
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(invalidate).not.toHaveBeenCalled();
+
+    await act(async () => complete());
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Force refresh completed. Previews reload on demand.'));
+    await waitFor(() => expect(mocks.catalog).toHaveBeenCalledTimes(2));
+    expect(refresh).toHaveAttribute('aria-disabled', 'true');
+    expect(refresh).toHaveAttribute('aria-busy', 'true');
+    await user.click(refresh);
+    await user.keyboard('{Enter} ');
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    await act(async () => reload(page()));
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['printer-file-thumbnail'] }));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['printer-file-catalog'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['printer-file-preview'] });
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
     expect(mocks.enabled).not.toHaveBeenCalled();
     expect(onSubmit).not.toHaveBeenCalled();
+    await waitFor(() => expect(refresh).not.toHaveAttribute('aria-disabled', 'true'));
+    expect(refresh).toHaveAttribute('aria-busy', 'false');
+  });
+
+  it('allows refresh during background I/O without mistaking the lease for a pending user request', async () => {
+    let complete!: () => void;
+    mocks.refresh.mockReturnValue(new Promise<void>(resolve => { complete = resolve; }));
+    mocks.catalog.mockResolvedValue(page({ scans: [{ ...completeScan, isScanning: true }] }));
+    const user = userEvent.setup();
+    const { onSubmit } = renderSection();
+    const refresh = await screen.findByRole('button', { name: 'Force refresh' });
+    expect(statusValue('Status')).toHaveTextContent(/^Scanning \(file I\/O active\)$/);
+    expect(refresh).not.toHaveAttribute('aria-disabled', 'true');
+    expect(refresh).toHaveAttribute('aria-busy', 'false');
+    await user.click(refresh);
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledExactlyOnceWith('printer-1', true));
+    expect(refresh).toHaveAttribute('aria-disabled', 'true');
+    expect(refresh).toHaveAttribute('aria-busy', 'true');
+    await user.click(refresh);
+    await user.keyboard('{Enter} ');
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+
+    await act(async () => complete());
+    await waitFor(() => expect(refresh).not.toHaveAttribute('aria-disabled', 'true'));
+    expect(refresh).toHaveAttribute('aria-busy', 'false');
+    expect(mocks.catalog).toHaveBeenCalledTimes(2);
+    expect(statusValue('Status')).toHaveTextContent(/^Scanning \(file I\/O active\)$/);
+    expect(toast.success).toHaveBeenCalledWith('Force refresh completed. Previews reload on demand.');
+    expect(mocks.enabled).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('reports why a force refresh did not run instead of claiming success', async () => {
+    const user = userEvent.setup();
+    const { queryClient } = renderSection();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    mocks.refresh.mockRejectedValue({
+      statusCode: 409,
+      message: 'Request failed with status code 409',
+      data: { code: 'waiting_for_confirmed_idle', reasonCode: 'waiting_for_confirmed_idle' },
+    });
+    await user.click(await screen.findByRole('button', { name: 'Force refresh' }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Force refresh failed: waiting for confirmed idle'));
+    expect(toast.success).not.toHaveBeenCalled();
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['printer-file-catalog'] }));
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['printer-file-preview'] });
   });
 
   it('defaults discovery on for a never-scanned printer and does not claim a completed scan', async () => {
@@ -130,7 +212,7 @@ describe('PrinterFileDiscoverySection', () => {
     expect(await screen.findByText(/do not have permission to change file discovery/)).toBeInTheDocument();
     expect(statusValue('Status')).toHaveTextContent(/^Complete$/);
     expect(screen.queryByRole('checkbox', { name: 'Automatic file discovery' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Refresh now' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Force refresh' })).not.toBeInTheDocument();
   });
 
   it('renders and fetches nothing without printer-file read permission', () => {

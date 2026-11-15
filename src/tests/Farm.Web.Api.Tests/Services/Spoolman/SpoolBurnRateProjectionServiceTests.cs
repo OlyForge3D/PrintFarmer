@@ -1,4 +1,6 @@
-﻿using System.Text.Json;
+﻿using System.Collections.Concurrent;
+using System.Data.Common;
+using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -9,6 +11,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -22,6 +25,7 @@ public sealed class SpoolBurnRateProjectionServiceTests : IAsyncLifetime, IDispo
 
     private SqliteConnection _connection = null!;
     private DbContextOptions<AppDbContext> _options = null!;
+    private readonly ReaderCommandCounter _commandCounter = new();
     private readonly Mock<IFilamentCoverageSpoolResolver> _resolver = new();
     private readonly Mock<ISettingsService> _settings = new();
 
@@ -31,6 +35,7 @@ public sealed class SpoolBurnRateProjectionServiceTests : IAsyncLifetime, IDispo
         await _connection.OpenAsync();
         _options = new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlite(_connection)
+            .AddInterceptors(_commandCounter)
             .Options;
         await using AppDbContext db = CreateContext();
         await db.Database.EnsureCreatedAsync();
@@ -41,6 +46,20 @@ public sealed class SpoolBurnRateProjectionServiceTests : IAsyncLifetime, IDispo
                 SpoolBurnRateLookbackDays = 30,
                 SpoolBurnRateMinimumSamples = 3,
                 SpoolReorderThresholdGrams = 250,
+            });
+        _resolver
+            .Setup(service => service.ResolveAsync(
+                It.IsAny<IReadOnlyCollection<CanonicalSpoolIdentity>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(async (IReadOnlyCollection<CanonicalSpoolIdentity> identities, CancellationToken ct) =>
+            {
+                Dictionary<CanonicalSpoolIdentity, FilamentCoverageSpoolSnapshot> snapshots = [];
+                foreach (CanonicalSpoolIdentity identity in identities)
+                {
+                    snapshots[identity] = await _resolver.Object.ResolveSpoolAsync(identity, ct);
+                }
+
+                return snapshots;
             });
     }
 
@@ -74,12 +93,12 @@ public sealed class SpoolBurnRateProjectionServiceTests : IAsyncLifetime, IDispo
         await using AppDbContext projectionContext = CreateContext();
         SpoolBurnRateProjectionService service = CreateService(projectionContext);
 
-        SpoolBurnRateProjectionDto centralResult =
-            await service.ProjectAsync(central);
-        SpoolBurnRateProjectionDto nativeAResult =
-            await service.ProjectAsync(nativeA);
-        SpoolBurnRateProjectionDto nativeBResult =
-            await service.ProjectAsync(nativeB);
+        _commandCounter.Reset();
+        IReadOnlyDictionary<CanonicalSpoolIdentity, SpoolBurnRateProjectionDto> results =
+            await service.ProjectAsync([central, nativeA, nativeB]);
+        SpoolBurnRateProjectionDto centralResult = results[central];
+        SpoolBurnRateProjectionDto nativeAResult = results[nativeA];
+        SpoolBurnRateProjectionDto nativeBResult = results[nativeB];
 
         centralResult.AuthoritativeGramsConsumed.Should().Be(30);
         nativeAResult.AuthoritativeGramsConsumed.Should().Be(60);
@@ -87,6 +106,123 @@ public sealed class SpoolBurnRateProjectionServiceTests : IAsyncLifetime, IDispo
         centralResult.SampleCount.Should().Be(1);
         nativeAResult.SampleCount.Should().Be(1);
         nativeBResult.SampleCount.Should().Be(1);
+        _commandCounter.Commands.Should().HaveCount(3);
+        _commandCounter.Commands.Should().OnlyContain(command =>
+            command.Contains("PrintJobToolheadUsages", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData(10, 1)]
+    [InlineData(50, 1)]
+    [InlineData(100, 1)]
+    [InlineData(10, 6)]
+    [InlineData(50, 6)]
+    [InlineData(100, 6)]
+    public async Task ProjectAsync_BatchesUsageAggregatesOncePerSource(
+        int spoolCount,
+        int sourceCount)
+    {
+        CanonicalSpoolIdentity[] identities = Enumerable.Range(0, spoolCount)
+            .Select(index =>
+            {
+                int sourceIndex = index % sourceCount;
+                SpoolSourceKind sourceKind = sourceIndex == 0
+                    ? SpoolSourceKind.Central
+                    : SpoolSourceKind.MoonrakerNative;
+                string sourceIdentity = sourceIndex == 0
+                    ? "http://central.local"
+                    : $"http://moon-{sourceIndex}.local";
+                return Identity(sourceKind, sourceIdentity, 1000 + index);
+            })
+            .ToArray();
+        await using (AppDbContext seedContext = CreateContext())
+        {
+            foreach (CanonicalSpoolIdentity identity in identities)
+            {
+                PrintJob job = CompletedJob(Now.AddDays(-1));
+                PrintJobToolheadUsage usage = Usage(job, identity);
+                _ = usage.RecordAuthoritativeUsage(30, identity);
+                seedContext.AddRange(job, usage);
+                SetupRemaining(identity, 500);
+            }
+
+            await seedContext.SaveChangesAsync();
+        }
+
+        SetMinimumSamples(1);
+        _commandCounter.Reset();
+        await using AppDbContext projectionContext = CreateContext();
+
+        IReadOnlyDictionary<CanonicalSpoolIdentity, SpoolBurnRateProjectionDto> results =
+            await CreateService(projectionContext).ProjectAsync(identities);
+
+        results.Should().HaveCount(spoolCount);
+        results.Values.Should().OnlyContain(result =>
+            result.SampleCount == 1
+            && result.AuthoritativeGramsConsumed == 30
+            && result.State == SpoolBurnRateProjectionState.Ready);
+        _commandCounter.Commands.Should().HaveCount(sourceCount);
+        _commandCounter.Commands.Should().OnlyContain(command =>
+            command.Contains("PrintJobToolheadUsages", StringComparison.OrdinalIgnoreCase));
+        _resolver.Verify(
+            service => service.ResolveAsync(
+                It.Is<IReadOnlyCollection<CanonicalSpoolIdentity>>(requested =>
+                    requested.Count == spoolCount),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ProjectAsync_UsageMutationAfterAggregateDoesNotMixBatchResults()
+    {
+        CanonicalSpoolIdentity[] identities =
+        [
+            Identity(SpoolSourceKind.Central, "http://central.local", 41),
+            Identity(SpoolSourceKind.Central, "http://central.local", 42),
+        ];
+        foreach (CanonicalSpoolIdentity identity in identities)
+        {
+            await SeedCompletedSampleAsync(identity, 30, Now.AddDays(-1));
+            SetupRemaining(identity, 500);
+        }
+
+        _resolver
+            .Setup(service => service.ResolveAsync(
+                It.IsAny<IReadOnlyCollection<CanonicalSpoolIdentity>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(async (IReadOnlyCollection<CanonicalSpoolIdentity> requested, CancellationToken ct) =>
+            {
+                int[] spoolIds = requested.Select(identity => identity.SpoolId).ToArray();
+                await using (AppDbContext mutationContext = CreateContext())
+                {
+                    List<PrintJobToolheadUsage> usages = await mutationContext.PrintJobToolheadUsages
+                        .Where(usage =>
+                            usage.SpoolmanSpoolId.HasValue
+                            && spoolIds.Contains(usage.SpoolmanSpoolId.Value))
+                        .ToListAsync(ct);
+                    foreach (PrintJobToolheadUsage usage in usages)
+                    {
+                        usage.FilamentUsageGrams = 90;
+                    }
+
+                    await mutationContext.SaveChangesAsync(ct);
+                }
+
+                Dictionary<CanonicalSpoolIdentity, FilamentCoverageSpoolSnapshot> snapshots = [];
+                foreach (CanonicalSpoolIdentity identity in requested)
+                {
+                    snapshots[identity] = await _resolver.Object.ResolveSpoolAsync(identity, ct);
+                }
+
+                return snapshots;
+            });
+        SetMinimumSamples(1);
+        await using AppDbContext projectionContext = CreateContext();
+
+        IReadOnlyDictionary<CanonicalSpoolIdentity, SpoolBurnRateProjectionDto> results =
+            await CreateService(projectionContext).ProjectAsync(identities);
+
+        results.Values.Should().OnlyContain(result => result.AuthoritativeGramsConsumed == 30);
     }
 
     [Fact]
@@ -107,10 +243,10 @@ public sealed class SpoolBurnRateProjectionServiceTests : IAsyncLifetime, IDispo
         await using AppDbContext projectionContext = CreateContext();
         SpoolBurnRateProjectionService service = CreateService(projectionContext);
 
-        SpoolBurnRateProjectionDto upperResult =
-            await service.ProjectAsync(upperPath);
-        SpoolBurnRateProjectionDto lowerResult =
-            await service.ProjectAsync(lowerPath);
+        IReadOnlyDictionary<CanonicalSpoolIdentity, SpoolBurnRateProjectionDto> results =
+            await service.ProjectAsync([upperPath, lowerPath]);
+        SpoolBurnRateProjectionDto upperResult = results[upperPath];
+        SpoolBurnRateProjectionDto lowerResult = results[lowerPath];
 
         upperResult.AuthoritativeGramsConsumed.Should().Be(30);
         lowerResult.AuthoritativeGramsConsumed.Should().Be(90);
@@ -334,6 +470,38 @@ public sealed class SpoolBurnRateProjectionServiceTests : IAsyncLifetime, IDispo
         double.IsFinite(serializedConsumption).Should().BeTrue();
     }
 
+    [Fact]
+    public async Task ProjectAsync_OverflowingSpoolDoesNotPoisonOtherBatchResults()
+    {
+        CanonicalSpoolIdentity overflowing = Identity(
+            SpoolSourceKind.Central,
+            "http://central.local",
+            42);
+        CanonicalSpoolIdentity healthy = Identity(
+            SpoolSourceKind.Central,
+            "http://central.local",
+            43);
+        await SeedCompletedSampleAsync(overflowing, double.MaxValue, Now.AddDays(-1));
+        await SeedCompletedSampleAsync(overflowing, double.MaxValue, Now.AddDays(-2));
+        await SeedCompletedSampleAsync(healthy, 30, Now.AddDays(-1));
+        SetupRemaining(overflowing, 1000);
+        SetupRemaining(healthy, 1000);
+        SetMinimumSamples(1);
+
+        await using AppDbContext projectionContext = CreateContext();
+        IReadOnlyDictionary<CanonicalSpoolIdentity, SpoolBurnRateProjectionDto> results =
+            await CreateService(projectionContext).ProjectAsync([overflowing, healthy]);
+
+        results[overflowing].State.Should().Be(SpoolBurnRateProjectionState.InsufficientData);
+        results[overflowing].SampleCount.Should().Be(2);
+        results[overflowing].AuthoritativeGramsConsumed.Should().Be(double.MaxValue);
+        results[overflowing].BurnRateGramsPerDay.Should().BeNull();
+        results[healthy].State.Should().Be(SpoolBurnRateProjectionState.Ready);
+        results[healthy].SampleCount.Should().Be(1);
+        results[healthy].AuthoritativeGramsConsumed.Should().Be(30);
+        results[healthy].BurnRateGramsPerDay.Should().Be(1);
+    }
+
     private AppDbContext CreateContext() => new(_options);
 
     private SpoolBurnRateProjectionService CreateService(AppDbContext db)
@@ -345,8 +513,9 @@ public sealed class SpoolBurnRateProjectionServiceTests : IAsyncLifetime, IDispo
 
     private static CanonicalSpoolIdentity Identity(
         SpoolSourceKind sourceKind,
-        string sourceIdentity)
-        => new(sourceKind, sourceIdentity, 42);
+        string sourceIdentity,
+        int spoolId = 42)
+        => new(sourceKind, sourceIdentity, spoolId);
 
     private void SetMinimumSamples(int minimumSamples)
     {
@@ -459,6 +628,39 @@ public sealed class SpoolBurnRateProjectionServiceTests : IAsyncLifetime, IDispo
             ToolheadIndex = 0,
             SpoolmanSpoolId = identity.SpoolId,
         };
+
+    private sealed class ReaderCommandCounter : DbCommandInterceptor
+    {
+        private readonly ConcurrentQueue<string> _commands = new();
+
+        public IReadOnlyList<string> Commands => _commands.ToArray();
+
+        public void Reset()
+        {
+            while (_commands.TryDequeue(out _))
+            {
+            }
+        }
+
+        public override InterceptionResult<DbDataReader> ReaderExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result)
+        {
+            _commands.Enqueue(command.CommandText);
+            return base.ReaderExecuting(command, eventData, result);
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            _commands.Enqueue(command.CommandText);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+    }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {

@@ -77,10 +77,97 @@ public sealed class DatabaseMigrationTests
             "20261013004523_CameraPrinterJoinAndLocation",
             "20261013023326_AddDismissedPrinterCameras",
             "20261025192142_AddPrinterFileCatalog",
-            "20261026153717_RetireGcodeHarvest");
+            "20261026153717_RetireGcodeHarvest",
+            "20261027134803_PersistPrinterFileDetails",
+            "20261027212835_AddPrinterFileEnrichment",
+            "20261104185036_AddBedClearEvaluations",
+            "20261104222416_AddPrinterPrintGuardEnabled",
+            "20261105000821_AddFailureDetectionIncidentProvider",
+            "20261106201513_AddObicoPrintRouting",
+            "20261110024730_AddScanCodeAliases",
+            "20261110155826_AddPrinterExpectedOffline",
+            "20261111013812_ConsolidatePrinterServiceStatus");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CoreMigration_ConvertsExpectedOfflineIntentWithoutDisablingPrintersWithAssignedOrActiveJobs()
+    {
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+        IMigrator migrator = context.Database.GetService<IMigrator>();
+        await migrator.MigrateAsync("20261110155826_AddPrinterExpectedOffline");
+
+        Guid idlePrinterId = Guid.NewGuid();
+        Guid assignedPrinterId = Guid.NewGuid();
+        Guid printingPrinterId = Guid.NewGuid();
+        Guid completedPrinterId = Guid.NewGuid();
+        Guid onlinePrinterId = Guid.NewGuid();
+        Manufacturer manufacturer = new() { Name = "Migration maker" };
+        PrinterModel model = new() { Name = "Migration model", Manufacturer = manufacturer };
+        context.Printers.AddRange(
+            new Printer { Id = idlePrinterId, Name = "Expected offline idle", ServerUrl = "http://idle.invalid", IsEnabled = true, Manufacturer = manufacturer, Model = model },
+            new Printer { Id = assignedPrinterId, Name = "Expected offline assigned", ServerUrl = "http://assigned.invalid", IsEnabled = true, Manufacturer = manufacturer, Model = model },
+            new Printer { Id = printingPrinterId, Name = "Expected offline printing", ServerUrl = "http://printing.invalid", IsEnabled = true, Manufacturer = manufacturer, Model = model },
+            new Printer { Id = completedPrinterId, Name = "Expected offline completed", ServerUrl = "http://completed.invalid", IsEnabled = true, Manufacturer = manufacturer, Model = model },
+            new Printer { Id = onlinePrinterId, Name = "Online", ServerUrl = "http://online.invalid", IsEnabled = true, Manufacturer = manufacturer, Model = model });
+        context.Manufacturers.Add(manufacturer);
+        _ = await context.SaveChangesAsync();
+
+        await context.Database.ExecuteSqlRawAsync(
+            "UPDATE \"Printers\" SET \"ExpectedOfflineSinceUtc\" = '2026-11-10T00:00:00Z' "
+            + "WHERE \"Id\" <> {0};",
+            onlinePrinterId);
+        DateTime now = DateTime.UtcNow;
+        await context.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT INTO \"PrintJobs\" (\"Id\", \"Revision\", \"Name\", \"AssignedPrinterId\", \"Status\", \"Priority\", \"QueuePosition\", \"CreatedAt\", \"UpdatedAt\", \"QueuedAt\", \"WasSeededFromHistory\", \"IsExternalPrint\", \"Copies\", \"CompletedCopies\") VALUES ({Guid.NewGuid()}, 1, 'Assigned', {assignedPrinterId}, 1, 0, 0, {now}, {now}, {now}, 0, 0, 1, 0)");
+        await context.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT INTO \"PrintJobs\" (\"Id\", \"Revision\", \"Name\", \"AssignedPrinterId\", \"Status\", \"Priority\", \"QueuePosition\", \"CreatedAt\", \"UpdatedAt\", \"QueuedAt\", \"WasSeededFromHistory\", \"IsExternalPrint\", \"Copies\", \"CompletedCopies\") VALUES ({Guid.NewGuid()}, 1, 'Printing', {printingPrinterId}, 3, 0, 0, {now}, {now}, {now}, 0, 0, 1, 0)");
+        await context.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT INTO \"PrintJobs\" (\"Id\", \"Revision\", \"Name\", \"AssignedPrinterId\", \"Status\", \"Priority\", \"QueuePosition\", \"CreatedAt\", \"UpdatedAt\", \"QueuedAt\", \"WasSeededFromHistory\", \"IsExternalPrint\", \"Copies\", \"CompletedCopies\") VALUES ({Guid.NewGuid()}, 1, 'Completed', {completedPrinterId}, 5, 0, 0, {now}, {now}, {now}, 0, 0, 1, 0)");
+        await context.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT INTO \"PrintJobs\" (\"Id\", \"Revision\", \"Name\", \"AssignedPrinterId\", \"Status\", \"Priority\", \"QueuePosition\", \"CreatedAt\", \"UpdatedAt\", \"QueuedAt\", \"WasSeededFromHistory\", \"IsExternalPrint\", \"Copies\", \"CompletedCopies\") VALUES ({Guid.NewGuid()}, 1, 'Online printing', {onlinePrinterId}, 3, 0, 0, {now}, {now}, {now}, 0, 0, 1, 0)");
+
+        await migrator.MigrateAsync();
+        context.ChangeTracker.Clear();
+        Dictionary<Guid, bool> enabledByPrinter = await context.Printers
+            .AsNoTracking()
+            .ToDictionaryAsync(printer => printer.Id, printer => printer.IsEnabled);
+        Dictionary<string, bool> reviewByJob = await context.PrintJobs
+            .AsNoTracking()
+            .ToDictionaryAsync(job => job.Name, job => job.RequiresOperatorReview);
+
+        enabledByPrinter[idlePrinterId].Should().BeFalse();
+        enabledByPrinter[completedPrinterId].Should().BeFalse();
+        enabledByPrinter[assignedPrinterId].Should().BeTrue();
+        enabledByPrinter[printingPrinterId].Should().BeTrue();
+        enabledByPrinter[onlinePrinterId].Should().BeTrue();
+        reviewByJob["Assigned"].Should().BeTrue();
+        reviewByJob["Printing"].Should().BeTrue();
+        reviewByJob["Completed"].Should().BeFalse();
+        reviewByJob["Online printing"].Should().BeFalse();
+
+        (await context.Printers.Where(printer => printer.Id == idlePrinterId)
+            .Select(printer => printer.Revision).SingleAsync()).Should().Be(2);
+        (await context.Printers.Where(printer => printer.Id == onlinePrinterId)
+            .Select(printer => printer.Revision).SingleAsync()).Should().Be(1);
+        (await context.PrintJobs.Where(job => job.Name == "Assigned")
+            .Select(job => job.Revision).SingleAsync()).Should().Be(2);
+        (await context.PrintJobs.Where(job => job.Name == "Online printing")
+            .Select(job => job.Revision).SingleAsync()).Should().Be(1);
+
+        await migrator.MigrateAsync("20261110155826_AddPrinterExpectedOffline");
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT COUNT(*) FROM \"Printers\" "
+            + "WHERE \"ExpectedOfflineSinceUtc\" IS NOT NULL "
+            + "AND \"Id\" IN (SELECT \"AssignedPrinterId\" FROM \"PrintJobs\" "
+            + "WHERE \"Status\" IN (1, 2, 3, 4));";
+        (await command.ExecuteScalarAsync()).Should().Be(0L);
+        command.CommandText = "SELECT \"IsEnabled\" FROM \"Printers\" WHERE \"Name\" = 'Expected offline idle';";
+        (await command.ExecuteScalarAsync()).Should().Be(0L);
     }
 
     [Fact]
@@ -108,18 +195,24 @@ public sealed class DatabaseMigrationTests
             FileHash = "existing-owned-hash",
             Folder = new FolderNode { Id = Guid.NewGuid(), Path = "/", FolderType = "gcode" },
         };
-        context.AddRange(printer, local);
-        await context.SaveChangesAsync();
+        await using (PrePrintGuardAppDbContext legacyContext = CreatePrePrintGuardContext(context))
+        {
+            legacyContext.AddRange(printer, local);
+            await legacyContext.SaveChangesAsync();
+        }
+
         await ProviderAwareMigrationRunner.MigrateAsync(context, DatabaseMigrationTarget.Core, NullLogger.Instance);
-        Assert.Equal(local.FileHash, (await context.GcodeFiles.SingleAsync(x => x.Id == local.Id)).FileHash);
-        Assert.Equal(printer.Name, (await context.Printers.SingleAsync(x => x.Id == printer.Id)).Name);
+        Printer migratedPrinter = await context.Printers.SingleAsync(x => x.Id == printer.Id);
+        GcodeFile migratedLocal = await context.GcodeFiles.SingleAsync(x => x.Id == local.Id);
+        Assert.Equal(local.FileHash, migratedLocal.FileHash);
+        Assert.Equal(printer.Name, migratedPrinter.Name);
         foreach (string path in new[] { "Parts/Café.gcode", "parts/Café.gcode" })
         {
             context.PrinterFileLocations.Add(new()
             {
                 Id = Guid.NewGuid(),
-                SourcePrinterId = printer.Id,
-                RegisteredPrinterId = printer.Id,
+                SourcePrinterId = migratedPrinter.Id,
+                RegisteredPrinterId = migratedPrinter.Id,
                 StorageRoot = "gcodes",
                 RelativePath = path,
                 IdentityKey = Farm.Infrastructure.Services.Printers.PrinterInventoryPath.ComputeIdentity("gcodes", path),
@@ -133,23 +226,23 @@ public sealed class DatabaseMigrationTests
         {
             Id = Guid.NewGuid(),
             OperationId = Guid.NewGuid(),
-            SourcePrinterId = printer.Id,
+            SourcePrinterId = migratedPrinter.Id,
             LocationId = source.Id,
-            GcodeFileId = local.Id,
+            GcodeFileId = migratedLocal.Id,
             StorageRoot = source.StorageRoot,
             RelativePath = source.RelativePath,
-            ContentSha256 = local.FileHash,
+            ContentSha256 = migratedLocal.FileHash,
         });
         await context.SaveChangesAsync();
-        context.Printers.Remove(printer);
+        context.Printers.Remove(migratedPrinter);
         await context.SaveChangesAsync();
         context.ChangeTracker.Clear();
         Assert.All(await context.PrinterFileLocations.ToArrayAsync(), location =>
         {
             Assert.Null(location.RegisteredPrinterId);
-            Assert.Equal(printer.Id, location.SourcePrinterId);
+            Assert.Equal(migratedPrinter.Id, location.SourcePrinterId);
         });
-        Assert.Equal(local.Id, (await context.PrinterFileOrigins.SingleAsync()).GcodeFileId);
+        Assert.Equal(migratedLocal.Id, (await context.PrinterFileOrigins.SingleAsync()).GcodeFileId);
         Assert.Single(await context.GcodeFiles.ToArrayAsync());
         Assert.False(context.Database.HasPendingModelChanges());
     }
@@ -803,7 +896,16 @@ public sealed class DatabaseMigrationTests
             "20261013004523_CameraPrinterJoinAndLocation",
             "20261013023326_AddDismissedPrinterCameras",
             "20261025192142_AddPrinterFileCatalog",
-            "20261026153717_RetireGcodeHarvest");
+            "20261026153717_RetireGcodeHarvest",
+            "20261027134803_PersistPrinterFileDetails",
+            "20261027212835_AddPrinterFileEnrichment",
+            "20261104185036_AddBedClearEvaluations",
+            "20261104222416_AddPrinterPrintGuardEnabled",
+            "20261105000821_AddFailureDetectionIncidentProvider",
+            "20261106201513_AddObicoPrintRouting",
+            "20261110024730_AddScanCodeAliases",
+            "20261110155826_AddPrinterExpectedOffline",
+            "20261111013812_ConsolidatePrinterServiceStatus");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -1082,7 +1184,8 @@ public sealed class DatabaseMigrationTests
             "20260830221213_AddProcessProfileMaterialAndTemperatureFields",
             "20260928195945_ScopeFilamentPromotionIndexPerOwner",
             "20260928205623_ScopeFilamentNameIndexPerOwner",
-            "20260928230444_ScopeMachineProcessNameIndexesPerOwner");
+            "20260928230444_ScopeMachineProcessNameIndexesPerOwner",
+            "20261104024657_AddSliceJobExtruderFilamentSnapshots");
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
     }
 
@@ -1362,6 +1465,15 @@ public sealed class DatabaseMigrationTests
                 "20261013023320_AddDismissedPrinterCameras",
                 "20261025192207_AddPrinterFileCatalog",
                 "20261026153721_RetireGcodeHarvest",
+                "20261027134806_PersistPrinterFileDetails",
+                "20261027212852_AddPrinterFileEnrichment",
+                "20261104185029_AddBedClearEvaluations",
+                "20261104222340_AddPrinterPrintGuardEnabled",
+                "20261105000821_AddFailureDetectionIncidentProvider",
+                "20261106201434_AddObicoPrintRouting",
+                "20261110024722_AddScanCodeAliases",
+                "20261110155721_AddPrinterExpectedOffline",
+                "20261111013829_ConsolidatePrinterServiceStatus",
             ]
             :
             [
@@ -1404,6 +1516,15 @@ public sealed class DatabaseMigrationTests
                 "20261013023323_AddDismissedPrinterCameras",
                 "20261025192231_AddPrinterFileCatalog",
                 "20261026153726_RetireGcodeHarvest",
+                "20261027134809_PersistPrinterFileDetails",
+                "20261027212909_AddPrinterFileEnrichment",
+                "20261104185033_AddBedClearEvaluations",
+                "20261104222359_AddPrinterPrintGuardEnabled",
+                "20261105000821_AddFailureDetectionIncidentProvider",
+                "20261106201456_AddObicoPrintRouting",
+                "20261110024727_AddScanCodeAliases",
+                "20261110155749_AddPrinterExpectedOffline",
+                "20261111013847_ConsolidatePrinterServiceStatus",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");
@@ -1428,6 +1549,7 @@ public sealed class DatabaseMigrationTests
                 "20260928195942_ScopeFilamentPromotionIndexPerOwner",
                 "20260928205621_ScopeFilamentNameIndexPerOwner",
                 "20260928230440_ScopeMachineProcessNameIndexesPerOwner",
+                "20261104024635_AddSliceJobExtruderFilamentSnapshots",
             ]
             :
             [
@@ -1447,6 +1569,7 @@ public sealed class DatabaseMigrationTests
                 "20260928195943_ScopeFilamentPromotionIndexPerOwner",
                 "20260928205622_ScopeFilamentNameIndexPerOwner",
                 "20260928230442_ScopeMachineProcessNameIndexesPerOwner",
+                "20261104024653_AddSliceJobExtruderFilamentSnapshots",
             ];
         _ = slicerMigrations.Should().Equal(expectedSlicerMigrations,
             $"the {provider} slicer migration set must apply in the exact recorded order");
@@ -1467,6 +1590,16 @@ public sealed class DatabaseMigrationTests
                 sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"))
             .Options;
         return new AppDbContext(options);
+    }
+
+    private static PrePrintGuardAppDbContext CreatePrePrintGuardContext(AppDbContext context)
+    {
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(
+                context.Database.GetDbConnection(),
+                sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"))
+            .Options;
+        return new PrePrintGuardAppDbContext(options);
     }
 
     private static AppDbContext CreateCoreContextWithoutMigrations(SqliteConnection connection)
@@ -1655,6 +1788,15 @@ public sealed class DatabaseMigrationTests
             CREATE UNIQUE INDEX "IX_UserRoles_UserId_RoleId" ON "UserRoles" ("UserId", "RoleId");
             PRAGMA foreign_keys = ON;
             """;
+    }
+
+    private sealed class PrePrintGuardAppDbContext(DbContextOptions<AppDbContext> options) : AppDbContext(options)
+    {
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+            modelBuilder.Entity<Printer>().Ignore(printer => printer.PrintGuardEnabled);
+        }
     }
 }
 

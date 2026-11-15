@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -62,12 +63,22 @@ public sealed class DiscoveryRegistrationSecurityTests
         _ = responseJson.Should().NotContain("printer.internal");
         _ = responseJson.Should().NotContain("192.168.1.20");
         _ = responseJson.Should().NotContain("camera.internal");
+        using JsonDocument registration = JsonDocument.Parse(responseJson);
+        _ = (registration.RootElement.TryGetProperty("frontendUrl", out JsonElement frontendUrl) &&
+            frontendUrl.ValueKind != JsonValueKind.Null).Should().BeFalse();
 
         await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Printer stored = await db.Printers.SingleAsync(
             printer => printer.Name == "Secure Discovery Printer");
         _ = stored.ServerUrl.Should().Be(serverUrl);
+        _ = response.Headers.Location.Should().NotBeNull();
+        _ = response.Headers.Location!.OriginalString.Should().EndWith($"/api/printers/{stored.Id}");
+
+        HttpResponseMessage detailResponse = await client.GetAsync(response.Headers.Location);
+        _ = detailResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using JsonDocument detail = JsonDocument.Parse(await detailResponse.Content.ReadAsStringAsync());
+        _ = detail.RootElement.GetProperty("frontendUrl").GetString().Should().Be("http://printer.internal");
     }
 
     [Fact]

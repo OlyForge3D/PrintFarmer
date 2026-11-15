@@ -1,4 +1,5 @@
-﻿using Farm.Slicer.Module.Data.Repositories;
+﻿using System.Text.Json;
+using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
@@ -274,7 +275,8 @@ public class DbSlicerJobQueue(
                 sj.FilamentProfileJson,
                 sj.MachineProfileSha256,
                 sj.ProcessProfileSha256,
-                sj.FilamentProfileSha256),
+                sj.FilamentProfileSha256,
+                sj.ExtruderFilamentProfilesJson),
             MachineProfileSha256 = sj.MachineProfileSha256,
             ProcessProfileSha256 = sj.ProcessProfileSha256,
             FilamentProfileSha256 = sj.FilamentProfileSha256,
@@ -328,6 +330,9 @@ public class DbSlicerJobQueue(
             MachineProfileJson = dj.NativeProfiles?.MachineJson,
             ProcessProfileJson = dj.NativeProfiles?.ProcessJson,
             FilamentProfileJson = dj.NativeProfiles?.FilamentJson,
+            ExtruderFilamentProfilesJson = dj.NativeProfiles?.ExtruderFilaments is { } extruderFilaments
+                ? JsonSerializer.Serialize(extruderFilaments)
+                : null,
             MachineProfileSha256 = dj.MachineProfileSha256 ?? dj.NativeProfiles?.MachineSha256,
             ProcessProfileSha256 = dj.ProcessProfileSha256 ?? dj.NativeProfiles?.ProcessSha256,
             FilamentProfileSha256 = dj.FilamentProfileSha256 ?? dj.NativeProfiles?.FilamentSha256,

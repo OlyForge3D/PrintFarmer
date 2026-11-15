@@ -137,10 +137,10 @@ public sealed class PrinterFileCopyTests
     }
 
     [Fact]
-    public void PrusaLink_DoesNotAdvertiseUncertifiedCopy()
+    public void PrusaLink_AdvertisesCertifiedCopy()
     {
         using HttpClient http = new();
-        Assert.False((object)new PrusaLinkClient(http) is ISupportsPrinterFileCopy);
+        Assert.True((object)new PrusaLinkClient(http) is ISupportsPrinterFileCopy);
     }
 
     private static ISupportsPrinterFileCopy Client(string backend, HttpClient http) => backend switch

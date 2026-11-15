@@ -16,6 +16,7 @@ public sealed class ManualTimeProvider : TimeProvider
 {
     private readonly object _gate = new();
     private readonly List<ManualTimer> _timers = [];
+    private readonly List<TimerWaiter> _timerWaiters = [];
     private DateTimeOffset _utcNow;
     private long _timestamp;
 
@@ -101,13 +102,59 @@ public sealed class ManualTimeProvider : TimeProvider
     /// <param name="count">Minimum number of scheduled timers.</param>
     /// <param name="timeout">Real-time upper bound for the wait.</param>
     /// <returns>A task that completes once the timers are scheduled.</returns>
+    /// <remarks>Completion is signalled when a timer is scheduled; it does not poll.</remarks>
     public async Task WaitForActiveTimersAsync(int count, TimeSpan timeout)
     {
-        using var cts = new CancellationTokenSource(timeout);
-        while (ActiveTimerCount < count)
+        var waiter = new TimerWaiter(count);
+        lock (_gate)
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(5), cts.Token).ConfigureAwait(false);
+            if (ScheduledTimerCountLocked() >= count)
+            {
+                return;
+            }
+
+            _timerWaiters.Add(waiter);
         }
+
+        try
+        {
+            await waiter.Completion.Task.WaitAsync(timeout).ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                _ = _timerWaiters.Remove(waiter);
+            }
+        }
+    }
+
+    private int ScheduledTimerCountLocked() => _timers.Count(timer => timer.IsScheduled);
+
+    // Caller holds _gate.
+    private void SignalTimerWaitersLocked()
+    {
+        if (_timerWaiters.Count == 0)
+        {
+            return;
+        }
+
+        int scheduled = ScheduledTimerCountLocked();
+        foreach (TimerWaiter waiter in _timerWaiters)
+        {
+            if (scheduled >= waiter.Count)
+            {
+                _ = waiter.Completion.TrySetResult();
+            }
+        }
+    }
+
+    private sealed class TimerWaiter(int count)
+    {
+        public int Count { get; } = count;
+
+        public TaskCompletionSource Completion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
     private sealed class ManualTimer(
@@ -128,6 +175,7 @@ public sealed class ManualTimeProvider : TimeProvider
                     ? null
                     : checked(owner._timestamp + dueTime.Ticks);
                 _period = period;
+                owner.SignalTimerWaitersLocked();
             }
 
             return true;

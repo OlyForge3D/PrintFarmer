@@ -14,7 +14,8 @@ public sealed class ArtifactStorageSettings
     public string RootPath { get; set; } = "artifacts";
 
     /// <summary>
-    /// Maximum allowed uploaded file size in bytes (default 100MB).
+    /// Maximum allowed uploaded file size in bytes (default 100 MiB; supported range 1-500,000,000).
+    /// Worker multipart requests allow a further 1 MiB for transport metadata.
     /// </summary>
     public long MaxFileSizeBytes { get; set; } = 100 * 1024 * 1024;
 

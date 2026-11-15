@@ -828,6 +828,46 @@ EOF
     pass_test
 }
 
+test_slicer_host_artifact_storage_startup_repair() {
+    start_test "slicer-host artifact storage startup repair"
+
+    local output
+    output=$(bash "$SCRIPT_DIR/test-slicer-host-entrypoint.sh" 2>&1) || {
+        fail_test "Slicer-host artifact storage entrypoint regression tests failed: $output"
+        return
+    }
+
+    assert_contains "$output" "existing custom-path artifacts survive repeated startup" \
+        "Should preserve existing artifacts and resolve the runtime appuser identity"
+    assert_contains "$output" "ownership repair failure blocks application startup" \
+        "Should fail closed if storage ownership cannot be repaired"
+    assert_contains "$output" "symlinks inside artifact storage are rejected" \
+        "Should reject symlinks inside artifact storage roots"
+    assert_contains "$output" "outside-mount" \
+        "Should reject artifact paths outside the persistent data mount"
+    assert_contains "$output" "unprivileged-owned or group-writable ancestors" \
+        "Should prevent unprivileged redirection of root ownership repair"
+    assert_contains "$output" "insufficient non-root storage permissions" \
+        "Should verify access as appuser without a blanket permission fallback"
+    assert_contains "$output" "different-device nested mounts block ownership changes" \
+        "Should not reown even the root of a nested foreign filesystem"
+
+    local dockerfile
+    dockerfile=$(cat "$REPO_ROOT/scripts/docker/dockerfiles/Dockerfile.multistage")
+    assert_contains "$dockerfile" "COPY scripts/docker/slicer-host-entrypoint.sh /usr/local/bin/slicer-host-entrypoint" \
+        "Slicer-host image should install the tested entrypoint"
+    assert_contains "$dockerfile" "pf-apt install -y --no-install-recommends gosu" \
+        "Slicer-host image should install its privilege-dropping helper"
+    assert_contains "$dockerfile" "ENV ArtifactStorage__RootPath=/data/artifacts" \
+        "Slicer-host entrypoint fallback should match the application's configured artifact root"
+    assert_contains "$dockerfile" "chown root:root /data && chmod 0755 /data" \
+        "New volume parents should remain protected from unprivileged path replacement"
+    assert_contains "$dockerfile" 'ENTRYPOINT ["/usr/local/bin/slicer-host-entrypoint"]' \
+        "Slicer-host should use the privilege-dropping startup entrypoint"
+
+    pass_test
+}
+
 # Regression test for issue #1908: when the worker is disabled, no temp directory
 # preparation should occur (no unnecessary directory creation / noise).
 test_orcaslicer_worker_temp_directory_skipped_when_disabled() {
@@ -2449,6 +2489,7 @@ run_all_tests() {
     test_worker_configuration
     test_orcaslicer_worker_temp_directory_permissions
     test_orcaslicer_worker_temp_directory_recreated_when_permissions_are_wrong
+    test_slicer_host_artifact_storage_startup_repair
     test_orcaslicer_worker_temp_directory_skipped_when_disabled
     test_network_configuration  
     test_database_configuration

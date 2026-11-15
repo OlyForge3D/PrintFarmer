@@ -298,6 +298,9 @@ public class UpdateCameraDto
     [StringLength(256, MinimumLength = 1, ErrorMessage = "Camera name must be between 1 and 256 characters.")]
     public string? Name { get; set; }
 
+    /// <summary>
+    /// New description. Empty or whitespace clears it; omit or pass null to leave it unchanged.
+    /// </summary>
     [StringLength(1024, ErrorMessage = "Camera description cannot exceed 1024 characters.")]
     public string? Description { get; set; }
 

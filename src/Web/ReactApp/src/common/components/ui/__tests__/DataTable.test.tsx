@@ -40,6 +40,98 @@ const mockColumns: DataTableColumn<TestItem>[] = [
 ];
 
 describe('DataTable', () => {
+  const rowNames = () => screen.getAllByRole('row').slice(1).map(row => row.querySelector('td')?.textContent);
+
+  it.each(['', 'md:text-right'])('retains default left alignment with only %s', headerClassName => {
+    render(<DataTable data={mockData} getRowKey={item => item.id} columns={[
+      { ...mockColumns[1], headerClassName },
+    ]} />);
+    expect(screen.getByRole('columnheader', { name: 'Value' })).toHaveClass('text-left');
+  });
+
+  it.each(['text-center', 'text-right'])('keeps %s and custom padding on a full-cell sort target', async alignment => {
+    const user = userEvent.setup();
+    render(<DataTable data={mockData} getRowKey={item => item.id} columns={[
+      { ...mockColumns[1], headerClassName: `px-2 py-1 ${alignment} w-24 border` },
+    ]} />);
+    const header = screen.getByRole('columnheader', { name: 'Value' });
+    const button = screen.getByRole('button', { name: 'Value' });
+    expect(header).toHaveClass(alignment, 'w-24', 'border');
+    expect(header).not.toHaveClass('px-2', 'py-1', 'text-left');
+    expect(header).toHaveStyle({ padding: '0px', height: '1px' });
+    expect(button).toHaveClass('px-2', 'py-1', 'h-full', 'w-full', 'focus-visible:ring-inset');
+    expect(button).not.toHaveClass('px-4', 'py-3', 'text-left');
+    expect(button.style.textAlign).toBe('inherit');
+    expect(button.style.textTransform).toBe('inherit');
+    expect(button.firstElementChild).toHaveClass('inline-flex', 'items-center');
+    button.focus();
+    await user.keyboard('{Enter}');
+    expect(header).toHaveAttribute('aria-sort', 'ascending');
+    expect(button).toHaveFocus();
+  });
+
+  it('cycles numeric sort with Enter and Space, restoring supplied order and keeping both glyphs', async () => {
+    const user = userEvent.setup();
+    render(<DataTable data={mockData} columns={mockColumns} getRowKey={item => item.id} />);
+    const header = screen.getByRole('columnheader', { name: 'Value' });
+    const button = screen.getByRole('button', { name: 'Value' });
+    const glyphs = header.querySelectorAll('svg');
+    expect(glyphs).toHaveLength(2);
+    expect(glyphs[0].parentElement).toHaveAttribute('aria-hidden', 'true');
+    expect(header).toHaveAttribute('aria-sort', 'none');
+    expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute('aria-sort', 'none');
+    expect(screen.getByRole('columnheader', { name: 'Status' })).not.toHaveAttribute('aria-sort');
+    button.focus();
+    await user.keyboard('{Enter}');
+    expect(header).toHaveAttribute('aria-sort', 'ascending');
+    expect(rowNames()).toEqual(['Item B', 'Item C', 'Item A']);
+    expect(glyphs[0]).toHaveClass('text-pf-accent');
+    expect(glyphs[1]).toHaveClass('text-pf-text-secondary');
+    await user.keyboard(' ');
+    expect(header).toHaveAttribute('aria-sort', 'descending');
+    expect(rowNames()).toEqual(['Item A', 'Item C', 'Item B']);
+    expect(glyphs[1]).toHaveClass('text-pf-accent');
+    await user.click(button);
+    expect(header).toHaveAttribute('aria-sort', 'none');
+    expect(rowNames()).toEqual(['Item A', 'Item B', 'Item C']);
+    expect(button).toHaveFocus();
+    expect(header.querySelectorAll('svg')).toHaveLength(2);
+  });
+
+  it('reports controlled sorting without reordering even when a local comparator exists', async () => {
+    const user = userEvent.setup();
+    const onSortChange = vi.fn();
+    const props = { data: mockData, columns: mockColumns, getRowKey: (item: TestItem) => item.id, onSortChange };
+    const { rerender } = render(<DataTable {...props} sortColumn={null} sortDirection={null} />);
+    await user.click(screen.getByRole('button', { name: 'Value' }));
+    expect(onSortChange).toHaveBeenLastCalledWith('value', 'asc');
+    expect(rowNames()).toEqual(['Item A', 'Item B', 'Item C']);
+    expect(screen.getByRole('columnheader', { name: 'Value' })).toHaveAttribute('aria-sort', 'none');
+    rerender(<DataTable {...props} sortColumn="value" sortDirection="asc" />);
+    expect(rowNames()).toEqual(['Item A', 'Item B', 'Item C']);
+    await user.click(screen.getByRole('button', { name: 'Value' }));
+    expect(onSortChange).toHaveBeenLastCalledWith('value', 'desc');
+    rerender(<DataTable {...props} sortColumn="value" sortDirection="desc" />);
+    await user.click(screen.getByRole('button', { name: 'Value' }));
+    expect(onSortChange).toHaveBeenLastCalledWith(null, null);
+    await user.click(screen.getByRole('button', { name: 'Name' }));
+    expect(onSortChange).toHaveBeenLastCalledWith('name', 'asc');
+  });
+
+  it('preserves tie order descending and starts from the existing default sort', async () => {
+    const user = userEvent.setup();
+    render(<DataTable
+      data={[{ ...mockData[0], value: 50 }, mockData[1], mockData[2]]}
+      columns={mockColumns} getRowKey={item => item.id}
+      defaultSortColumn="value"
+    />);
+    expect(rowNames()).toEqual(['Item A', 'Item B', 'Item C']);
+    await user.click(screen.getByRole('button', { name: 'Value' }));
+    expect(rowNames()).toEqual(['Item C', 'Item A', 'Item B']);
+    await user.click(screen.getByRole('button', { name: 'Value' }));
+    expect(rowNames()).toEqual(['Item A', 'Item B', 'Item C']);
+  });
+
   it('should render table with data', () => {
     render(
       <DataTable
@@ -416,6 +508,10 @@ describe('DataTable', () => {
     expect(grid).toHaveFocus();
     await user.keyboard('{ArrowDown}');
     const activeRowId = grid.getAttribute('aria-activedescendant');
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Name' })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Value' })).toHaveFocus();
     await user.tab();
     expect(editButton).toHaveFocus();
     await user.keyboard('{ArrowDown}{Enter}');

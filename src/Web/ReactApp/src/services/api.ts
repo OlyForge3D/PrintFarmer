@@ -3,7 +3,12 @@
 import { getAuthenticatedCameraProxyRoute } from "@/common/auth/authenticatedCameraRoutes";
 import { generateUUID } from "@/utils/uuid";
 import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
-import type { PrinterSensorSetRequest, PrinterStatus } from "@/types/api";
+import type {
+  DeleteGcodeFilesResponse,
+  DeleteModel3dFilesResponse,
+  PrinterSensorSetRequest,
+  PrinterStatus,
+} from "@/types/api";
 import {
   PrintJobStatusDto,
   BedType,
@@ -104,6 +109,7 @@ import {
   SpoolmanMaterial,
   SpoolmanBulkUpdateFilamentsRequest,
   SpoolmanBulkUpdateResult,
+  SpoolmanFilamentDeletePreview,
   SpoolmanUpdateFilamentRequest,
   SpoolmanUpdateSpoolRequest,
   SpoolmanBulkUpdateSpoolsRequest,
@@ -599,8 +605,31 @@ export class ApiClient {
     return response.data;
   }
 
-  async refreshPrinterFileIndex(printerId: string): Promise<void> {
-    await this.client.post(`/printer-files/printers/${encodeURIComponent(printerId)}/refresh`);
+  async refreshPrinterFileIndex(printerId: string, force = false): Promise<void> {
+    const capacityDeadline = Date.now() + 120_000;
+    for (;;) {
+      try {
+        const response = await this.client.post<{ code: string }>(
+          `/printer-files/printers/${encodeURIComponent(printerId)}/refresh`,
+          undefined,
+          // A forced scan can use the full 120-second server budget after acquiring capacity.
+          force ? { params: { force: true }, timeout: 150_000 } : undefined,
+        );
+        if (force && (response.status !== 200 || response.data?.code !== 'refresh_completed')) {
+          throw new Error('The server did not confirm a completed force refresh. Reload the catalog before retrying.');
+        }
+        return;
+      } catch (error) {
+        // Only source_busy proves no scan started. Never replay a timeout, lost response or partial scan.
+        const busy = typeof error === 'object' && error !== null &&
+          'statusCode' in error && error.statusCode === 409 &&
+          'data' in error && typeof error.data === 'object' && error.data !== null &&
+          'code' in error.data && error.data.code === 'source_busy';
+        const delay = 1_000 + Math.floor(Math.random() * 500);
+        if (!force || !busy || Date.now() + delay >= capacityDeadline) throw error;
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
   }
 
   async setPrinterFileIndexEnabled(printerId: string, enabled: boolean): Promise<void> {
@@ -618,14 +647,19 @@ export class ApiClient {
     return response.data;
   }
 
-  /** Captured thumbnail bytes for one exact observation, or `null` when no image exists (404). */
+  /**
+   * Locally stored thumbnail bytes for one exact observation, or `null` when no image exists
+   * (404). `version` is the preview's opaque `thumbnailVersion`; it makes each stored image a
+   * distinct, cacheable URL. Never contacts the printer.
+   */
   async getPrinterFileLocationThumbnail(
-    locationId: string, observationRevision: number, signal?: AbortSignal,
+    locationId: string, observationRevision: number, version: string | null | undefined, signal?: AbortSignal,
   ): Promise<Blob | null> {
     try {
       const response = await this.client.get<Blob>(
         `/printer-files/locations/${encodeURIComponent(locationId)}/thumbnail`,
-        { params: { observationRevision }, responseType: "blob", signal },
+        // axios drops null/undefined params, so older servers see the unchanged request.
+        { params: { observationRevision, version }, responseType: "blob", signal },
       );
       return response.data;
     } catch (error) {
@@ -742,17 +776,6 @@ export class ApiClient {
       `/printer-file-index/delete-operations/${encodeURIComponent(id)}/reconcile`,
     );
     return response.data;
-  }
-
-  // Get hash for a G-code file (returns string)
-  async getGcodeFileHash(
-    path: string,
-    algorithm: "sha256" | "sha1" = "sha256"
-  ): Promise<string> {
-    const resp = await this.client.get<{ hash: string }>(`/gcode-files/hash`, {
-      params: { path, algorithm },
-    });
-    return resp.data.hash;
   }
 
   // ============ Printer API methods ============
@@ -2550,16 +2573,18 @@ export class ApiClient {
     return ApiClient.normalizePrintablesHistoryPage(response.data);
   }
 
-  async deleteGcodeFiles(fileIds: string[]): Promise<void> {
-    await this.client.delete("/gcode-files", { data: { fileIds } });
+  async deleteGcodeFiles(fileIds: string[]): Promise<DeleteGcodeFilesResponse> {
+    const response = await this.client.delete<DeleteGcodeFilesResponse>("/gcode-files", { data: { fileIds } });
+    return response.data;
   }
 
   async deleteModel3dFile(id: string): Promise<void> {
     await this.client.delete(`/3d-models/${id}`);
   }
 
-  async deleteModel3dFiles(modelIds: string[]): Promise<void> {
-    await this.client.delete("/3d-models", { data: { modelIds } });
+  async deleteModel3dFiles(ids: string[]): Promise<DeleteModel3dFilesResponse> {
+    const response = await this.client.delete<DeleteModel3dFilesResponse>("/3d-models", { data: { ids } });
+    return response.data;
   }
 
   async downloadGcodeFile(filePath: string, originalName?: string): Promise<void> {
@@ -2767,13 +2792,17 @@ export class ApiClient {
     return response.data;
   }
 
+  async createModelFolder(path: string): Promise<void> {
+    await this.client.post("/3d-models/folder", { path, folderType: "models" });
+  }
+
   async moveModel3dFiles(
     fileIds: string[],
     targetFolderPath: string
   ): Promise<{ success: boolean; message?: string }> {
     const resp = await this.client.post("/3d-models/move", {
-      modelIds: fileIds,
-      targetDirectoryId: targetFolderPath,
+      ids: fileIds,
+      targetFolderPath,
     });
     return resp.data as { success: boolean; message?: string };
   }
@@ -3099,11 +3128,6 @@ export class ApiClient {
     return response.data;
   }
 
-  async getFeatureFlags(): Promise<Record<string, boolean>> {
-    const response = await this.client.get<Record<string, boolean>>('/system/feature-flags');
-    return response.data;
-  }
-
   // ============ Generic request method ============
 
   async request<T>(config: PfRequestConfig): Promise<T> {
@@ -3201,11 +3225,6 @@ export class ApiClient {
 
   async getLocationTree(): Promise<import("@/types/api").LocationTreeNode[]> {
     const response = await this.client.get<import("@/types/api").LocationTreeNode[]>('/locations/tree');
-    return response.data;
-  }
-
-  async getLocationAncestors(id: string): Promise<import("@/types/api").LocationBreadcrumbItem[]> {
-    const response = await this.client.get<import("@/types/api").LocationBreadcrumbItem[]>(`/locations/${id}/ancestors`);
     return response.data;
   }
 
@@ -3390,55 +3409,6 @@ export class ApiClient {
     }
     const response = await this.client.get('/tags/models/filter', { params });
     return response.data || [];
-  }
-
-  // ============ Prediction API methods ============
-  async getPrediction<T = Record<string, unknown>>(jobId: string): Promise<T> {
-    const response = await this.client.get<T>(`/predictions/jobs/${jobId}/completion`);
-    return response.data;
-  }
-
-  async getStatistics<T = Record<string, unknown>>(jobId: string): Promise<T | null> {
-    try {
-      const response = await this.client.get<T>(`/predictions/jobs/${jobId}/statistics`);
-      return response.data;
-    } catch (error: unknown) {
-      if ((error as Record<string, unknown>).statusCode === 404) {
-        return null;
-      }
-      throw error;
-    }
-  }
-
-  async getMaterialStats<T = Record<string, unknown>>(
-    material?: string,
-    printerId?: string,
-    minSampleSize?: number
-  ): Promise<Record<string, T>> {
-    const params: Record<string, string> = {};
-    if (material) params.material = material;
-    if (printerId) params.printerId = printerId;
-    if (minSampleSize) params.minSampleSize = minSampleSize.toString();
-    const response = await this.client.get<Record<string, T>>('/predictions/stats/by-material', { params });
-    return response.data || {};
-  }
-
-  async getModelStats<T = Record<string, unknown>>(modelId: string, material?: string): Promise<T | null> {
-    try {
-      const params: Record<string, string> = {};
-      if (material) params.material = material;
-      const response = await this.client.get<T>(`/predictions/stats/model/${modelId}`, { params });
-      return response.data;
-    } catch (error: unknown) {
-      if ((error as Record<string, unknown>).statusCode === 404) {
-        return null;
-      }
-      throw error;
-    }
-  }
-
-  async recordCompletion(jobId: string, request: object): Promise<void> {
-    await this.client.post(`/predictions/jobs/${jobId}/completion-record`, request);
   }
 
   // ============ System Logs API methods ============
@@ -3773,8 +3743,22 @@ export class ApiClient {
   /**
    * Delete a single filament from Spoolman by ID.
    */
-  async deleteFilament(id: number): Promise<void> {
-    await this.client.delete(`/spoolman/filaments/${id}`);
+  async deleteFilament(id: number, archivedSpoolIds?: number[]): Promise<void> {
+    if (archivedSpoolIds === undefined) {
+      await this.client.delete(`/spoolman/filaments/${id}`);
+    } else {
+      // Each server-side Spoolman request is bounded; a batch can legitimately
+      // exceed the shared client timeout. Keep its final/partial outcome visible.
+      await this.client.post(`/spoolman/filaments/${id}/delete-confirmed`, { archivedSpoolIds }, { timeout: 0 });
+    }
+  }
+
+  /** Includes archived spools, without deleting anything. Never use a cached display list. */
+  async previewFilamentDelete(id: number, signal?: AbortSignal): Promise<SpoolmanFilamentDeletePreview> {
+    const response = await this.client.get<SpoolmanFilamentDeletePreview>(
+      `/spoolman/filaments/${id}/delete-preview`, { signal },
+    );
+    return response.data;
   }
 
   /**
@@ -4038,7 +4022,6 @@ export class ApiClient {
   }
 
   // ============ 3D Models API methods ============
-
   /**
    * Get all 3D models
    */
@@ -4626,6 +4609,40 @@ export class ApiClient {
   async getCamerasByPrinter(printerId: string): Promise<import('@/types/api').CameraDto[]> {
     const response = await this.client.get(`/cameras/by-printer/${printerId}`);
     return response.data;
+  }
+
+  async getBedClearEvaluations(printerId: string): Promise<import('@/types/api').BedClearEvaluationDto[]> {
+    const response = await this.client.get(`/bed-clear-detector/printers/${printerId}/evaluations`);
+    return response.data;
+  }
+
+  async captureBedClearEvaluation(printerId: string): Promise<{ id: string }> {
+    const response = await this.client.post(`/bed-clear-detector/printers/${printerId}/evaluations`);
+    return response.data;
+  }
+
+  async getBedClearDetectorMetrics(printerId: string): Promise<import('@/types/api').BedClearDetectorMetricsDto> {
+    const response = await this.client.get(`/bed-clear-detector/printers/${printerId}/metrics`);
+    return response.data;
+  }
+
+  async getBedClearEvaluationImage(evaluationId: string): Promise<Blob> {
+    const response = await this.client.get<Blob>(
+      `/bed-clear-detector/evaluations/${evaluationId}/image`,
+      { responseType: 'blob' }
+    );
+    return response.data;
+  }
+
+  async labelBedClearEvaluation(
+    evaluationId: string,
+    groundTruth: import('@/types/api').BedClearGroundTruth
+  ): Promise<void> {
+    await this.client.put(`/bed-clear-detector/evaluations/${evaluationId}/label`, { groundTruth });
+  }
+
+  async deleteBedClearEvaluation(evaluationId: string): Promise<void> {
+    await this.client.delete(`/bed-clear-detector/evaluations/${evaluationId}`);
   }
 
   /**

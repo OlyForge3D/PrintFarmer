@@ -221,41 +221,40 @@ struct PrinterListView: View {
                 .padding(.top, 8)
 
             ScrollView {
-                LazyVStack(spacing: 12) {
-                    Group {
-                        if viewModel.filteredPrinters.isEmpty {
-                            ContentUnavailableView {
-                                Label("No Printers in This Filter", systemImage: "line.3.horizontal.decrease.circle")
-                            } description: {
-                                Text("Choose another Farm filter to see printers.")
-                            }
-                            .padding(.top, 40)
-                        } else {
-                            LazyVGrid(columns: iPadColumns, spacing: 12) {
-                                ForEach(viewModel.filteredPrinters) { printer in
-                                    NavigationLink(value: AppDestination.printerDetail(id: printer.id)) {
-                                        PrinterCardView(
-                                            printer: printer,
-                                            isPendingReady: viewModel.isPendingReady(printer),
-                                            attentionCount: attentionCount(for: printer.id),
-                                            failureReason: failureReason(for: printer.id),
-                                            printerService: services.printerService
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityElement(children: .combine)
-                                    .accessibilityHint("Opens \(printer.name) printer details.")
-                                    .accessibilityIdentifier(
-                                        printerAccessibilityIdentifier(for: printer)
+                // Avoid nesting lazy containers; Farm swipes hung with both LazyVStack and LazyVGrid (#3539).
+                Group {
+                    if viewModel.filteredPrinters.isEmpty {
+                        ContentUnavailableView {
+                            Label("No Printers in This Filter", systemImage: "line.3.horizontal.decrease.circle")
+                        } description: {
+                            Text("Choose another Farm filter to see printers.")
+                        }
+                        .padding(.top, 40)
+                    } else {
+                        LazyVGrid(columns: iPadColumns, spacing: 12) {
+                            ForEach(viewModel.filteredPrinters) { printer in
+                                NavigationLink(value: AppDestination.printerDetail(id: printer.id)) {
+                                    PrinterCardView(
+                                        printer: printer,
+                                        isPendingReady: viewModel.isPendingReady(printer),
+                                        attentionCount: attentionCount(for: printer.id),
+                                        failureReason: failureReason(for: printer.id),
+                                        printerService: services.printerService
                                     )
                                 }
+                                .buttonStyle(.plain)
+                                .accessibilityElement(children: .combine)
+                                .accessibilityHint("Opens \(printer.name) printer details.")
+                                .accessibilityIdentifier(
+                                    printerAccessibilityIdentifier(for: printer)
+                                )
                             }
                         }
                     }
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
-                    .padding(.bottom, 112)
                 }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .padding(.bottom, 112)
             }
             .accessibilityIdentifier("farm.printerList")
         }

@@ -198,6 +198,7 @@ afterEach(cleanup);
 describe('FailureDetectionEvent type', () => {
   it('should have the correct shape when used as an object', async () => {
     const event = {
+      provider: 'Obico',
       printerId: 'abc-123',
       printerName: 'My Printer',
       jobId: 'job-1',
@@ -218,6 +219,7 @@ describe('FailureDetectionEvent type', () => {
 
   it('should allow optional jobId to be undefined', () => {
     const event: FailureDetectionEvent = {
+      provider: 'Obico',
       printerId: 'abc-123',
       printerName: 'Printer',
       confidence: 0.5,
@@ -274,7 +276,6 @@ function makeFailureDetectionStatus(
     monitoringEnabled: true,
     confidenceThreshold: 0.8,
     scanIntervalSeconds: 30,
-    autoPauseOnFailure: true,
     configuredPrinterCount: 1,
     activelyMonitoredPrinterCount: 1,
     lastAnalyzedPrinterCount: 1,
@@ -330,7 +331,7 @@ describe('CompactPrinterCard monitoring badge', () => {
     // Shield icon with proper aria label should be present
     expect(screen.getByLabelText('Failure detection guarding')).toBeTruthy();
     // Button should exist with tooltip
-    expect(screen.getByRole('button', { name: /open spaghetti detection details/i })).toHaveAttribute('title', expect.stringContaining('Guarding'));
+    expect(screen.getByRole('button', { name: /open failure detection details/i })).toHaveAttribute('title', expect.stringContaining('Guarding'));
   });
 
   it('does NOT show guarding badge when printer does not have Obico monitoring enabled', () => {
@@ -381,7 +382,7 @@ describe('CompactPrinterCard monitoring badge', () => {
     // Icon-only badge, no inline text
     expect(screen.queryByText('Ready')).not.toBeInTheDocument();
     // Button should exist with tooltip showing "Ready"
-    expect(screen.getByRole('button', { name: /open spaghetti detection details/i })).toHaveAttribute('title', expect.stringContaining('Ready'));
+    expect(screen.getByRole('button', { name: /open failure detection details/i })).toHaveAttribute('title', expect.stringContaining('Ready'));
   });
 
   it('shows the bed-clear overlay when auto-dispatch status is PendingReady', () => {
@@ -466,7 +467,6 @@ describe('CompactPrinterCard monitoring badge', () => {
       detectionSource: 'global',
       lastOutcome: 'error',
       lastAnalyzedAt: '2026-01-01T00:00:00Z',
-      lastAutoPaused: false,
     };
 
     render(
@@ -499,6 +499,7 @@ describe('CompactPrinterCard monitoring badge', () => {
 
     act(() => {
       emitFailureDetected({
+        provider: 'Obico',
         printerId: printer.id,
         printerName: printer.name,
         confidence: 0.87,
@@ -508,7 +509,7 @@ describe('CompactPrinterCard monitoring badge', () => {
       });
     });
 
-    expect(screen.getByText('Failure: 87%')).toBeTruthy();
+    expect(screen.getByText(/Obico\s*:\s*87\s*%/)).toBeTruthy();
     expect(screen.getByText('Review required')).toBeTruthy();
     expect(screen.queryByText('1 incident')).not.toBeInTheDocument();
   });
@@ -546,7 +547,7 @@ describe('DetailedPrinterCard monitoring badge', () => {
     // Shield icon with proper aria label should be present
     expect(screen.getByLabelText('Failure detection guarding')).toBeTruthy();
     // Button should exist with tooltip
-    expect(screen.getByRole('button', { name: /open spaghetti detection details/i })).toHaveAttribute('title', expect.stringContaining('Guarding'));
+    expect(screen.getByRole('button', { name: /open failure detection details/i })).toHaveAttribute('title', expect.stringContaining('Guarding'));
   });
 
   it('does NOT show guarding badge when printer does not have Obico monitoring enabled', () => {
@@ -580,20 +581,21 @@ describe('DetailedPrinterCard monitoring badge', () => {
 
     act(() => {
       emitFailureDetected({
+        provider: 'Obico',
         printerId: printer.id,
         printerName: printer.name,
         confidence: 0.91,
         detectedAt: '2026-01-01T00:00:00Z',
-        autoPaused: true,
+        autoPaused: false,
         snapshotUrl: 'http://example.com/snapshot.jpg',
       });
     });
 
-    expect(screen.getByText('Print auto-paused')).toBeTruthy();
+    expect(screen.getByText('Review required')).toBeTruthy();
     expect(screen.queryByText('1 incident')).not.toBeInTheDocument();
     expect(
       screen.getByText(
-        /Inspect print and verify/
+        /Check the live camera/
       )
     ).toBeTruthy();
     expect(screen.getByRole('link', { name: /snapshot/i })).toHaveAttribute(

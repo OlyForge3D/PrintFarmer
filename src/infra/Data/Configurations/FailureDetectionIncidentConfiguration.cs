@@ -16,6 +16,7 @@ public sealed class FailureDetectionIncidentConfiguration : IEntityTypeConfigura
 
         _ = builder.HasKey(incident => incident.Id);
 
+        _ = builder.Property(incident => incident.Provider).HasMaxLength(64).IsRequired();
         _ = builder.Property(incident => incident.JobName).HasMaxLength(255);
         _ = builder.Property(incident => incident.FileName).HasMaxLength(255);
         _ = builder.Property(incident => incident.Confidence).HasColumnType("decimal(5,4)");

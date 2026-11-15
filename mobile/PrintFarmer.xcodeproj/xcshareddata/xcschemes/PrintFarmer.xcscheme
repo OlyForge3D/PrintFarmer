@@ -37,6 +37,9 @@
             reference = "container:PrintFarmerLiveSensorE2E.xctestplan">
          </TestPlanReference>
          <TestPlanReference
+            reference = "container:PrintFarmerLiveSensorStateE2E.xctestplan">
+         </TestPlanReference>
+         <TestPlanReference
             reference = "container:AppStoreScreenshots.xctestplan">
          </TestPlanReference>
       </TestPlans>

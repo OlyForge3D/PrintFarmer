@@ -263,9 +263,8 @@ import { apiClient } from '@/services/api';
 // Direct usage (recommended for simple calls)
 const printers = await apiClient.getPrinters();
 
-// Through service wrapper (for caching/debouncing)
-import { jobSchedulingService } from '@/services/jobSchedulingService';
-const scheduled = await jobSchedulingService.getScheduledJob(jobId);
+// Use the central client directly for API requests
+const scheduled = await apiClient.getScheduledJob(jobId);
 ```
 
 **DO NOT create raw axios instances or use fetch for API calls.** All services delegate to `apiClient`:

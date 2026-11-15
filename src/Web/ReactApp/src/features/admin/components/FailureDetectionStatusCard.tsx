@@ -29,6 +29,10 @@ function formatStateLabel(state: string): string {
       return 'Error';
     case 'idle':
       return 'Idle';
+    case 'reservation-held':
+      return 'Reservation held';
+    case 'unknown':
+      return 'Activity unknown';
     default:
       return 'Disabled';
   }
@@ -39,6 +43,8 @@ function stateVariant(state: string): 'default' | 'success' | 'warning' | 'error
     case 'monitoring':
       return 'success';
     case 'misconfigured':
+    case 'reservation-held':
+    case 'unknown':
       return 'warning';
     case 'error':
       return 'error';
@@ -68,7 +74,7 @@ export function FailureDetectionStatusCard() {
   if (error && !data) {
     return (
       <Alert type="warning" title="Failure detection status unavailable">
-        Could not load the live spaghetti-detection runtime status.
+        Could not load the live failure-detection runtime status.
       </Alert>
     );
   }
@@ -78,7 +84,7 @@ export function FailureDetectionStatusCard() {
   }
 
   const activePrinters = data.printers.filter(printer => printer.state === 'monitoring');
-  const attentionPrinters = data.printers.filter(printer => printer.state === 'misconfigured' || printer.state === 'error').slice(0, 3);
+  const attentionPrinters = data.printers.filter(printer => ['misconfigured', 'error', 'reservation-held', 'unknown'].includes(printer.state)).slice(0, 3);
 
   return (
     <Card>
@@ -93,9 +99,6 @@ export function FailureDetectionStatusCard() {
           <div className="flex flex-wrap gap-2">
             <Badge variant={data.monitoringEnabled ? 'success' : 'default'} size="sm">
               Global {data.monitoringEnabled ? 'On' : 'Off'}
-            </Badge>
-            <Badge variant={data.autoPauseOnFailure ? 'error' : 'warning'} size="sm">
-              Auto-pause {data.autoPauseOnFailure ? 'On' : 'Off'}
             </Badge>
           </div>
         </div>
@@ -121,7 +124,7 @@ export function FailureDetectionStatusCard() {
 
         {data.printers.length === 0 ? (
           <div className="rounded-lg border border-dashed border-pf-border px-4 py-3 text-sm text-pf-text-secondary">
-            No printers have Obico monitoring enabled yet.
+            No printers have failure detection enabled yet.
           </div>
         ) : (
           // Equal `1fr` tracks, not the old 1.2fr/1fr viewport breakpoint. This
@@ -178,6 +181,22 @@ export function FailureDetectionStatusCard() {
               )}
             </div>
           </div>
+        )}
+        {data.printers.some(printer => printer.providers?.length) && (
+          <section className="space-y-2" aria-label="Detection provider status">
+            <h3 className="text-sm font-semibold text-pf-text-primary">Detection providers</h3>
+            {data.printers.map(printer => (
+              <div key={printer.printerId} className="rounded-lg border border-pf-border bg-pf-bg-1 px-4 py-3">
+                <div className="font-medium text-pf-text-primary">{printer.printerName}</div>
+                {printer.providers?.length ? printer.providers.map(provider => (
+                  <div key={provider.provider} className="mt-1 text-sm text-pf-text-secondary">
+                    <span className="font-medium">{provider.provider}</span>
+                    {' - '}{provider.state} ({provider.analysisMode}): {provider.reason}
+                  </div>
+                )) : <p className="text-sm text-pf-text-secondary">No provider status reported</p>}
+              </div>
+            ))}
+          </section>
         )}
       </Card.Body>
     </Card>

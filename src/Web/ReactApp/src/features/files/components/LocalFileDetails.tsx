@@ -3,6 +3,7 @@ import { FileDate } from '@/features/files/components/FileDate';
 import { FileDetailPanel, type FileDetailRow } from '@/features/files/components/FileDetailPanel';
 import { FileThumbnail } from '@/features/files/components/FileThumbnail';
 import type { FileAction } from '@/features/files/components/FileActions';
+import { PrinterPrintSettings } from '@/features/files/components/PrinterPrintSettings';
 import {
   FILE_KIND_LABEL,
   formatLayerHeight,
@@ -10,8 +11,9 @@ import {
   formatSizeLabel,
   type FileKind,
 } from '@/features/files/utils/fileDisplay';
+import { printSettingRows } from '@/features/files/utils/printerMetadata';
 import type { FileItem } from '@/features/fileBrowser/types';
-import type { GcodeFile } from '@/types/api';
+import type { GcodeFile, PrinterPrintMetadata } from '@/types/api';
 
 interface LocalFileDetailsProps {
   file: FileItem;
@@ -23,10 +25,31 @@ interface LocalFileDetailsProps {
 }
 
 /** Detail panel content for an owned local-library asset. */
+/**
+ * Legacy Slic3r writes `fill_density = 0.2` (a fraction) where newer slicers write `20%`, and the
+ * extractor stores the bare number. Values strictly between 0 and 1 are read as fractions; exactly 1
+ * stays 1% because it is ambiguous and modern slicers emit it far more often than a solid 1.0.
+ */
+function normalizeInfillPercentage(value: number | null | undefined): number | null | undefined {
+  return value != null && value > 0 && value < 1 ? value * 100 : value;
+}
+
 export function LocalFileDetails({ file, kind, extension, actions, onClose }: LocalFileDetailsProps) {
   const gcode = file.meta?.gcode as GcodeFile | undefined;
-  const material = gcode?.requiredMaterial || gcode?.extractedMaterial;
-  const slicer = [gcode?.extractedSlicerName, gcode?.extractedSlicerVersion].filter(Boolean).join(' ');
+  // Map the library's extracted G-code fields onto the on-printer settings shape so both panels
+  // read the same; settings the library does not extract are omitted rather than shown as unknown.
+  const printMetadata: PrinterPrintMetadata | null = gcode ? {
+    slicerName: gcode.extractedSlicerName,
+    slicerVersion: gcode.extractedSlicerVersion,
+    printerModel: gcode.extractedPrinterModel || gcode.extractedPrinterModelName,
+    nozzleDiameterMm: gcode.extractedNozzleDiameter,
+    nozzleTemperatureC: gcode.extractedHotendTemp,
+    bedTemperatureC: gcode.extractedBedTemp,
+    infillPercentage: normalizeInfillPercentage(gcode.extractedInfill),
+    filamentType: gcode.extractedMaterial,
+    filamentUsedMm: gcode.extractedFilamentLength,
+  } : null;
+  const hasPrintSettings = printSettingRows(printMetadata).some((row) => row.value != null);
   const rows: FileDetailRow[] = [
     { label: 'Type', value: extension ? `${FILE_KIND_LABEL[kind]} (${extension.toUpperCase()})` : FILE_KIND_LABEL[kind] },
     { label: 'Size', value: formatSizeLabel(file.fileSize) },
@@ -37,9 +60,8 @@ export function LocalFileDetails({ file, kind, extension, actions, onClose }: Lo
     // Extracted G-code metadata is in minutes; models have none, so both read "Unavailable".
     { label: 'Print time', value: formatPrintMinutes(gcode?.extractedPrintTime) },
     { label: 'Layer height', value: formatLayerHeight(gcode?.extractedLayerHeight) },
-    ...(material ? [{ label: 'Material', value: material }] : []),
-    ...(gcode?.extractedPrinterModelName ? [{ label: 'Sliced for', value: gcode.extractedPrinterModelName }] : []),
-    ...(slicer ? [{ label: 'Slicer', value: slicer }] : []),
+    // The extracted material is listed as "Filament type" under the print settings.
+    ...(gcode?.requiredMaterial ? [{ label: 'Material', value: gcode.requiredMaterial }] : []),
   ];
 
   return (
@@ -68,6 +90,9 @@ export function LocalFileDetails({ file, kind, extension, actions, onClose }: Lo
             ))}
           </ul>
         </div>
+      )}
+      {hasPrintSettings && (
+        <PrinterPrintSettings metadata={printMetadata} status={{ kind: 'settled' }} hideUnknown />
       )}
     </FileDetailPanel>
   );

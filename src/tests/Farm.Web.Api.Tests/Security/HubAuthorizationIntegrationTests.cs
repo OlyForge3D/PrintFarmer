@@ -63,6 +63,57 @@ public sealed class HubAuthorizationIntegrationTests : IAsyncLifetime, IDisposab
     }
 
     [Fact]
+    public async Task PrinterHub_ReconnectWithRevokedJwt_IsDenied()
+    {
+        (Guid userId, string token) = await CreateUserAndTokenAsync();
+        await using HubConnection connection = new HubConnectionBuilder()
+            .WithUrl(
+                new Uri(_factory.Server.BaseAddress, "/hubs/printers"),
+                options =>
+                {
+                    options.AccessTokenProvider = () => Task.FromResult<string?>(token);
+                    options.HttpMessageHandlerFactory = _ => _factory.Server.CreateHandler();
+                    options.Transports = HttpTransportType.WebSockets;
+                    options.WebSocketFactory = async (context, cancellationToken) =>
+                    {
+                        string authenticatedUrl = QueryHelpers.AddQueryString(
+                            context.Uri.ToString(),
+                            "access_token",
+                            token);
+                        return await _factory.Server
+                            .CreateWebSocketClient()
+                            .ConnectAsync(new Uri(authenticatedUrl), cancellationToken);
+                    };
+                })
+            .Build();
+
+        await connection.StartAsync();
+        await connection.StopAsync();
+
+        AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        try
+        {
+            ITokenRevocationService revocationService =
+                scope.ServiceProvider.GetRequiredService<ITokenRevocationService>();
+            _ = await revocationService.RevokeAllUserTokensAsync(userId, userId, "test reconnect revocation");
+        }
+        finally
+        {
+            await scope.DisposeAsync();
+        }
+
+        HttpRequestException reconnectFailure = await Assert.ThrowsAsync<HttpRequestException>(
+            () => connection.StartAsync());
+        reconnectFailure.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+        using HttpClient client = _factory.CreateClient();
+        using HttpResponseMessage queryTokenHandshake = await client.PostAsync(
+            $"/hubs/printers/negotiate?negotiateVersion=1&access_token={Uri.EscapeDataString(token)}",
+            content: null);
+        queryTokenHandshake.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
     public async Task PrinterHub_JwtClient_CannotJoinUnauthorizedQueueOrProjectGroups()
     {
         (_, string token) = await CreateUserAndTokenAsync();

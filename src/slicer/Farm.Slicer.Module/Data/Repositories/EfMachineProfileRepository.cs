@@ -11,8 +11,30 @@ public class EfMachineProfileRepository(SlicerDbContext db) : IMachineProfileRep
     private readonly SlicerDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
 
     /// <inheritdoc/>
+    public async Task<HashSet<Guid>> GetPrinterModelIdsWithProfilesAsync(IEnumerable<Guid> printerModelIds, CancellationToken ct = default)
+    {
+        HashSet<Guid> result = [];
+        foreach (Guid[] batch in printerModelIds.Distinct().Chunk(100))
+        {
+            result.UnionWith(await _db.MachineProfiles.AsNoTracking()
+                .Where(p => p.PrinterModelId.HasValue && batch.Contains(p.PrinterModelId.Value))
+                .Select(p => p.PrinterModelId!.Value).Distinct().ToListAsync(ct));
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc/>
     public async Task<MachineProfile?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
         await _db.MachineProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<MachineProfile>> GetOwnedNonSystemAsync(SlicerType engine, Guid userId, CancellationToken ct = default) =>
+        await _db.MachineProfiles.AsNoTracking()
+            .Where(p => p.SlicerType == engine && !p.IsSystem && p.CreatedByUserId == userId)
+            .OrderBy(p => p.Manufacturer)
+            .ThenBy(p => p.Name)
+            .ToListAsync(ct);
 
     /// <inheritdoc/>
     public async Task<IReadOnlyList<MachineProfile>> GetByEngineAsync(SlicerType engine, bool includeSystem = true, Guid? userId = null, CancellationToken ct = default)

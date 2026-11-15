@@ -17,6 +17,8 @@ import { cameraService } from '@/services/cameraService';
 import { apiClient } from '@/services/api';
 import type { CameraDto, CreateCameraDto, Printer } from '@/types/api';
 import { EditCameraModal } from '@/features/cameras/components/EditCameraModal';
+import { TableHeaderCell } from '@/common/components/ui/Table';
+import { useTableSort } from '@/common/hooks/useTableSort';
 
 interface CameraManagementPanelProps {
   onCamerasChanged?: () => void;
@@ -62,6 +64,13 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
     cameras,
     (state, deletedId) => state.filter((cam) => cam.id !== deletedId)
   );
+  const { headerProps, sortDataByValues } = useTableSort<'name' | 'location' | 'printer' | 'status'>();
+  const sortedCameras = sortDataByValues(optimisticCameras, {
+    name: camera => camera.name,
+    location: camera => camera.location || null,
+    printer: camera => camera.printerId ? printersById.get(camera.printerId) ?? 'Linked printer' : null,
+    status: camera => camera.isEnabled ? 'Enabled' : 'Disabled',
+  });
 
   // State for delete confirmation modal
   const [cameraToDelete, setCameraToDelete] = useState<CameraDto | null>(null);
@@ -356,28 +365,28 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
           <table className="min-w-full divide-y divide-pf-border">
             <thead className="bg-pf-bg-1">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wider">
+                <TableHeaderCell {...headerProps('name')} className="px-4 py-3 text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wider">
                   Camera
-                </th>
+                </TableHeaderCell>
                 <th className="px-4 py-3 text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wider">
                   URLs
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wider">
+                <TableHeaderCell {...headerProps('location')} className="px-4 py-3 text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wider">
                   Location
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wider">
+                </TableHeaderCell>
+                <TableHeaderCell {...headerProps('printer')} className="px-4 py-3 text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wider">
                   Printer
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wider">
+                </TableHeaderCell>
+                <TableHeaderCell {...headerProps('status')} className="px-4 py-3 text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wider">
                   Status
-                </th>
+                </TableHeaderCell>
                 <th className="px-4 py-3 text-right text-xs font-medium text-pf-text-secondary uppercase tracking-wider">
                   Actions
                 </th>
               </tr>
             </thead>
             <tbody className="bg-pf-bg-0 divide-y divide-pf-border">
-              {optimisticCameras.map((camera) => (
+              {sortedCameras.map((camera) => (
                 <SelectableRow key={camera.id} isSelected={false}>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">

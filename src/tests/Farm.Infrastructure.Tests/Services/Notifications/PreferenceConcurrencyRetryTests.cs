@@ -188,7 +188,7 @@ public sealed class PreferenceConcurrencyRetryTests
         factory.CreatedContexts.Should().Be(1);
     }
 
-    private static SqlException CreateSqlException(int number, string message)
+    internal static SqlException CreateSqlException(int number, string message)
     {
         const BindingFlags instanceFlags = BindingFlags.Instance | BindingFlags.NonPublic;
         var collection = (SqlErrorCollection)Activator.CreateInstance(

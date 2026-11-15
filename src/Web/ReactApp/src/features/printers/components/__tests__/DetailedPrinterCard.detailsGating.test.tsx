@@ -405,15 +405,20 @@ describe('DetailedPrinterCard Open in Browser (#1546)', () => {
     expect(disabledButton).not.toBeDisabled();
     expect(disabledButton).toHaveAttribute('aria-disabled', 'true');
     expect(disabledButton).toHaveAttribute('title', 'Not available for simulated test printers');
+    expect(screen.getByText(printer.name).parentElement).toContainElement(disabledButton);
   });
 
-  it('keeps a real printer browser URL as a working link', () => {
+  it('keeps a real printer browser URL in the header rather than the action toolbar', () => {
     const printer = makePrinter({ frontendUrl: 'http://printer-1.local' });
 
     render(<DetailedPrinterCard printer={printer} />);
 
-    expect(screen.getByRole('link', { name: `Open printer ${printer.name} in new tab` }))
-      .toHaveAttribute('href', 'http://printer-1.local');
+    const link = screen.getByRole('link', { name: `Open printer ${printer.name} in new tab` });
+    expect(link).toHaveAttribute('href', 'http://printer-1.local');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(screen.getByText(printer.name).parentElement).toContainElement(link);
+    expect(screen.getByRole('toolbar', { name: 'Printer actions' })).not.toContainElement(link);
   });
 });
 

@@ -324,7 +324,8 @@ public class GcodeFilesController(
             string userId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
 
             // Delegate to service - it handles all the validation, quota checking, hashing, and finalization
-            ChunkedUploadStatus result = await chunkedUploadService.AppendChunkAsync(uploadId, offset, chunkBytes, userId, quotaService);
+            ChunkedUploadAppendResult appendResult = await chunkedUploadService.AppendChunkWithMetadataAsync(uploadId, offset, chunkBytes, userId, quotaService);
+            ChunkedUploadStatus result = appendResult.Status;
 
             // If upload is complete, finalize it to the database
             Guid? gcodeFileId = null;
@@ -342,7 +343,7 @@ public class GcodeFilesController(
                         result.SafeFileName,
                         result.ThumbnailPath,
                         virtualDir,
-                        chunkedUploadService,
+                        appendResult.ExtractedMetadata,
                         CancellationToken.None);
 
                     if (gcodeFile != null)
@@ -557,19 +558,31 @@ public class GcodeFilesController(
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> DeleteGcodeFileAsync(Guid id)
     {
         try
         {
-            bool success = await gcodeFilesService.DeleteFilesAsync(new[] { id }, HttpContext.RequestAborted);
-            return !success ? NotFound(new { message = "File not found", fileId = id }) : NoContent();
+            IReadOnlyList<BulkDeleteItemResult> results = await gcodeFilesService.DeleteFilesAsync([id], HttpContext.RequestAborted);
+            BulkDeleteItemResult? result = results.Count == 1 ? results[0] : null;
+            switch (result)
+            {
+                case { RecordRemoved: true }:
+                    return NoContent();
+                case { Status: BulkDeleteItemStatus.Blocked, Reason: BulkDeleteItemReasons.ActiveJobs }:
+                    return Conflict(new
+                    {
+                        message = $"Cannot delete G-code file {id} because it is referenced by active job(s). Cancel or complete those jobs first.",
+                        fileId = id
+                    });
+                case { Status: BulkDeleteItemStatus.NotFound } or { Status: BulkDeleteItemStatus.Blocked }:
+                    return NotFound(new { message = "File not found", fileId = id });
+                default:
+                    logger.LogError("G-code file {Id} deletion ended with {Status} ({Reason})", id, result?.Status, result?.Reason);
+                    return Problem("Failed to delete file", statusCode: 500);
+            }
         }
-        catch (InvalidOperationException ex)
-        {
-            // The file is still referenced by active queue jobs (or other constraints)
-            return Conflict(new { message = ex.Message, fileId = id });
-        }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Error deleting G-code file {Id}", id);
             return Problem("Failed to delete file", statusCode: 500);
@@ -580,12 +593,16 @@ public class GcodeFilesController(
     /// Delete G-code files by file IDs
     /// </summary>
     /// <param name="request">Request with list of file IDs (GUIDs) to delete</param>
-    /// <returns>Deletion result with count</returns>
+    /// <returns>
+    /// Removed-record count, distinct requested count, and one typed outcome per distinct ID. Per-item
+    /// failures (missing, active jobs, unsafe path, database or cleanup failures) are reported in
+    /// <c>results</c> with HTTP 200 so callers can retry or keep only the unresolved IDs.
+    /// </returns>
     [RequirePermission("gcode_library", "admin")]
     [HttpDelete]
-    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(DeleteFilesResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult> DeleteGcodeFilesAsync([FromBody] DeleteFilesRequest request)
+    public async Task<ActionResult<DeleteFilesResponse>> DeleteGcodeFilesAsync([FromBody] DeleteFilesRequest request)
     {
         if (request?.FileIds == null || request.FileIds.Count == 0)
         {
@@ -594,14 +611,10 @@ public class GcodeFilesController(
 
         try
         {
-            bool success = await gcodeFilesService.DeleteFilesAsync(request.FileIds, HttpContext.RequestAborted);
-            return Ok(new
-            {
-                deleted = success ? request.FileIds.Count : 0,
-                totalRequested = request.FileIds.Count
-            });
+            IReadOnlyList<BulkDeleteItemResult> results = await gcodeFilesService.DeleteFilesAsync(request.FileIds, HttpContext.RequestAborted);
+            return Ok(new DeleteFilesResponse(results.Count(r => r.RecordRemoved), results.Count, results));
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError("Error deleting G-code files: {Message}", ex.Message);
             return Problem("Failed to delete files", statusCode: 500);
@@ -745,6 +758,12 @@ public class GcodeFilesController(
                 ".gif" => "image/gif",
                 _ => "image/png"
             };
+
+            // .bgcode files may only embed JPG thumbnails; they share the _thumb.png naming, so sniff JPEG bytes.
+            if (contentType == "image/png" && IsJpegFile(absolutePath))
+            {
+                contentType = "image/jpeg";
+            }
 
             logger.LogInformation("[Thumbnail] Returning thumbnail for GCode file {Id} with content type {ContentType}", id, contentType);
             return PhysicalFile(absolutePath, contentType);
@@ -932,6 +951,25 @@ public class GcodeFilesController(
         return string.IsNullOrWhiteSpace(status.FinalFilePath)
             ? throw new InvalidOperationException("Upload has not completed - no final file path available")
             : status.FinalFilePath;
+    }
+
+    private static bool IsJpegFile(string path)
+    {
+        try
+        {
+            using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            Span<byte> header = stackalloc byte[3];
+            return stream.ReadAtLeast(header, header.Length, throwOnEndOfStream: false) == header.Length
+                && header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     // ---------------- Settings & Move endpoints ----------------

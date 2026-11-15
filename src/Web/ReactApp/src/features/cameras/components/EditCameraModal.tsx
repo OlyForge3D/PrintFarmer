@@ -218,7 +218,7 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess, lockPrinte
 
     const request: UpdateCameraDto = {
       name: formData.name.trim(),
-      description: formData.description.trim() || undefined,
+      description: formData.description.trim(),
       sortOrder: formData.sortOrder,
       isEnabled: formData.isEnabled,
     };

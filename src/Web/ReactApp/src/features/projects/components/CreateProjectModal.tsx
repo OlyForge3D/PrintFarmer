@@ -3,6 +3,8 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { Modal } from '@/common/components/modals/Modal';
 import { FilePickerModal } from '@/common/components/modals/FilePickerModal';
 import { Button, Select, Textarea } from '@/common/components/ui';
+import { TableHeaderCell } from '@/common/components/ui/Table';
+import { useTableSort } from '@/common/hooks/useTableSort';
 import { 
   PlusIcon, 
   DeleteIcon,
@@ -62,6 +64,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   const [gcodeFileCache, setGcodeFileCache] = useState<Record<string, GcodeFile>>({});
   // Track which filament is assigned to each file (keyed by gcodeFileId)
   const [filamentAssignments, setFilamentAssignments] = useState<Record<string, number>>({});
+  const { headerProps, sortDataByValues } = useTableSort<'file' | 'material' | 'filament' | 'plate' | 'quantity' | 'cost'>();
 
   // Initialize form when modal opens
   useEffect(() => {
@@ -320,6 +323,19 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     );
   };
 
+  const sortedFiles = sortDataByValues(selectedFiles, {
+    file: file => gcodeFileCache[file.gcodeFileId]?.name || gcodeFileCache[file.gcodeFileId]?.fileName || file.gcodeFileId,
+    material: file => gcodeFileCache[file.gcodeFileId]?.extractedMaterial || file.materialRequirement || null,
+    filament: file => filamentsById.get(filamentAssignments[file.gcodeFileId])?.name,
+    plate: file => file.plateIndex,
+    quantity: file => file.printCount,
+    cost: file => computeEstimatedCost(
+      filamentsById.get(filamentAssignments[file.gcodeFileId]),
+      gcodeFileCache[file.gcodeFileId]?.extractedFilamentLength,
+      file.printCount,
+    ),
+  });
+
   return (
     <Modal
       isOpen={isOpen}
@@ -347,10 +363,11 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
         {/* Template selector (create mode only) */}
         {!isEditMode && templates.length > 0 && (
           <div>
-            <label className="block text-sm font-medium text-pf-text-primary mb-1">
+            <label htmlFor="project-template" className="block text-sm font-medium text-pf-text-primary mb-1">
               Start from Template
             </label>
             <Select
+              id="project-template"
               value={selectedTemplate}
               onChange={(e) => handleTemplateChange(e.target.value)}
               className="bg-pf-bg-2 border-pf-border rounded-lg! px-3! py-2!"
@@ -408,10 +425,11 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
         {/* Priority, Status, and Due Date row */}
         <div className={`grid gap-4 ${isEditMode ? 'grid-cols-3' : 'grid-cols-2'}`}>
           <div>
-            <label className="block text-sm font-medium text-pf-text-primary mb-1">
+            <label htmlFor="project-priority" className="block text-sm font-medium text-pf-text-primary mb-1">
               Priority
             </label>
             <Select
+              id="project-priority"
               value={priority}
               onChange={(e) => setPriority(Number(e.target.value))}
               className="bg-pf-bg-2 border-pf-border rounded-lg! px-3! py-2!"
@@ -426,10 +444,11 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
           {/* Status (edit mode only) */}
           {isEditMode && (
             <div>
-              <label className="block text-sm font-medium text-pf-text-primary mb-1">
+              <label htmlFor="project-status" className="block text-sm font-medium text-pf-text-primary mb-1">
                 Status
               </label>
               <Select
+                id="project-status"
                 value={status}
                 onChange={(e) => setStatus(e.target.value as PrintProjectStatus)}
                 className="bg-pf-bg-2 border-pf-border rounded-lg! px-3! py-2!"
@@ -489,17 +508,17 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-pf-border bg-pf-bg-2">
-                    <th className="px-3 py-2 text-left font-medium text-pf-text-primary">File</th>
-                    <th className="px-3 py-2 text-left font-medium text-pf-text-primary">Material</th>
-                    <th className="px-3 py-2 text-left font-medium text-pf-text-primary">Filament</th>
-                    <th className="px-3 py-2 text-left font-medium text-pf-text-primary">Plate</th>
-                    <th className="px-3 py-2 text-center font-medium text-pf-text-primary w-16">Qty</th>
-                    <th className="px-3 py-2 text-right font-medium text-pf-text-primary w-24">Est. Cost</th>
+                    <TableHeaderCell {...headerProps('file')} className="px-3 py-2 text-left font-medium text-pf-text-primary">File</TableHeaderCell>
+                    <TableHeaderCell {...headerProps('material')} className="px-3 py-2 text-left font-medium text-pf-text-primary">Material</TableHeaderCell>
+                    <TableHeaderCell {...headerProps('filament')} className="px-3 py-2 text-left font-medium text-pf-text-primary">Filament</TableHeaderCell>
+                    <TableHeaderCell {...headerProps('plate')} className="px-3 py-2 text-left font-medium text-pf-text-primary">Plate</TableHeaderCell>
+                    <TableHeaderCell {...headerProps('quantity')} className="px-3 py-2 text-center font-medium text-pf-text-primary w-16">Qty</TableHeaderCell>
+                    <TableHeaderCell {...headerProps('cost')} className="px-3 py-2 text-right font-medium text-pf-text-primary w-24">Est. Cost</TableHeaderCell>
                     <th className="px-3 py-2 w-10"><span className="sr-only">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-pf-border">
-                  {selectedFiles.map((file) => {
+                  {sortedFiles.map((file) => {
                     const gcodeFile = gcodeFileCache[file.gcodeFileId];
                     const fileName = gcodeFile?.name || gcodeFile?.fileName || file.gcodeFileId;
                     const material = gcodeFile?.extractedMaterial || file.materialRequirement || '—';

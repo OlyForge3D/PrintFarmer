@@ -86,7 +86,13 @@ public static class SlicerApiExtensions
             ServiceDescriptor.Singleton<IHostedService, SlicerApiKeyStartupValidationService>());
 
         // Artifact services
-        _ = services.Configure<Farm.Infrastructure.Settings.ArtifactStorageSettings>(configuration.GetSection(Farm.Infrastructure.Settings.ArtifactStorageSettings.SectionName));
+        _ = services.AddOptions<ArtifactStorageSettings>()
+            .Bind(configuration.GetSection(ArtifactStorageSettings.SectionName))
+            .Validate(
+                settings => settings.MaxFileSizeBytes > 0 &&
+                settings.MaxFileSizeBytes <= WorkerArtifactUploadLimitsAttribute.MaximumFileSizeBytes,
+                "ArtifactStorage:MaxFileSizeBytes must be between 1 and 500000000.")
+            .ValidateOnStart();
         _ = services.AddScoped<IArtifactsService, ArtifactsService>();
         _ = services.AddScoped<IPromotionArtifactContentSource, LocalPromotionArtifactContentSource>();
         _ = services.AddSingleton<SlicerPromotionServiceAuthenticator>();

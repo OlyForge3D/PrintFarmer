@@ -438,7 +438,7 @@ public class AutoDispatchService(
             try
             {
                 QueuedPrintJobDto dispatched =
-                    await jobDispatchService.DispatchReviewedJobAsync(
+                    await jobDispatchService.DispatchBedClearConfirmedJobAsync(
                         reviewedJob.Id,
                         printerId,
                         QueueActorIdentity.AutoDispatch,
@@ -641,6 +641,7 @@ public class AutoDispatchService(
             dsEmpty.AutoDispatchState = AutoDispatchState.None;
             dsEmpty.BedPreConfirmed = false;
             await db.SaveChangesAsync(ct);
+            await TryRecordBedClearEvaluationAsync(printer, null, actorSubject, ct);
 
             var emptyStatus = await BuildStatusDtoAsync(printer, ct);
             await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync(AutoDispatchStateChangedEventName, emptyStatus, ct);
@@ -769,6 +770,8 @@ public class AutoDispatchService(
             reviewedPrinterVersion,
             OverrideApproved: filamentOverrideRequired);
 
+        await TryRecordBedClearEvaluationAsync(printer, nextJob.Id, actorSubject, ct);
+
         byte[] reviewedDispatchStateVersion = expectedDispatchStateVersion ??
             printer.DispatchState?.RowVersion ??
             throw new InvalidOperationException(
@@ -782,7 +785,7 @@ public class AutoDispatchService(
         QueuedPrintJobDto dispatched;
         try
         {
-            dispatched = await jobDispatchService.DispatchReviewedJobAsync(
+            dispatched = await jobDispatchService.DispatchBedClearConfirmedJobAsync(
                 nextJob.Id,
                 printerId,
                 actorSubject,
@@ -961,6 +964,39 @@ public class AutoDispatchService(
         await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync(AutoDispatchStateChangedEventName, status, ct);
 
         return status;
+    }
+
+    private async Task TryRecordBedClearEvaluationAsync(
+        Printer printer,
+        Guid? printJobId,
+        string actorSubject,
+        CancellationToken ct)
+    {
+        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
+        var sample = new BedClearEvaluation
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printer.Id,
+            PrintJobId = printJobId,
+            BedTypeId = printer.BedTypeId,
+            SourceAcknowledgementId = Guid.NewGuid(),
+            AcknowledgedBySubject = actorSubject,
+            AcknowledgedAtUtc = now,
+            CreatedAtUtc = now,
+        };
+        db.BedClearEvaluations.Add(sample);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogError(
+                exception,
+                "Could not persist shadow bed-clear evaluation for printer {PrinterId}; readiness and dispatch will continue.",
+                printer.Id);
+            db.Entry(sample).State = EntityState.Detached;
+        }
     }
 
     public async Task<AutoDispatchStatusDto> MarkPreClearAsync(

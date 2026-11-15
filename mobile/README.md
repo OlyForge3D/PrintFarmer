@@ -48,6 +48,22 @@ Visual-acceptance fixture images are included only in Debug builds.
 
 4. Build and run on a simulator or device (iOS 17+).
 
+## NFC spool tags
+
+The app reads the physical NFC UID first and resolves it through the connected
+PrintFarmer server and Spoolman. A linked spool opens directly. A tag linked to
+a filament opens spool intake for that filament; an unlinked tag can be linked
+to an existing spool or to a newly created spool after confirmation. A failed
+UID lookup is surfaced as an error, not treated as an unknown tag.
+
+OpenPrintTag writes use the `application/vnd.openprinttag` NDEF MIME record with
+CBOR payload on NFC-V/ISO15693 tags. PrintFarmer verifies the written NDEF
+message before registering the UID in Spoolman, so a link failure reports
+partial success rather than claiming the tag was registered. The app preserves
+legacy OpenSpool and prior PrintFarmer tag reads. ISO15693 UIDs use the
+uppercase E0-first bytes returned by CoreNFC; UID identity is independent of
+NDEF payload data.
+
 ## Testing
 
 The iOS CI matrix selects shipping Login, three-tab shell, Scan, harvest,
@@ -60,13 +76,15 @@ Type assertions) are intentionally removed rather than mapped to empty suites.
 `scripts/tests/test_run_tests.py` checks every selected class/method against
 Swift sources and rejects selected classes without real test methods.
 
-Use **Xcode 26.6 (17F113)** and **iOS 26.5 (23F77)** for snapshot and simulator
-tests. CI uses GitHub's `macos-26` runner image and downloads iOS 26.5 when that
+Use **Xcode 26.6 (17F113)** and **iOS 26.5 (23F77)** for authoritative snapshot
+and simulator evidence. CI uses GitHub's `macos-26` runner image and downloads iOS 26.5 when that
 runtime is not already installed. The unchanged-snapshot default is supported by
 [the original evidence](https://github.com/OlyForge3D/PrintFarmer/issues/2536#issuecomment-5573657441).
 Install iOS 26.5 in Xcode Settings > Components and create an available iPhone
 simulator. The shared resolver requires Python 3, rejects beta/unapproved
 builds even in fallbacks, and works without `GITHUB_ENV`.
+Xcode 26.6 is unsupported on macOS 27 or later; the resolver stops before
+simulator discovery. Use a macOS 26.2-26.x host for pinned test evidence.
 From the repository root:
 
 ```bash
@@ -77,11 +95,11 @@ cd mobile
   run_dir="$(mktemp -d "$PWD/build/snapshots.XXXXXX")"
   xcodebuild -version | tee "$run_dir/xcode.log"
   git rev-parse HEAD | tee "$run_dir/commit.log"
-  xcrun simctl list runtimes -j > "$run_dir/runtimes.json"
-  xcrun simctl list devices available -j > "$run_dir/devices.json"
   simulator_udid="$(../scripts/ci/resolve-ios-simulator.sh --udid 2>"$run_dir/destination.log")" ||
     { cat "$run_dir/destination.log" >&2; exit 1; }
   cat "$run_dir/destination.log"
+  xcrun simctl list runtimes -j > "$run_dir/runtimes.json"
+  xcrun simctl list devices available -j > "$run_dir/devices.json"
   python3 scripts/run-tests.py -- test -scheme PrintFarmer \
     -destination "platform=iOS Simulator,id=$simulator_udid" \
     -only-testing:PrintFarmerTests/PrinterDetailControlsSnapshotTests \
@@ -91,6 +109,44 @@ cd mobile
     2>&1 | tee "$run_dir/test.log"
 )
 ```
+
+### Local exploration on macOS 27
+
+For development only, macOS 27.x can run simulator tests with **Xcode 27.2
+(27B52)** and the same **iOS 26.5 (23F77)** runtime. Install that runtime and an
+available iPhone simulator in Xcode first. Set `DEVELOPER_DIR` to the installed
+Xcode 27.2 bundle; the path below is an example and does not change the
+system-wide Xcode selection.
+
+```bash
+cd mobile
+(
+  set -euo pipefail
+  export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+  mkdir -p build
+  run_dir="$(mktemp -d "$PWD/build/local-exploratory.XXXXXX")"
+  xcodebuild -version | tee "$run_dir/xcode.log"
+  sw_vers -productVersion | tee "$run_dir/macos.log"
+  git -C .. rev-parse HEAD | tee "$run_dir/commit.log"
+  git -C .. status --porcelain > "$run_dir/worktree-status.log"
+  simulator_udid="$(../scripts/ci/resolve-ios-simulator.sh --local-exploratory-udid 2>"$run_dir/destination.log")" ||
+    { cat "$run_dir/destination.log" >&2; exit 1; }
+  cat "$run_dir/destination.log"
+  xcrun simctl list runtimes -j > "$run_dir/runtimes.json"
+  xcrun simctl list devices available -j > "$run_dir/devices.json"
+  python3 scripts/run-tests.py -- test -scheme PrintFarmer \
+    -destination "platform=iOS Simulator,id=$simulator_udid" \
+    -only-testing:PrintFarmerTests/ModelsTests \
+    -parallel-testing-enabled NO \
+    -resultBundlePath "$run_dir/LocalExploratory.xcresult" \
+    2>&1 | tee "$run_dir/test.log"
+)
+```
+
+The explicit resolver mode rejects CI and `GITHUB_ENV`; its results are
+exploratory, not CI, release, or snapshot-acceptance evidence. Do not re-record
+goldens from this toolchain. The pinned workflow above still requires macOS
+26.2-26.x and Xcode 26.6.
 
 The shared test plan enables XCTest watchdogs. Isolated timeout investigations
 use a 60-second allowance without capping longer adjacent tests; see the
@@ -114,6 +170,26 @@ gates. Prefer state, command, accessibility and bounded-layout contracts over ne
 whole-screen references. Retained goldens still require strict precision, no
 skips and separate approved iPhone/iPad evidence. The guide does not authorize
 re-recording to hide runtime drift.
+
+### Connected scan-code intake checks
+
+The two `ScanStationUITests.testFnskuFirstScan…` scenarios can use production
+intake/spool clients against an isolated loopback API. Pass
+`TEST_RUNNER_PRINTFARMER_ALIAS_API_URL=http://127.0.0.1:<port>` and
+`TEST_RUNNER_PRINTFARMER_ALIAS_API_TOKEN` through `xcodebuild` using the runner
+above. Never use a production account or farm. This opt-in exists only in DEBUG
+UI-test launches; the scanner and unrelated shell services remain fixtures.
+
+Run each first-scan selector separately and reset the isolated fixture's
+`X0022Z40I1` alias before **each** run. The preflight requires `NotRemembered`
+and fails explicitly on stale fixtures or lookup errors. Seed filaments 41 and
+42 with material `PLA`, vendor `Fixture Vendor`, and name `PLA explicitly chosen`
+for the existing-filament scenario; the duplicate names exercise ID selection.
+The test selects 42, relaunches the app and confirms another spool.
+The new-filament scenario submits the form only in connected mode because the
+standard demo spool service is intentionally read-only. Verify the API database
+and distinct upstream spool IDs separately, and identify any fixture upstream
+or unavailable physical camera in the evidence.
 
 ## Updating App Store screenshots (manual)
 
@@ -155,18 +231,40 @@ The app supports multiple registered PrintFarmer backend servers. Server
 registrations are stored locally in UserDefaults on the device, and each server
 keeps its own Keychain-stored credentials.
 
+The printer detail **Open in web** link opens that printer's configured native
+web interface (`frontendUrl`), not the PrintFarmer web app or backend API.
+It is hidden when no valid HTTP(S) frontend URL is available.
+Canonical printer detail responses include this sanitized native URL, with
+credentials, query parameters and fragments removed.
+
 ### Direct Motion Controls
 
 Home All/XY/Z, relative jogs and absolute positioning use ordinary direct
 command endpoints. Controls remain gated by authorization, printer readiness,
 backend capabilities and movement safety. Absolute positioning allows blank
 axes to remain unchanged; current telemetry is used only to validate safety.
+Jogging additionally requires the corresponding axis to be reported homed.
+Unknown or unhomed axes stay disabled until a printer update reports homing;
+the same check applies immediately before dispatch.
+OctoPrint and PrusaLink currently provide no homing telemetry, so their jog
+buttons remain disabled even after a Home request succeeds. Unknown homing
+is not evidence that an axis is unhomed, and Home acceptance does not prove
+homing. Accepted motor release clears cached homing until a subsequent printer
+update supplies authoritative homing telemetry.
 
 A successful response means the backend accepted the command, not that physical
 motion completed. The in-flight request disables conflicting actions.
 Canceling observation, closing a screen or disconnecting cannot recall a command.
 After a timeout or uncertain outcome, inspect the printer before another action.
 Commands are never automatically retried or replayed on reconnect.
+Routine accepted commands are silent. Connection errors describe the failed
+command request, rather than claiming the device has no internet; they remain
+visible until dismissed or replaced by the next command.
+
+Once loaded, the Control panel stays in place through printer connectivity
+changes; offline commands remain disabled. The top "Server connected" banner
+describes the app's connection to PrintFarmer, not an individual printer's
+availability.
 
 There are no motion journals, operation IDs, receipt polling, recovery panels
 or admission-resubmission flows. Ordinary printer telemetry and safety refreshes
@@ -208,6 +306,20 @@ the iPad detail column). It opens the existing barcode/QR and NFC flows for
 printer and spool tags. Filament retains Add spool and continuous barcode
 intake. The toolbar avatar opens **Account**, including **Settings**, **Manage
 Servers**, notifications and offline activity.
+
+**Add Spool** (including the manual form offered by Scan) requires choosing the
+exact existing filament, or enabling **Create New Filament** and confirming its
+name, material, color, density and diameter. A material/vendor resemblance is
+not a product identity. New filament creation completes first; the returned ID
+is used for the spool. Vendor selection uses an existing server vendor or None.
+An identified physical spool still opens that spool instead of creating one.
+
+Failed saves keep the form. A successfully created filament is reused if spool
+authorization must be retried, and **Retry Link** reuses the already-created
+spool. If a creation response is uncertain (including timeout/server failure),
+Save stays disabled: check Filament inventory before starting again to avoid
+duplicates. This mobile fix uses the existing filament/spool API and needs no
+new server migration; it does not add remembered scan-code aliases.
 
 When the server enables printed-parts inventory, the **Printed parts** toolbar
 button in Filament opens stock browsing and quantity adjustment as a secondary

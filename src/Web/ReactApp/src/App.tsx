@@ -219,16 +219,8 @@ function AuthenticatedAppRoutes() {
           }
         : undefined;
 
-      if (event.autoPaused) {
-        toast.error(
-          `Failure detected on ${event.printerName} (${confidencePercent}% confidence). Print auto-paused.`,
-          { duration: 10_000, action },
-        );
-        return;
-      }
-
       toast.warning(
-        `Failure detected on ${event.printerName} (${confidencePercent}% confidence). Review the printer now.`,
+        `${event.provider} detected a possible failure on ${event.printerName} (${confidencePercent}% confidence). Review the printer now.`,
         { duration: 10_000, action },
       );
     });

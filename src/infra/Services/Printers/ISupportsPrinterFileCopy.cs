@@ -66,6 +66,18 @@ public static class PrinterFileCopyTransport
 
         using HttpResponseMessage response = await http.SendAsync(
             request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+        return await CopyResponseAsync(response, destination, maximumBytes, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Applies the certified redirect, status, encoding, and length checks to a response obtained
+    /// from an adapter-owned redirect-disabled transport (for example, one performing Digest auth).
+    /// </summary>
+    public static async Task<PrinterFileCopyBytes> CopyResponseAsync(
+        HttpResponseMessage response, Stream destination, long maximumBytes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumBytes);
         if ((int)response.StatusCode is >= 300 and < 400)
         {
             throw new PrinterFileCopyException("redirect_refused");

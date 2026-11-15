@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
 import clsx from 'clsx';
-import { ImageOffIcon } from '@/common/components/icons/MdiIcons';
+import { ImageOffIcon, TimerSandIcon } from '@/common/components/icons/MdiIcons';
 import { FileTypeGlyph } from '@/features/files/components/FileGlyphs';
-import type { FileKind } from '@/features/files/utils/fileDisplay';
+import { COLLECTING_PREVIEW, type FileKind } from '@/features/files/utils/fileDisplay';
 
 export type FileThumbnailSize = 'row' | 'card' | 'panel';
 
@@ -15,6 +15,8 @@ interface FileThumbnailProps {
   blob?: Blob | null;
   /** Set once the server reported that no preview image can be shown. */
   unavailableReason?: string | null;
+  /** Background capture has not produced an image yet; a calm pending state, not an error. */
+  collecting?: boolean;
   loading?: boolean;
   /** Empty for list thumbnails: the adjacent filename already names the item. */
   alt?: string;
@@ -55,9 +57,12 @@ function BlobImage({ blob, alt, className }: BlobImageProps) {
   return <img ref={attach} alt={alt} className={className} />;
 }
 
-/** Shared thumbnail frame: image, explicit "Preview unavailable" state, or the file-type glyph. */
+/**
+ * Shared thumbnail frame: image, explicit "Preview unavailable" state, a calm "Collecting
+ * preview…" state while background capture is pending, or the file-type glyph.
+ */
 export function FileThumbnail({
-  kind, size, src, blob, unavailableReason, loading = false, alt = '', className,
+  kind, size, src, blob, unavailableReason, collecting = false, loading = false, alt = '', className,
 }: FileThumbnailProps) {
   const imageClass = 'h-full w-full object-contain';
   let content;
@@ -76,6 +81,18 @@ export function FileThumbnail({
     ) : (
       <span title={label} className="inline-flex text-pf-text-tertiary">
         <ImageOffIcon className={GLYPH_CLASS[size]} ariaLabel={label} />
+      </span>
+    );
+  } else if (collecting) {
+    // Neutral (not error) styling: capture is queued, nothing has failed.
+    content = size === 'panel' ? (
+      <div className="flex flex-col items-center gap-2 px-4 text-center text-pf-text-secondary">
+        <span aria-hidden="true"><TimerSandIcon className="h-12 w-12" ariaLabel="" /></span>
+        <p className="text-sm font-medium">{COLLECTING_PREVIEW}</p>
+      </div>
+    ) : (
+      <span title={COLLECTING_PREVIEW} className="inline-flex text-pf-text-tertiary">
+        <TimerSandIcon className={GLYPH_CLASS[size]} ariaLabel={COLLECTING_PREVIEW} />
       </span>
     );
   } else {

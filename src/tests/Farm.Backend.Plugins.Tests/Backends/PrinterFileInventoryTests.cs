@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Farm.Backend.Plugin.FlashForge;
 using Farm.Backend.Plugin.Moonraker;
 using Farm.Backend.Plugin.OctoPrint;
@@ -142,10 +143,18 @@ public sealed class PrinterFileInventoryTests
     [InlineData("prusalink", true)]
     public async Task GetFileInventoryAsync_CancelOrDeadline_PreservesDistinctFailure(string backend, bool callerCancel)
     {
-        using InventoryHandler handler = new(async (_, token) =>
+        TimeSpan deadline = TimeSpan.FromSeconds(100);
+        ManualClock clock = new();
+        bool cancelledBeforeDeadline = true;
+        bool cancelledAtDeadline = false;
+        using InventoryHandler handler = new((_, token) =>
         {
-            await Task.Delay(Timeout.InfiniteTimeSpan, token);
-            return Reply("{}");
+            clock.Advance(deadline - TimeSpan.FromTicks(1));
+            cancelledBeforeDeadline = token.IsCancellationRequested;
+            clock.Advance(TimeSpan.FromTicks(1));
+            cancelledAtDeadline = token.IsCancellationRequested;
+            token.ThrowIfCancellationRequested();
+            throw new InvalidOperationException("Request was not cancelled at the deadline boundary.");
         });
         using HttpClient http = new(handler);
         using CancellationTokenSource cancellation = new();
@@ -154,8 +163,15 @@ public sealed class PrinterFileInventoryTests
             cancellation.Cancel();
         }
 
-        PrinterFileInventoryResult result = await CreateClient(backend, http).GetFileInventoryAsync(
-            "http://printer/", options: new() { Deadline = TimeSpan.FromMilliseconds(30) }, ct: cancellation.Token);
+        PrinterFileInventoryResult result = await CreateClient(backend, http, clock).GetFileInventoryAsync(
+            "http://printer/", options: new() { Deadline = deadline }, ct: cancellation.Token);
+
+        if (!callerCancel)
+        {
+            Assert.False(cancelledBeforeDeadline);
+            Assert.True(cancelledAtDeadline);
+            Assert.Equal(deadline, clock.Elapsed);
+        }
 
         Assert.Equal(callerCancel ? PrinterFileInventoryOutcome.Cancelled : PrinterFileInventoryOutcome.Unavailable,
             result.Outcome);
@@ -236,11 +252,8 @@ public sealed class PrinterFileInventoryTests
         Assert.Equal(4, handler.Paths.Count);
     }
 
-    [Theory]
-    [InlineData(1, PrinterFileInventoryReason.RequestLimit, 1)]
-    [InlineData(3, PrinterFileInventoryReason.DepthLimit, 2)]
-    public async Task GetFileInventoryAsync_PrusaTraversalBudget_NeverClaimsRootComplete(
-        int requests, PrinterFileInventoryReason expected, int expectedCalls)
+    [Fact]
+    public async Task GetFileInventoryAsync_PrusaDepthBudget_NeverClaimsRootComplete()
     {
         using InventoryHandler handler = new(request => Reply(request.RequestUri!.AbsolutePath == "/api/v1/storage"
             ? """{"storage_list":[{"path":"/custom","available":true}]}"""
@@ -248,12 +261,12 @@ public sealed class PrinterFileInventoryTests
         using HttpClient http = new(handler);
 
         PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
-            "http://printer/", options: new() { MaxRequests = requests, MaxDepth = 0 });
+            "http://printer/", options: new() { MaxDepth = 0 });
 
         Assert.Equal(PrinterFileInventoryOutcome.Partial, result.Outcome);
-        Assert.Equal(expected, result.Reason);
+        Assert.Equal(PrinterFileInventoryReason.DepthLimit, result.Reason);
         Assert.DoesNotContain(result.Coverage, coverage => coverage.IsComplete);
-        Assert.Equal(expectedCalls, handler.Paths.Count);
+        Assert.Equal(2, handler.Paths.Count);
     }
 
     [Fact]
@@ -353,27 +366,49 @@ public sealed class PrinterFileInventoryTests
     }
 
     [Fact]
-    public async Task GetFileInventoryAsync_PrusaDigestReservation_RespectsWireRequestCeiling()
+    public async Task GetFileInventoryAsync_PrusaDetails_MoreThan100RequestsCompletesWithoutFetchingBodies()
     {
-        using InventoryHandler handler = new(_ => throw new InvalidOperationException("No network request was budgeted"));
+        string listing = JsonSerializer.Serialize(new
+        {
+            type = "FOLDER",
+            children = Enumerable.Range(0, 105).Select(index => new { name = $"PART{index}.BGC", type = "PRINT_FILE" })
+        });
+        using InventoryHandler handler = new(request => Reply(request.RequestUri!.AbsolutePath switch
+        {
+            "/api/v1/storage" => """{"storage_list":[{"path":"/usb","available":true}]}""",
+            "/api/v1/files/usb" => listing,
+            var path when path.StartsWith("/api/v1/files/usb/PART", StringComparison.Ordinal) =>
+                JsonSerializer.Serialize(new { type = "PRINT_FILE", name = path.Split('/')[^1], size = 123, meta = new { } }),
+            _ => throw new InvalidOperationException("Unexpected file body or thumbnail request")
+        }));
         using HttpClient http = new(handler);
 
         PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
-            "http://printer/", new() { ApiKey = "test-key" }, new() { MaxRequests = 1 });
+            "http://printer/", new() { ApiKey = "test-key" }, new() { IncludeFileDetails = true });
 
-        Assert.Equal(PrinterFileInventoryOutcome.Partial, result.Outcome);
-        Assert.Equal(PrinterFileInventoryReason.RequestLimit, result.Reason);
-        Assert.Empty(handler.Paths);
+        Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        Assert.Equal(105, result.Entries.Length);
+        Assert.Equal(107, handler.Paths.Count);
+        Assert.All(result.Entries, entry =>
+        {
+            Assert.Equal(123, entry.SizeBytes);
+            Assert.NotNull(entry.DetailsFetchedAtUtc);
+            Assert.Null(entry.Metadata);
+        });
+        Assert.All(handler.ApiKeys, key => Assert.Equal("test-key", key));
+        Assert.All(handler.Methods, method => Assert.Equal(HttpMethod.Get, method));
     }
 
     [Fact]
-    public async Task GetFileInventoryAsync_PrusaDigestChallenge_CountsRetryInsideRequestCeiling()
+    public async Task GetFileInventoryAsync_PrusaDigestChallenge_AuthenticatesAndCompletesTraversal()
     {
         using InventoryHandler handler = new(request =>
         {
             if (request.Headers.Authorization?.Scheme == "Digest")
             {
-                return Reply("""{"storage_list":[{"path":"/usb","available":true}]}""");
+                return Reply(request.RequestUri!.AbsolutePath == "/api/v1/storage"
+                    ? """{"storage_list":[{"path":"/usb","available":true}]}"""
+                    : """{"type":"FOLDER","children":[]}""");
             }
 
             HttpResponseMessage challenge = Reply("{}", HttpStatusCode.Unauthorized);
@@ -383,12 +418,291 @@ public sealed class PrinterFileInventoryTests
         using HttpClient http = new(handler);
 
         PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
-            "http://printer/", new() { Username = "maker", Password = "test-password" }, new() { MaxRequests = 2 });
+            "http://printer/", new() { Username = "maker", Password = "test-password" });
 
+        Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        // One challenge; the transport reuses the negotiated digest for later traversal requests.
+        Assert.Equal(["/api/v1/storage", "/api/v1/storage", "/api/v1/files/usb"], handler.Paths);
+        Assert.True(Assert.Single(result.Coverage).IsComplete);
+    }
+
+    [Theory]
+    [InlineData(0.2)]
+    [InlineData(0.0)]
+    public async Task GetFileInventoryAsync_PrusaDetails_MapsEveryNativeMetadataFieldWithoutChangingIdentity(double layerHeight)
+    {
+        using InventoryHandler handler = new(request => Reply(request.RequestUri!.AbsolutePath switch
+        {
+            "/api/v1/storage" => """{"storage_list":[{"path":"/usb","available":true}]}""",
+            "/api/v1/files/usb" => """{"type":"FOLDER","children":[{"name":"PART~1.BGC","type":"PRINT_FILE","m_timestamp":1700000000}]}""",
+            "/api/v1/files/usb/PART~1.BGC" => $$$"""
+                {"name":"PART~1.BGC","type":"PRINT_FILE","display_name":"Long printable part.bgcode","size":629505,"m_timestamp":1700000000,
+                 "refs":{"download":"/usb/PART~1.BGC","thumbnail":"/thumb/l/usb/PART~1.BGC"},
+                 "meta":{"bed_temperature":60,"bed_temperature per tool":[60,0],"temperature":215,"temperature per tool":[215,0],
+                 "brim_width":0,"estimated printing time (normal mode)":"1h 2m","estimated_print_time":3720,"faded_layers":3,
+                 "filament cost":1.5,"filament cost per tool":[1.5,0],"filament used [cm3]":12,"filament used [cm3] per tool":[12,0],
+                 "filament used [g]":15,"filament used [g] per tool":[15,0],"filament used [mm]":100,"filament used [mm] per tool":[100,0],
+                 "filament_type":"PLA","filament_type per tool":["PLA","PETG"],"fill_density":"15%","initial_exposure_time":20,
+                 "layer_height":{{{JsonSerializer.Serialize(layerHeight)}}},"material_name":"Resin","exposure_time":2,"max_exposure_time":3,"max_initial_exposure_time":25,
+                 "min_exposure_time":1,"min_initial_exposure_time":15,"nozzle_diameter":0.4,"nozzle_diameter per tool":[0.4,0.6],
+                 "normal_percent_present":true,"normal_left_present":false,"quiet_percent_present":false,"quiet_left_present":true,
+                 "layer_info_present":false,"max_layer_z":42,"print_time":3700,"printer_model":"Future printer","support_material":"0",
+                 "ironing":0,"required_resin_ml":25,"profile":"Quality"}}
+                """,
+            _ => throw new InvalidOperationException("Unexpected body request")
+        }));
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
+            "http://printer/", options: new() { IncludeFileDetails = true });
+
+        Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        PrinterFileInventoryEntry entry = Assert.Single(result.Entries);
+        Assert.Equal("PART~1.BGC", entry.RelativePath);
+        Assert.Equal("Long printable part.bgcode", entry.DisplayName);
+        Assert.Equal(629505, entry.SizeBytes);
+        Assert.NotNull(entry.DetailsFetchedAtUtc);
+        PrinterPrintMetadata expected = new()
+        {
+            BedTemperatureC = 60,
+            BedTemperaturePerToolC = [60, 0],
+            NozzleTemperatureC = 215,
+            NozzleTemperaturePerToolC = [215, 0],
+            BrimWidthMm = 0,
+            EstimatedPrintTimeNormalMode = "1h 2m",
+            EstimatedPrintTimeSeconds = 3720,
+            FadedLayers = 3,
+            FilamentCost = 1.5,
+            FilamentCostPerTool = [1.5, 0],
+            FilamentUsedCm3 = 12,
+            FilamentUsedPerToolCm3 = [12, 0],
+            FilamentUsedG = 15,
+            FilamentUsedGIsDerived = false,
+            FilamentUsedPerToolG = [15, 0],
+            FilamentUsedMm = 100,
+            FilamentUsedPerToolMm = [100, 0],
+            FilamentType = "PLA",
+            FilamentTypePerTool = ["PLA", "PETG"],
+            FillDensity = "15%",
+            InitialExposureTimeSeconds = 20,
+            LayerHeightMm = layerHeight,
+            MaterialName = "Resin",
+            ExposureTimeSeconds = 2,
+            MaxExposureTimeSeconds = 3,
+            MaxInitialExposureTimeSeconds = 25,
+            MinExposureTimeSeconds = 1,
+            MinInitialExposureTimeSeconds = 15,
+            NozzleDiameterMm = 0.4,
+            NozzleDiameterPerToolMm = [0.4, 0.6],
+            NormalPercentPresent = true,
+            NormalLeftPresent = false,
+            QuietPercentPresent = false,
+            QuietLeftPresent = true,
+            LayerInfoPresent = false,
+            MaxLayerZMm = 42,
+            PrintTimeSeconds = 3700,
+            PrinterModel = "Future printer",
+            SupportMaterial = "0",
+            Ironing = 0,
+            RequiredResinMl = 25,
+            Profile = "Quality",
+            Tools =
+            [
+                new PrinterFilamentTool { Index = 0, Material = "PLA", FilamentUsedG = 15 },
+                new PrinterFilamentTool { Index = 1, Material = "PETG", FilamentUsedG = 0 }
+            ]
+        };
+        Assert.Equal(JsonSerializer.Serialize(expected), JsonSerializer.Serialize(entry.Metadata));
+        Assert.True(entry.Metadata!.IsValid());
+        Assert.Equal(3, handler.Paths.Count);
+    }
+
+    [Theory]
+    [InlineData("1700000000", null, true, true)]
+    [InlineData("1700000000", 123L, true, true)]
+    [InlineData("1700000000", 124L, true, false)]
+    [InlineData("1700000001", null, true, false)]
+    [InlineData("null", null, true, false)]
+    [InlineData("1700000000", null, false, false)]
+    public async Task GetFileInventoryAsync_PrusaDetails_ReusesOnlyFetchedDetailsWithMatchingListingEvidence(
+        string timestamp, long? size, bool fetched, bool reuse)
+    {
+        PrinterPrintMetadata metadata = new() { BrimWidthMm = 0, QuietLeftPresent = false };
+        DateTime fetchedAt = DateTime.UtcNow.AddDays(-30);
+        PrinterFileInventoryEntry cached = new("usb", "PART.BGC", 123,
+            ModifiedValue: "1700000000", DisplayName: "Cached part.bgcode", Metadata: metadata,
+            DetailsFetchedAtUtc: fetched ? fetchedAt : null);
+        using InventoryHandler handler = new(request => Reply(request.RequestUri!.AbsolutePath switch
+        {
+            "/api/v1/storage" => """{"storage_list":[{"path":"/usb","available":true}]}""",
+            "/api/v1/files/usb" => $$$"""{"type":"FOLDER","children":[{"type":"PRINT_FILE","name":"PART.BGC","size":{{{JsonSerializer.Serialize(size)}}},"m_timestamp":{{{timestamp}}}}]}""",
+            "/api/v1/files/usb/PART.BGC" => $$$"""{"type":"PRINT_FILE","name":"PART.BGC","size":{{{size ?? 123}}},"m_timestamp":{{{timestamp}}},"meta":{}}""",
+            _ => throw new InvalidOperationException("Unexpected request")
+        }));
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
+            "http://printer/", options: new()
+            {
+                IncludeFileDetails = true,
+                CachedEntries = new Dictionary<string, PrinterFileInventoryEntry>
+                {
+                    [PrinterInventoryPath.ComputeIdentity("usb", "PART.BGC")] = cached
+                }
+            });
+
+        Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        PrinterFileInventoryEntry entry = Assert.Single(result.Entries);
+        Assert.Equal(reuse ? 2 : 3, handler.Paths.Count);
+        Assert.NotNull(entry.DetailsFetchedAtUtc);
+        if (reuse)
+        {
+            Assert.Equal(fetchedAt, entry.DetailsFetchedAtUtc);
+            Assert.Same(metadata, entry.Metadata);
+            Assert.Equal(123, entry.SizeBytes);
+            Assert.Equal("Cached part.bgcode", entry.DisplayName);
+        }
+        else
+        {
+            Assert.Null(entry.Metadata);
+            Assert.NotEqual(fetchedAt, entry.DetailsFetchedAtUtc);
+        }
+    }
+
+    [Theory]
+    [InlineData("{}", HttpStatusCode.OK)]
+    [InlineData("""{"type":"PRINT_FILE","name":"OTHER.BGC"}""", HttpStatusCode.OK)]
+    [InlineData("""{"type":"PRINT_FILE","name":"PART.BGC","m_timestamp":1700000001}""", HttpStatusCode.OK)]
+    [InlineData("broken", HttpStatusCode.OK)]
+    [InlineData("{}", HttpStatusCode.Forbidden)]
+    public async Task GetFileInventoryAsync_PrusaDetailFailure_KeepsCompleteListingWithoutDetails(
+        string details, HttpStatusCode status)
+    {
+        using InventoryHandler handler = new(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/api/v1/storage" => Reply("""{"storage_list":[{"path":"/usb","available":true}]}"""),
+            "/api/v1/files/usb" => Reply("""{"type":"FOLDER","children":[{"type":"PRINT_FILE","name":"PART.BGC","m_timestamp":1700000000}]}"""),
+            _ => Reply(details, status)
+        });
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
+            "http://printer/", options: new() { IncludeFileDetails = true });
+
+        Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        Assert.Equal(PrinterFileInventoryReason.None, result.Reason);
+        Assert.True(Assert.Single(result.Coverage).IsComplete);
+        Assert.Null(Assert.Single(result.Entries).DetailsFetchedAtUtc);
+        Assert.Null(result.Entries[0].Metadata);
+    }
+
+    [Fact]
+    public async Task GetFileInventoryAsync_PrusaDetailFailure_ContinuesWithLaterFiles()
+    {
+        using InventoryHandler handler = new(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/api/v1/storage" => Reply("""{"storage_list":[{"path":"/usb","available":true}]}"""),
+            "/api/v1/files/usb" => Reply("""{"type":"FOLDER","children":[{"type":"PRINT_FILE","name":"A.BGC"},{"type":"PRINT_FILE","name":"B.BGC"},{"type":"PRINT_FILE","name":"C.BGC"}]}"""),
+            "/api/v1/files/usb/B.BGC" => Reply("{}", HttpStatusCode.InternalServerError),
+            "/api/v1/files/usb/A.BGC" => Reply("""{"type":"PRINT_FILE","name":"A.BGC","size":1,"meta":{"layer_height":0.2}}"""),
+            _ => Reply("""{"type":"PRINT_FILE","name":"C.BGC","size":3,"meta":{"layer_height":0.3}}""")
+        });
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
+            "http://printer/", options: new() { IncludeFileDetails = true });
+
+        Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        PrinterFileInventoryEntry[] entries = [.. result.Entries.OrderBy(x => x.RelativePath, StringComparer.Ordinal)];
+        Assert.Equal(["A.BGC", "B.BGC", "C.BGC"], entries.Select(x => x.RelativePath));
+        Assert.NotNull(entries[0].DetailsFetchedAtUtc);
+        Assert.Null(entries[1].DetailsFetchedAtUtc);
+        Assert.Null(entries[1].Metadata);
+        Assert.NotNull(entries[2].DetailsFetchedAtUtc);
+        Assert.Equal(3, entries[2].SizeBytes);
+        Assert.NotNull(entries[2].Metadata);
+        Assert.Contains("/api/v1/files/usb/C.BGC", handler.Paths);
+    }
+
+    [Fact]
+    public async Task GetFileInventoryAsync_PrusaDetailDeadline_StopsRemainingDetailRequests()
+    {
+        TimeSpan deadline = TimeSpan.FromSeconds(100);
+        TimeSpan detailBudget = deadline * 0.75;
+        TimeSpan traversal = TimeSpan.FromSeconds(50);
+        ManualClock clock = new();
+        bool cancelledBeforeBudget = true;
+        bool cancelledAtBudget = false;
+        using InventoryHandler handler = new((request, token) =>
+        {
+            switch (request.RequestUri!.AbsolutePath)
+            {
+                case "/api/v1/storage":
+                    return Task.FromResult(Reply("""{"storage_list":[{"path":"/usb","available":true}]}"""));
+                case "/api/v1/files/usb":
+                    clock.Advance(traversal);
+                    return Task.FromResult(Reply("""{"type":"FOLDER","children":[{"type":"PRINT_FILE","name":"FIRST.BGC"},{"type":"PRINT_FILE","name":"SECOND.BGC"}]}"""));
+                default:
+                    clock.Advance(detailBudget - traversal - TimeSpan.FromTicks(1));
+                    cancelledBeforeBudget = token.IsCancellationRequested;
+                    clock.Advance(TimeSpan.FromTicks(1));
+                    cancelledAtBudget = token.IsCancellationRequested;
+                    token.ThrowIfCancellationRequested();
+                    throw new InvalidOperationException("Request was not cancelled at the deadline boundary.");
+            }
+        });
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreatePrusaClient(http, clock).GetFileInventoryAsync(
+            "http://printer/", options: new() { IncludeFileDetails = true, Deadline = deadline });
+
+        Assert.False(cancelledBeforeBudget);
+        Assert.True(cancelledAtBudget);
+        Assert.Equal(detailBudget, clock.Elapsed);
+        Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        Assert.Equal(PrinterFileInventoryReason.None, result.Reason);
+        Assert.True(Assert.Single(result.Coverage).IsComplete);
+        Assert.Equal(2, result.Entries.Length);
+        Assert.All(result.Entries, x => Assert.Null(x.DetailsFetchedAtUtc));
+        Assert.Equal(["/api/v1/storage", "/api/v1/files/usb", "/api/v1/files/usb/FIRST.BGC"], handler.Paths);
+    }
+
+    [Fact]
+    public async Task GetFileInventoryAsync_PrusaOverallDeadline_IsPartialTimeoutNotDetailBudgetStop()
+    {
+        TimeSpan deadline = TimeSpan.FromSeconds(100);
+        ManualClock clock = new();
+        bool cancelledBeforeDeadline = true;
+        bool cancelledAtDeadline = false;
+        using InventoryHandler handler = new((request, token) =>
+        {
+            switch (request.RequestUri!.AbsolutePath)
+            {
+                case "/api/v1/storage":
+                    return Task.FromResult(Reply("""{"storage_list":[{"path":"/usb","available":true},{"path":"/local","available":true}]}"""));
+                case "/api/v1/files/usb":
+                    return Task.FromResult(Reply("""{"type":"FOLDER","children":[{"type":"PRINT_FILE","name":"FIRST.BGC"}]}"""));
+                default:
+                    clock.Advance(deadline - TimeSpan.FromTicks(1));
+                    cancelledBeforeDeadline = token.IsCancellationRequested;
+                    clock.Advance(TimeSpan.FromTicks(1));
+                    cancelledAtDeadline = token.IsCancellationRequested;
+                    token.ThrowIfCancellationRequested();
+                    throw new InvalidOperationException("Request was not cancelled at the deadline boundary.");
+            }
+        });
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreatePrusaClient(http, clock).GetFileInventoryAsync(
+            "http://printer/", options: new() { IncludeFileDetails = true, Deadline = deadline });
+
+        Assert.False(cancelledBeforeDeadline);
+        Assert.True(cancelledAtDeadline);
         Assert.Equal(PrinterFileInventoryOutcome.Partial, result.Outcome);
-        Assert.Equal(PrinterFileInventoryReason.RequestLimit, result.Reason);
-        Assert.Equal(["/api/v1/storage", "/api/v1/storage"], handler.Paths);
-        Assert.Empty(result.Coverage);
+        Assert.Equal(PrinterFileInventoryReason.Timeout, result.Reason);
+        Assert.Equal("usb", Assert.Single(result.Coverage).StorageRoot);
+        Assert.Null(Assert.Single(result.Entries).DetailsFetchedAtUtc);
+        Assert.Equal(["/api/v1/storage", "/api/v1/files/usb", "/api/v1/files/local"], handler.Paths);
     }
 
     [Fact]
@@ -489,6 +803,18 @@ public sealed class PrinterFileInventoryTests
         _ => throw new ArgumentOutOfRangeException(nameof(backend))
     };
 
+    private static ISupportsFileInventory CreateClient(string backend, HttpClient http, TimeProvider clock) => backend switch
+    {
+        "moonraker" => new MoonrakerClient(
+            http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings(), timeProvider: clock),
+        "octoprint" => new OctoPrintClient(http, clock),
+        "prusalink" => new PrusaLinkClient(CreatePrusaClient(http, clock)),
+        _ => throw new ArgumentOutOfRangeException(nameof(backend))
+    };
+
+    private static PrusaLinkApiClient CreatePrusaClient(HttpClient http, TimeProvider clock) =>
+        new(http, NullLogger<PrusaLinkApiClient>.Instance, ownsHttpClient: false, clock);
+
     private static HttpResponseMessage Reply(string json, HttpStatusCode status = HttpStatusCode.OK) =>
         new(status) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
 
@@ -518,6 +844,86 @@ public sealed class PrinterFileInventoryTests
             Methods.Add(request.Method);
             ApiKeys.Add(request.Headers.TryGetValues("X-Api-Key", out IEnumerable<string>? keys) ? keys.Single() : null);
             return _respond(request, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Minimal manual clock: timers fire synchronously inside <see cref="Advance"/>. Kept local because the plugins
+    /// test project intentionally does not reference Farm.Testing.Shared.
+    /// </summary>
+    private sealed class ManualClock : TimeProvider
+    {
+        private readonly object _gate = new();
+        private readonly List<ManualTimer> _timers = [];
+        private long _ticks;
+
+        public TimeSpan Elapsed => TimeSpan.FromTicks(GetTimestamp());
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp()
+        {
+            lock (_gate)
+            {
+                return _ticks;
+            }
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            Assert.Equal(Timeout.InfiniteTimeSpan, period);
+            ManualTimer timer = new(this, callback, state);
+            timer.Change(dueTime, period);
+            return timer;
+        }
+
+        public void Advance(TimeSpan elapsed)
+        {
+            List<ManualTimer> due;
+            lock (_gate)
+            {
+                _ticks += elapsed.Ticks;
+                due = [.. _timers.Where(timer => timer.DueTicks <= _ticks)];
+                foreach (ManualTimer timer in due)
+                {
+                    _timers.Remove(timer);
+                }
+            }
+
+            foreach (ManualTimer timer in due)
+            {
+                timer.Fire();
+            }
+        }
+
+        private sealed class ManualTimer(ManualClock owner, TimerCallback callback, object? state) : ITimer
+        {
+            public long DueTicks { get; private set; }
+
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                lock (owner._gate)
+                {
+                    owner._timers.Remove(this);
+                    if (dueTime != Timeout.InfiniteTimeSpan)
+                    {
+                        DueTicks = owner._ticks + dueTime.Ticks;
+                        owner._timers.Add(this);
+                    }
+                }
+
+                return true;
+            }
+
+            public void Fire() => callback(state);
+
+            public void Dispose() => Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
         }
     }
 }

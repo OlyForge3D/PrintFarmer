@@ -58,6 +58,9 @@ public interface IPrinterFileLeaseCoordinator
         Guid printerId,
         bool interactive,
         CancellationToken ct = default);
+
+    /// <summary>Bypasses discovery scheduling but requires confirmed idle throughout ownership.</summary>
+    Task<IPrinterFileLease?> TryAcquireForRefreshAsync(Guid printerId, CancellationToken ct = default);
 }
 
 /// <summary>

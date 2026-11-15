@@ -24,6 +24,7 @@ export default function PrinterImportExportControls() {
   return (
     <div className="flex items-center gap-2">
       <Button
+        control
         onClick={() => setOpenImportExportModal(true)}
         onMouseEnter={() => ImportExportModal.preload()}
         onFocus={() => ImportExportModal.preload()}

@@ -60,6 +60,7 @@ import { FailureDetectionBadge } from '@/features/printers/components/FailureDet
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
 import { PrinterTroubleshootingButton } from '@/features/printers/components/PrinterTroubleshootingButton';
+import { PrinterServiceStatus } from '@/features/printers/components/PrinterServiceStatus';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import {
   canCancel,
@@ -92,11 +93,12 @@ export interface DetailedPrinterCardProps {
   printer: Printer | PrinterDisplay;
   backendCapabilities?: PrinterBackendCapabilitiesDto;
   onEdit?: (printer: Printer) => void;
+  onToggleEnabled?: (printer: Printer) => void | Promise<void>;
 }
 
 // Memoized: with stable callbacks and structural sharing upstream, a card only
 // re-renders when its own printer's data actually changed.
-export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ printer, backendCapabilities, onEdit }: DetailedPrinterCardProps) {
+export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ printer, backendCapabilities, onEdit, onToggleEnabled }: DetailedPrinterCardProps) {
   const queryClient = useQueryClient();
   const motion = usePrinterMovement(printer);
   const { ready: spoolmanReady } = useSpoolmanConfigured();
@@ -576,42 +578,8 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             recentEvents={recentEvents}
           />
           {recentFailure && <FailureDetectionBadge event={recentFailure} />}
-          {!isOnline && <PrinterTroubleshootingButton key={printer.id} printer={printer} />}
-        </div>
-      </div>
-
-      {/* Identity + actions: the action grid sits beside the cover at the cover's
-          height (3 rows x 32px = h-24), so no row of the card is spent on icons. */}
-      <div className="mb-4 mt-3">
-        <div className="flex items-stretch gap-3">
-          <div className="flex min-w-0 flex-1 items-end gap-3" data-testid="detailed-printer-image">
-            <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-md border border-pf-border bg-pf-bg-2">
-              <PrinterImage
-                key={`${printer.manufacturerName ?? ''}|${printer.modelName ?? ''}`}
-                manufacturerName={printer.manufacturerName}
-                modelName={printer.modelName}
-                motionType={printer.motionType}
-                alt=""
-                className="h-full w-full object-contain p-1.5 drop-shadow-[0_4px_6px_rgba(0,0,0,0.45)]"
-              />
-            </div>
-            {(printer.modelName || printer.manufacturerName) && (
-              <div className="min-w-0 pb-0.5 leading-tight">
-                {printer.modelName && (
-                  <p className="truncate text-sm font-medium text-pf-text-primary" title={printer.modelName}>{printer.modelName}</p>
-                )}
-                {printer.manufacturerName && (
-                  <p className="truncate text-xs text-pf-text-secondary" title={printer.manufacturerName}>{printer.manufacturerName}</p>
-                )}
-              </div>
-            )}
-          </div>
-
-        <div
-          className="grid shrink-0 grid-flow-col grid-rows-3 content-start gap-x-1"
-          role="toolbar"
-          aria-label="Printer actions"
-        >
+          {!isOnline && printer.isEnabled !== false && <PrinterTroubleshootingButton key={printer.id} printer={printer} />}
+          <div className="ml-auto shrink-0">
             {browserUrl ? (
               <a
                 href={browserUrl}
@@ -640,57 +608,68 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                 iconCenter={<ExternalLinkIcon className="h-4 w-4" />}
               />
             )}
+          </div>
+        </div>
+      </div>
 
+      {/* Identity + actions */}
+      <div className="mb-4 mt-3">
+        <div className="flex items-stretch gap-3">
+          <div className="flex min-w-0 flex-1 items-end gap-3" data-testid="detailed-printer-image">
+            <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-md border border-pf-border bg-pf-bg-2">
+              <PrinterImage
+                key={`${printer.manufacturerName ?? ''}|${printer.modelName ?? ''}`}
+                manufacturerName={printer.manufacturerName}
+                modelName={printer.modelName}
+                motionType={printer.motionType}
+                alt=""
+                className="h-full w-full object-contain p-1.5 drop-shadow-[0_4px_6px_rgba(0,0,0,0.45)]"
+              />
+            </div>
+            {(printer.modelName || printer.manufacturerName || printer.ipAddress) && (
+              <div className="min-w-0 pb-0.5 leading-tight">
+                {printer.modelName && (
+                  <p className="truncate text-sm font-medium text-pf-text-primary" title={printer.modelName}>{printer.modelName}</p>
+                )}
+                {printer.manufacturerName && (
+                  <p className="truncate text-xs text-pf-text-secondary" title={printer.manufacturerName}>{printer.manufacturerName}</p>
+                )}
+                {printer.ipAddress && (
+                  <p className="break-all font-mono text-xs text-pf-text-secondary">{printer.ipAddress}</p>
+                )}
+              </div>
+            )}
+          </div>
+
+        <div
+          className="grid shrink-0 grid-cols-2 content-start gap-x-1"
+          role="toolbar"
+          aria-label="Printer actions"
+        >
+            <PrinterServiceStatus printer={printer} iconOnly onToggleEnabled={onToggleEnabled} />
             <Button
               type="button"
               variant="ghost"
               size="sm"
               onClick={() => setShowCamera(!showCamera)}
               disabled={!hasCameraUrls || !isEnabled}
-              className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
+              className="h-11 w-11 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
               aria-label={showCamera ? 'Hide camera preview' : 'Show camera preview'}
-              title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera preview available' : 'No linked camera configured'}
+              title={!isEnabled ? 'Printer Out of Service' : hasCameraUrls ? 'Camera preview available' : 'No linked camera configured'}
               iconCenter={<CameraIcon className="h-4 w-4" />}
             >
             </Button>
-
-            {support.supportsHistory && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={handleViewHistory}
-                disabled={!canOpenHistoryNow}
-                className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
-                title="View print history"
-                aria-label="View print history"
-                iconCenter={<HistoryIcon className="h-4 w-4" />}
-              >
-              </Button>
-            )}
 
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              onClick={() => setShowFiles(true)}
-              disabled={!canOpenFilesNow}
-              className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
-              title="View printer files"
-              aria-label="View printer files"
-              iconCenter={<FileIcon className="h-4 w-4" />}
-            >
-            </Button>
-
-            <Button
-              type="button"
-              variant="unstyled"
               onClick={handleAutoDispatchToggle}
               disabled={setAutoDispatchEnabled.isPending}
-              className={`h-8 w-8 p-0 rounded transition-colors ${
+              className={`h-11 w-11 p-0 rounded transition-colors ${
                 autoDispatchStatus?.enabled
                   ? 'text-pf-accent'
-                  : 'text-pf-text-secondary hover:text-pf-text-primary'
+                  : 'text-pf-text-secondary enabled:hover:text-pf-text-primary'
               } disabled:opacity-50 inline-flex items-center justify-center`}
               aria-label={`Toggle auto-dispatch for ${printer.name}`}
               aria-pressed={autoDispatchStatus?.enabled ?? false}
@@ -701,8 +680,34 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
               type="button"
               variant="ghost"
               size="sm"
+              onClick={() => setShowFiles(true)}
+              disabled={!canOpenFilesNow}
+              className="h-11 w-11 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
+              title="View printer files"
+              aria-label="View printer files"
+              iconCenter={<FileIcon className="h-4 w-4" />}
+            >
+            </Button>
+            {support.supportsHistory && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleViewHistory}
+                disabled={!canOpenHistoryNow}
+                className="h-11 w-11 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
+                title="View print history"
+                aria-label="View print history"
+                iconCenter={<HistoryIcon className="h-4 w-4" />}
+              >
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => onEdit?.(printer)}
-              className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
+              className="h-11 w-11 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
               title="Edit details"
               aria-label="Edit details"
               iconCenter={<EditIcon className="h-4 w-4" />}
@@ -881,7 +886,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                 controlActionPending={controlActionPending}
                 canPauseOrResume={canPauseOrResumeNow}
                 canCancel={canCancelNow}
-                canEmergencyStop={canEmergencyStopNow}
+                canEmergencyStop={canEmergencyStopNow && (!isShutdown || isEnabled)}
                 onControlAction={handleControlAction}
               />
             }

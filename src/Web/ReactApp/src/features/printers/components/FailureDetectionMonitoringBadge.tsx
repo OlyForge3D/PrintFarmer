@@ -74,7 +74,7 @@ export function FailureDetectionMonitoringBadge({
           'hover:bg-white/10',
           className
         )}
-        aria-label={`Open spaghetti detection details${resolvedPrinterName ? ` for ${resolvedPrinterName}` : ''}`}
+        aria-label={`Open failure detection details${resolvedPrinterName ? ` for ${resolvedPrinterName}` : ''}`}
         aria-haspopup="dialog"
         aria-expanded={isDetailsOpen}
         title={`${label} • click for details`}

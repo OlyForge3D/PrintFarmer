@@ -11,6 +11,9 @@ namespace Farm.Infrastructure.Services.Catalog;
 /// </summary>
 public interface ICatalogService
 {
+    /// <summary>Resolves only requested profile-task model names and manufacturer names.</summary>
+    Task<IReadOnlyList<ProfileTaskModelDto>> GetProfileTaskModelsAsync(IEnumerable<Guid> modelIds, CancellationToken ct = default);
+
     /// <summary>Gets all manufacturers with optional ETag for caching.</summary>
     /// <param name="ct">Cancellation token.</param>
     Task<(IReadOnlyList<ManufacturerDto> List, string? Etag)> GetManufacturersAsync(CancellationToken ct);

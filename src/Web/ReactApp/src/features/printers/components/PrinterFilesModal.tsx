@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Link } from 'react-router';
-import { DeleteIcon, TextIcon, AlertIcon, PlayIcon, CopyIcon, ImageIcon, SortIcon, DownloadIcon } from '@/common/components/icons/MdiIcons';
-import { Button, Select } from '@/common/components/ui';
+import { DeleteIcon, TextIcon, AlertIcon, PlayIcon, CopyIcon, ImageIcon, DownloadIcon } from '@/common/components/icons/MdiIcons';
+import { Button, ToolbarField } from '@/common/components/ui';
+import { SortControl, Toolbar } from '@/common/components/ui/toolbar';
 import { Modal, ConfirmationModal } from '@/common/components/modals';
 import { apiClient } from '@/services/api';
 import { usePrinterFileThumbnails } from '@/features/printers/hooks/usePrinterFileThumbnails';
@@ -323,33 +324,26 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
               </div>
             ) : (
               <div>
-                <div className="flex items-center justify-between mb-6">
+                <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
                   <h3 className="text-lg font-medium text-pf-text-primary">
                     {files.length} File{files.length !== 1 ? 's' : ''}
                   </h3>
-                  <div className="flex items-center gap-2">
-                    <label htmlFor="sort-by" className="text-sm text-pf-text-secondary">Sort by:</label>
-                    <Select
-                      id="sort-by"
-                      value={sortBy}
-                      onChange={(e) => setSortBy(e.target.value as SortBy)}
-                      className="text-sm"
-                    >
-                      <option value="name">Name</option>
-                      <option value="modified">Date Modified</option>
-                      <option value="size">File Size</option>
-                    </Select>
-                    <Button
-                      type="button"
-                      variant="subtle"
-                      size="sm"
-                      onClick={toggleSortOrder}
-                      className="!p-2 !h-auto"
-                      title={`Sort ${sortOrder === 'asc' ? 'descending' : 'ascending'}`}
-                      aria-label={`Sort ${sortOrder === 'asc' ? 'descending' : 'ascending'}`}
-                      iconCenter={<SortIcon className={`h-4 w-4 ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />}
-                    ></Button>
-                  </div>
+                  <Toolbar aria-label="Printer file sorting" labelled className="mb-0">
+                    <ToolbarField label="Sort by" htmlFor="sort-by">
+                      <SortControl
+                        id="sort-by"
+                        value={sortBy}
+                        onChange={(event) => setSortBy(event.target.value as SortBy)}
+                        direction={sortOrder}
+                        onDirectionChange={toggleSortOrder}
+                        aria-label="Sort by"
+                      >
+                        <option value="name">Name</option>
+                        <option value="modified">Date Modified</option>
+                        <option value="size">File Size</option>
+                      </SortControl>
+                    </ToolbarField>
+                  </Toolbar>
                 </div>
 
                 <div className="space-y-2">

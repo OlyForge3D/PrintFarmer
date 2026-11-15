@@ -35,8 +35,9 @@ struct PrinterControlCommandFeedback: View {
                     .foregroundStyle(Color.pfTextPrimary)
             }
             ControlActionButton(
-                title: "Dismiss", identifier: "printer.controls.dismiss-error",
-                compact: true, textSize: 13, textOnly: true
+                title: "", identifier: "printer.controls.dismiss-error",
+                accessibilityTitle: "Dismiss error",
+                compact: true, systemImage: "xmark", textSize: 13, textOnly: true
             ) { viewModel.dismissError() }
             .fixedSize(horizontal: true, vertical: false)
         }
@@ -100,7 +101,7 @@ struct PrinterSensorControlRows: View {
             fieldIdentifier: id + ".value",
             fieldLabel: spokenTitle + (unitSpoken.isEmpty ? "" : " in \(unitSpoken)"),
             // Disabled rows explain why to VoiceOver only; no visible caption (#3548).
-            fieldHint: viewModel.sensorRowMessage
+            fieldHint: viewModel.heatRowBlockedReason ?? viewModel.sensorRowMessage
                 ?? "Double tap to enter a value, then choose Set. Range \(descriptor.min.formatted()) to \(descriptor.max.formatted())"
                 + (allowsOff ? "; zero switches it off." : "."),
             stepLabel: { "\($0 ? "Increase" : "Decrease") \(spokenTitle)" },
@@ -132,7 +133,7 @@ struct PrinterSensorControlRows: View {
                 }
             }
         )
-        .disabled(!viewModel.canControlSensors || current == nil)
+        .disabled(!viewModel.canControlSensors || viewModel.isPrintingOrPaused || current == nil)
     }
 }
 
@@ -247,10 +248,8 @@ struct PrinterZOffsetCalibrationControls: View {
             }
             .disabled(viewModel.isExecuting || viewModel.calibrationReview == nil || viewModel.calibrationPositionBlockedReason != nil)
         case .done:
-            Text(
-                "Save request accepted. Verify the firmware offset and first layer at the printer. This app has not measured nozzle clearance or proven calibration quality."
-            )
-            .font(.footnote)
+            Text("Check the first layer before printing.")
+                .font(.footnote)
         }
     }
 }

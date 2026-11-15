@@ -43,4 +43,44 @@ test.describe('monolith smoke: print queue', () => {
     expect(payload, 'a pristine seeded DB has no printers, so the queue must be empty').toEqual([]);
     assertMatchesWireContractShape(payload, QUEUE_EMPTY_FIXTURE);
   });
+
+  test('printer SignalR client invokes the real hub before and after reconnecting', async ({ page }) => {
+    await page.goto('/printQueue/timeline');
+
+    const connected = () => page.evaluate(async () => {
+      const moduleUrl = new URL('/src/services/printer-signalr.ts', location.origin).href;
+      const { printerSignalRService } = await import(moduleUrl);
+      return printerSignalRService.isConnected;
+    });
+    await expect.poll(connected, { timeout: 15_000 }).toBe(true);
+
+    const invoke = () => page.evaluate(async () => {
+      const moduleUrl = new URL('/src/services/printer-signalr.ts', location.origin).href;
+      const { printerSignalRService } = await import(moduleUrl);
+      const connection = Reflect.get(printerSignalRService, 'connection') as {
+        invoke: (method: string, ids: string[]) => Promise<string[]>;
+      };
+      return {
+        connectionId: printerSignalRService.connectionId as string | null,
+        authorizedIds: await connection.invoke('SubscribeToPrintersAsync', ['invalid-printer-id']),
+      };
+    });
+
+    const before = await invoke();
+    expect(before.connectionId).toBeTruthy();
+    expect(before.authorizedIds).toEqual([]);
+
+    await page.evaluate(async () => {
+      const moduleUrl = new URL('/src/services/printer-signalr.ts', location.origin).href;
+      const { printerSignalRService } = await import(moduleUrl);
+      await printerSignalRService.disconnect();
+      await printerSignalRService.connect();
+    });
+    await expect.poll(connected, { timeout: 15_000 }).toBe(true);
+
+    const after = await invoke();
+    expect(after.connectionId).toBeTruthy();
+    expect(after.connectionId).not.toBe(before.connectionId);
+    expect(after.authorizedIds).toEqual([]);
+  });
 });

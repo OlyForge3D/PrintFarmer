@@ -1,8 +1,8 @@
 # Printer File Catalog API
 
 This document provides detailed reference for the durable printer-file catalog
-endpoints: metadata-only discovery, explicit local Copy, staged Queue, and safe
-single-location Delete.
+endpoints: metadata-only inventory, bounded background metadata/thumbnail
+enrichment, explicit local Copy, staged Queue, and safe single-location Delete.
 
 The legacy G-code harvest feature (the `/api/gcode-harvest/*` endpoints, the
 `/hubs/harvest` SignalR hub, its operation, queue, and discovered-file tables,
@@ -52,9 +52,41 @@ Catalog support is independent of legacy file-list support, authenticated
 streaming copy, and safe remote-delete support. A successful inventory does not
 grant any of those mutation capabilities. A complete empty listing differs from
 an HTTP/authentication/protocol failure; bounds or malformed responses never
-produce invented complete emptiness. Inventory traversal is capped at 100
-requests, 10,000 entries, depth 16, and 120 seconds, without G-code body,
-per-file header, or thumbnail requests.
+produce invented complete emptiness. Inventory traversal and native-detail
+requests share a 120-second deadline, 10,000-entry limit, depth limit of 16,
+and 8 MiB per-response limit. There is no inventory HTTP request-count cap.
+Inventory traversal never downloads G-code bodies, per-file G-code headers, or
+thumbnails. A separate bounded enrichment slice can follow inventory under the
+same confirmed-idle lease; catalog and preview GET requests never trigger it.
+
+Native-detail enrichment is best effort: it stops at 75% of the scan deadline
+(90 seconds by default), measured from the start of inventory traversal.
+Individual detail failures are safely logged and skipped so later files can
+still be enriched. Authentication failure stops further detail requests; neither
+it nor an exhausted detail budget discards a completed listing. The catalog
+service allows 15 seconds of teardown grace beyond the adapter's deadline to
+receive its result; this does not extend the printer-request budget.
+
+PrusaLink scans fetch native file details and store the full `display_name`,
+reported size, normalized print metadata, and successful-detail-fetch timestamp
+in the application's database. The raw short filename remains the location's
+path and action identity; a long display name does not rename the file.
+Scheduled scans reuse saved details only when listing evidence and configuration
+still match. Force Refresh fetches the details again. These catalog values do
+not depend on the thumbnail store and remain available while the printer is
+offline or a preview cannot be loaded.
+
+When a scan cannot fetch details, saved details survive only with unchanged
+modification time, reported size (when present), provider version/hash,
+configuration, mutation epoch, and availability evidence. Missing modification
+time cannot prove reuse is safe. A successful response with no metadata replaces
+the previous snapshot rather than preserving stale values.
+
+Normalized metadata is stored as one bounded JSON display snapshot, not as
+individually searchable database columns. Storage uses relaxed JSON escaping
+and a 32,768-character serialized limit. A snapshot exceeding that limit is
+logged and omitted without losing the file listing or successful-detail-fetch
+marker. This encoding is confined to database storage, not HTML or API output.
 
 ### Discovery policy and metadata API
 
@@ -62,15 +94,16 @@ The `PrinterFileIndex` settings section is saved independently through the
 existing settings shell. Its default cadence is 15 minutes with up to 20%
 deterministic per-printer jitter. Failures back off to at most six hours,
 including jitter. Entries become stale after two configured intervals.
-Authentication failures pause that printer until configuration changes or an
-authorized refresh is requested.
+Inventory traversal authentication failures pause that printer until
+configuration changes or an authorized refresh is requested. Optional detail
+authentication failures instead follow the best-effort behavior above.
 
 Discovery requires fresh, explicitly idle backend telemetry. Normalized `Idle`
 alone is insufficient because legacy normalizers also map unknown states to
 idle. Offline, busy, stale, or unknown activity defers discovery without
 refreshing last-seen timestamps. Disabling the global index or one printer's
 index retains observations, origins, and owned local files; it does not disable
-explicit Copy or Queue actions.
+explicit Force refresh, Copy, or Queue actions.
 
 Busy or unknown sources receive a jittered next-attempt time without advancing
 last-seen or complete-scan evidence, so they cannot monopolize the due batch.
@@ -80,22 +113,125 @@ races scan ownership returns `409` with `scan_state_changed`; refresh state and
 retry the deliberate Refresh or enable/disable action.
 
 Database-backed, renewable ownership shares two aggregate I/O slots by default
-and permits only one feature operation per printer. Configuration, registration,
-policy, and ownership are fenced again in the publication transaction. No
-database transaction spans printer HTTP requests. A superseded scan cannot
-publish positive observations or mark files missing.
+(`PrinterFileIndex.MaxConcurrentIo`, range 1-16) and permits only one feature
+operation per printer. Configuration, registration, policy, and ownership are
+fenced again in the publication transaction. No database transaction spans
+printer HTTP requests. A superseded scan cannot publish positive observations
+or mark files missing.
+
+Lease acquisition retries recognized serialization, deadlock, lock, and
+concurrency conflicts up to eight attempts with jittered backoff. Every attempt
+uses a fresh context and retries the entire serializable allocation transaction,
+not just the failed statement. Available-slot selection starts at a randomized
+slot to reduce collisions. Exhausted acquisition conflicts are logged and defer
+the work; unexpected database failures are not treated as contention.
 
 | Endpoint | Behavior |
 | --- | --- |
 | `GET /api/printer-files` | Metadata-only, paginated locations, authorized printer choices, scan status, and local-copy associations |
-| `POST /api/printer-files/printers/{id}/refresh` | Request a coalesced idle scan; does not bypass discovery disables or idle checks |
+| `POST /api/printer-files/printers/{id}/refresh` | Default: request a coalesced background scan (`202`); does not bypass discovery disables or idle checks |
+| `POST /api/printer-files/printers/{id}/refresh?force=true` | Run a bounded inventory now and mark enrichment due, bypassing discovery switches, schedule, and backoff while retaining idle and I/O safeguards |
 | `PUT /api/printer-files/printers/{id}/index` | Set that printer's discovery control with `{ "enabled": true/false }` |
+
+The default refresh response is `202` with `code: "refresh_requested"` (or
+`"enrollment_pending"` before scan-state enrollment). It is not completion
+evidence. With `force=true`, the request waits for the scan and returns `200`
+with `{ "code": "refresh_completed", "files": N }` only after a complete listing
+is published. Deferrals, interrupted/superseded scans, and incomplete inventories
+return `409` with `code` and `reasonCode`; examples include
+`waiting_for_confirmed_idle` and `refresh_incomplete`. Unavailable ownership,
+including exhausted acquisition retries, returns `409` with
+`code: "source_busy"` before a scan starts. A database state race returns `409`
+with `code: "scan_state_changed"`. These failures must not be presented as
+successful or scheduled force refreshes.
+
+Forced scans use the same inventory bounds, exclusive per-printer ownership, and
+deployment-wide I/O slots as background scans. They require confirmed-idle
+telemetry at acquisition, lease renewal, and publication. They do not enable
+automatic discovery or change its configured cadence.
+
+The React client retries only forced requests rejected with `409 source_busy`,
+using 1-1.5-second jitter within a 120-second capacity-wait window. Once a scan
+starts, its own deadline applies; the client allows 150 seconds for each forced
+HTTP request. Explicit non-idle responses, incomplete scans, state changes,
+network failures, and timeouts are not replayed automatically. Those outcomes
+require an operator to inspect current state before deliberately retrying.
+
+Catalog responses include `maxConcurrentIo`, the configured deployment-wide
+capacity. The bulk refresh control uses that value as its bounded parallel
+request count, defaulting to two when talking to an older server. Per-printer
+failures do not abort the remaining batch. Both icon-only refresh controls stay
+inactive through a pending user refresh and its awaited catalog/preview cache
+reload, including when switching between the catalog and printer settings.
+Background I/O alone does not disable either control: `isScanning` includes
+enrichment holding the exclusive per-printer lease, not just inventory scans.
+A forced request can register interactive demand and use the bounded
+`source_busy` retry above while background work releases ownership. The server
+lease and I/O slots prevent overlapping work; a polled UI snapshot does not.
+A completed listing does not mean metadata and thumbnail acquisition is done.
+
+A published force refresh advances `observationRevision` even for unchanged
+files, except unchanged locations pinned by unfinished file operations. The
+React controls invalidate catalog and preview queries. Force refresh also marks
+enrichment due, retaining an existing image only for the same source identity;
+image acquisition happens later in the background, not in the GET or forced
+inventory request. A completed refresh is not evidence that every image is ready.
+Background scans retain revisions for unchanged files, and enrichment itself
+never advances a revision. PrusaLink native details are still refreshed during
+the forced inventory. Disabling automatic discovery also pauses background
+enrichment; force refresh does not enable either switch.
 
 Listing accepts `printerId`, `search` (at most 200 characters), `availability`
 (`Available`, `Missing`, `Deleted`), `stale`, `page`, and `pageSize`
 (1-200, default 50). Source authorization is applied before counts,
 pagination, filtering, origins, and scan status. Responses contain canonical
 root/path observations, not credentials or printer URLs.
+
+Each location also includes `displayName`, optional `sizeBytes`, optional
+`metadata`, and optional `detailsFetchedAtUtc`. The latter records a successful
+native-detail fetch, including a valid response with no supported metadata.
+Absent fields mean **unknown**, not zero or false. An empty saved result must
+not be replaced by older preview-cache metadata. Existing installations acquire
+details on their next eligible scan; migrations preserve their existing catalog.
+
+The optional camelCase `metadata` object includes the 41 fields in PrusaLink's
+[PrintFileMetadata schema](https://github.com/prusa3d/Prusa-Link-Web/blob/master/spec/openapi.yaml).
+Moonraker, OctoPrint, and bounded G-code/BGCode parsing populate the same snapshot
+with only validated source values. Native fields take precedence over fallback
+fields; missing values are not guessed:
+
+| Fields | Type and units |
+| --- | --- |
+| `printerModel`, `profile`, `materialName`, `filamentType`, `fillDensity`, `supportMaterial` | String; provider text is preserved |
+| `estimatedPrintTimeNormalMode` | Provider's textual duration |
+| `printTimeSeconds`, `estimatedPrintTimeSeconds` | Number, seconds |
+| `layerHeightMm`, `maxLayerZMm`, `brimWidthMm`, `nozzleDiameterMm` | Number, millimeters |
+| `bedTemperatureC`, `nozzleTemperatureC` | Number, degrees Celsius |
+| `bedTemperaturePerToolC`, `nozzleTemperaturePerToolC` | Number array, degrees Celsius |
+| `nozzleDiameterPerToolMm`, `filamentUsedPerToolMm` | Number array, millimeters |
+| `filamentTypePerTool` | String array |
+| `filamentUsedMm`, `filamentUsedG`, `filamentUsedCm3` | Number, millimeters / grams / cubic centimeters respectively |
+| `filamentUsedPerToolG`, `filamentUsedPerToolCm3` | Number array, grams / cubic centimeters respectively |
+| `filamentCost`, `filamentCostPerTool` | Number / number array; currency unspecified by the provider |
+| `requiredResinMl` | Number, milliliters |
+| `fadedLayers`, `ironing` | Number; provider value is preserved |
+| `exposureTimeSeconds`, `initialExposureTimeSeconds`, `minExposureTimeSeconds`, `maxExposureTimeSeconds`, `minInitialExposureTimeSeconds`, `maxInitialExposureTimeSeconds` | Number, seconds |
+| `normalPercentPresent`, `normalLeftPresent`, `quietPercentPresent`, `quietLeftPresent`, `layerInfoPresent` | Boolean |
+| `layerCount` | Source-reported integer; never inferred from height |
+| `infillPercentage`, `infillPattern` | Number, 0-100 percent / string |
+| `supportEnabled`, `supportType`, `supportStyle` | Nullable boolean / strings; explicit false means disabled |
+| `slicerName`, `slicerVersion` | Source-reported strings |
+| `tools` | Array of identified tools: `index` (zero-based), optional `sourceId`, nullable `color`, `material`, and `filamentUsedG` |
+| `filamentUsedGIsDerived` | True only when total grams were summed from a complete set of tool weights |
+
+Legacy tool arrays retain provider order. The richer `tools` records retain
+explicit source slots: missing color, material, or weight remains null in that
+slot rather than shifting another tool into it. Colors must be literal
+`#RRGGBB` or `#RRGGBBAA`; they are not inferred from names. Zero and false remain
+valid where the source field permits them. These are source-reported
+observations, not independently verified print parameters or evidence of remote
+byte equality. Acquisition time, extractor version, independent metadata/image
+outcomes, and source identity are persisted with enrichment.
 
 Search ignores case on SQLite, PostgreSQL, and SQL Server. It lowers the stored
 path and the search text explicitly instead of relying on provider collation,
@@ -130,10 +266,16 @@ restricted local asset ID or authorizes reuse of its bytes.
 ### Explicit local Copy and staged Queue
 
 The canonical `/files` page separates **Local library** from **On printers**.
-The latter offers metadata search, availability/freshness filters, scan controls,
-and single-location actions. Catalog browsing and automatic indexing remain
-metadata-only. Preview capture is a distinct, opt-in request for visible items;
-it is never part of a scan or catalog list request.
+Both toolbars start with **Search**. Local library matches display names
+and stored filenames; On printers matches relative paths, including filenames
+and folder segments. Both use case-insensitive substring matching, subject to
+database-provider Unicode casing differences. On printers also offers a Printer
+filter (default **All**), a view toggle, Refresh, and single-location actions.
+Both sources use matching 40px-high toolbar inputs,
+dropdowns, buttons, and view toggles, including expanded local folder controls.
+Catalog browsing reads only local state. Automatic
+indexing can acquire metadata and thumbnails in a bounded background enrichment
+slice; browsing, opening details, and loading images never contact a printer.
 Captured local versions are links, not a claim that current remote bytes match.
 Each Copy request imports one file and there is no batch endpoint. Selecting
 several files makes the UI send one request per file, each bound to its own
@@ -141,7 +283,7 @@ observation revision and intent key; only failed files are retried with their
 original key, and stale files must be refreshed first. Part/stock harvesting
 and immediate printer Print controls are unchanged.
 
-### On-demand preview and browser Download
+### Background enrichment, local previews, and browser Download
 
 **Copy Local** retains the durable import flow described below. **Download**
 streams a file to the browser without importing it, creating an asset, or
@@ -155,8 +297,8 @@ No endpoint accepts a printer URL or arbitrary remote path.
 
 | Method and endpoint | Behavior |
 | --- | --- |
-| `GET /api/printer-files/locations/{id}/preview?observationRevision={n}` | Version-keyed cached preview, or one on-demand lightweight metadata/image capture |
-| `GET /api/printer-files/locations/{id}/thumbnail?observationRevision={n}` | Authorized cache-only raster image; `404` if absent; never contacts the printer |
+| `GET /api/printer-files/locations/{id}/preview?observationRevision={n}` | Local database metadata, image reference, and enrichment status; never acquires a printer-I/O lease or contacts the printer |
+| `GET /api/printer-files/locations/{id}/thumbnail?observationRevision={n}&version={v}` | Authorized local raster image; `404` if absent or the supplied artifact version no longer matches; never contacts the printer |
 | `GET /api/printer-files/locations/{id}/download?observationRevision={n}` | Explicit bounded browser attachment stream, not a local import |
 
 Preview JSON uses this camelCase contract:
@@ -169,20 +311,42 @@ Preview JSON uses this camelCase contract:
   "reasonCode": null,
   "capturedAtUtc": "2026-10-26T18:00:00Z",
   "hasImage": true,
-  "thumbnailUrl": "/api/printer-files/locations/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/thumbnail?observationRevision=7",
+  "thumbnailUrl": "/api/printer-files/locations/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/thumbnail?observationRevision=7&version=11111111-2222-3333-4444-555555555555",
+  "thumbnailVersion": "11111111-2222-3333-4444-555555555555",
+  "metadataState": "Ready",
+  "thumbnailState": "Ready",
+  "metadataReason": null,
+  "thumbnailReason": null,
+  "extractorVersion": 1,
+  "nextAttemptAtUtc": "2026-10-27T18:00:00Z",
+  "isStale": false,
+  "sizeBytes": 123456,
   "printTimeSeconds": 3600,
-  "layerHeightMm": 0.2
+  "layerHeightMm": 0.2,
+  "metadata": {
+    "printerModel": "COREONE",
+    "printTimeSeconds": 3600,
+    "layerHeightMm": 0.2
+  }
 }
 ```
 
-- `Available`: at least one image or native measurement is present.
-- `Unavailable`: native metadata was fetched but contains no supported detail.
-- `Unsupported`: no certified lightweight preview adapter; no capture date.
-- `Deferred`: no fresh, explicit idle status or no available file-I/O lease.
-  Returns HTTP `200`, `reasonCode: "printer_busy"`, no image or capture date.
-- A null print time, layer height, or image means explicitly unavailable, not
-  zero or an inferred value. `capturedAtUtc` is the real metadata/image fetch
-  time, retained on cache hits. It is not a source-version guarantee.
+- `Available`: an image, metadata, or a known measurement (including size) is present.
+- `Unavailable`: no display value is available and acquisition is not pending.
+- `Unsupported`: the backend does not support enrichment.
+- `Deferred`: no value is available and background acquisition is pending or deferred.
+- A missing or null metadata field means unknown, not zero or an inferred
+  value. `capturedAtUtc` is the saved acquisition time, not the GET time or a
+  source-version guarantee.
+
+`metadataState` and `thumbnailState` independently report `Pending`, `Ready`,
+`Partial`, `Absent`, `Unsupported`, `Deferred`, or `Failed`. An image failure
+does not discard successful metadata. Safe reason codes distinguish, for
+example, `cache_full`, `storage_unavailable`, `capture_paused`,
+`range_unsupported`, `region_limit`, and `invalid_image`. `isStale` identifies
+a retained same-source image while revalidation is due or its last image
+outcome is not ready. Clients should not confuse a known file size with complete
+print settings, or a missing image with failed metadata.
 
 Catalog `printers[]` includes `supportsPreview`, `canPreview`,
 `supportsDownload`, and `canDownload`. These are capability/authority flags,
@@ -190,31 +354,184 @@ not a promise that the printer is currently idle. Existing
 `supportsCopy && canCopy` also identifies eligible browser downloads for the
 currently certified adapters.
 
-| Backend | Preview | Browser Download |
+| Backend | Background enrichment | Browser Download |
 | --- | --- | --- |
-| Moonraker | Native per-file metadata, estimated time, layer height, and optional native PNG/JPEG/WebP | Certified authenticated `gcodes` stream |
-| OctoPrint | Native per-file analysis estimated time; image and layer height explicitly unavailable | Certified authenticated `local` stream |
-| PrusaLink, FlashForge, SDCP, others | Unsupported; no G-code fallback | Unsupported until native streaming is certified |
+| Moonraker | Native per-file metadata and thumbnail first; bounded reads of the exact `gcodes` file fill unknown fields or embedded images | Certified authenticated `gcodes` stream |
+| OctoPrint | Native analysis time, filament length/volume, and highest Z first; validated native thumbnail or bounded exact-file reads where supported | Certified authenticated `local` stream |
+| PrusaLink | Native print metadata and thumbnail first; bounded exact-file reads fill unknown fields or embedded images | Unsupported until native streaming is certified |
+| FlashForge, SDCP, others | Unsupported; no G-code fallback | Unsupported until native streaming is certified |
 
-Preview never fetches G-code to parse metadata or render an image. Moonraker
-uses at most two metadata requests and one image request per capture, with a
-15-second total deadline, 256 KiB metadata limit, and 2 MiB image limit.
-Images require a supported raster signature; SVG, redirects, ambiguous paths,
-encoded traversal, compressed responses, and oversized/truncated bodies fail
-closed. OctoPrint uses one bounded metadata request and no image request.
+Acquisition runs only with fresh confirmed-idle telemetry under the renewable,
+exclusive per-printer lease and deployment I/O budget. Native facts win, and
+native thumbnails are acquired before optional metadata fallback so a slow
+G-code read cannot prevent an already-available preview from being captured.
+Fallback reads only bounded regions, never imports the file, and never uses the
+explicit Copy/Download path. Each file has at most eight wire attempts (including
+authentication retries), 8 MiB of responses, and 15 seconds. A slice handles at
+most eight files and 16 MiB. Metadata responses are limited to 256 KiB, text
+regions to 1 MiB each, binary prefixes and decoded data to 4 MiB each, and images
+to 2 MiB, 4096 pixels per edge, and 4,194,304 total pixels. Unsupported ranges,
+compression, image formats, or parser bounds yield explicit partial/unsupported
+outcomes, not an unbounded download.
 
-The server cache is private filesystem data under
-`<ContentRoot>/App_Data/printer-file-previews`, outside the web root, and is
-never exposed by static-file middleware or the library. It is limited to
-256 entries and 64 MiB, with a 24-hour lifetime; oldest entries are evicted
-before writes exceed either bound. Cache identity includes printer, root,
-case-sensitive path, size, raw modification value, provider identity,
-observation/configuration/mutation revisions, and configuration fingerprint.
-Every read checks current database permissions, printer View ACL, registration,
-availability, revision, and configuration. Cached bytes may be served while
-busy because that causes no printer I/O. HTTP responses use
-`Cache-Control: private, no-store` and `X-Content-Type-Options: nosniff`;
-clients must authenticate even when loading a previously returned image URL.
+Acquired metadata and images retain independent outcomes if optional fallback
+exhausts the adapter's deadline or request/byte budget. The service safety
+timeout allows 15 seconds of grace beyond the adapter's 15-second deadline to
+return those partial results; it does not extend the printer I/O budget.
+Caller cancellation, lease loss, or a detected source change still discards
+the acquisition rather than publishing stale results.
+
+Image validation accepts supported PNG/JPEG/WebP payloads, not SVG or QOI.
+Redirects, off-origin references, ambiguous/encoded traversal paths, and
+oversized or truncated bodies fail closed. Publication rechecks ownership,
+idle state, registration, configuration, source identity, and current row
+eligibility without holding a database transaction over network I/O.
+
+Never-attempted files run first, followed by the oldest due attempt. Transient
+failures retry after 1, 5, 15, then 60 minutes with up to 20% subtractive
+deterministic jitter. Settled outcomes revalidate after 24 hours; this is a
+revalidation interval, not image expiry. Old extractor versions and force
+refresh also make work due. Successful metadata remains useful when image
+capture cannot proceed, and local-capacity retries do not repeatedly read
+already-settled metadata.
+
+#### Fallback telemetry
+
+The `PrintFarmer.PrinterFileEnrichment` meter measures the shared acquisition
+pipeline for Moonraker, OctoPrint, and PrusaLink. It uses the API's existing
+OpenTelemetry exporters: scrape `/metrics` with Prometheus or configure
+`OpenTelemetry:OTLP:Endpoint`. `DISABLE_TELEMETRY=true` and the `Testing`
+environment disable export. Deploy the instrumentation and collect samples
+before drawing conclusions about live fallback frequency or latency.
+
+| OpenTelemetry instrument | Type / unit | Labels | Meaning |
+| --- | --- | --- | --- |
+| `printer_file.enrichment.started` | Counter / acquisitions | `backend` | Acquisitions started, including native-only attempts |
+| `printer_file.enrichment.fallback.started` | Counter / fallbacks | `backend`, `trigger` | Actual bounded G-code/BGCode fallback attempts |
+| `printer_file.enrichment.fallback.skipped` | Counter / fallbacks | `backend`, `trigger`, `reason` | Needed fallback not started because the budget was exhausted or the source was empty |
+| `printer_file.enrichment.fallback.duration` | Histogram / ms | `backend`, `trigger`, `outcome` | Elapsed fallback reads and parsing, including unsuccessful attempts |
+
+Labels are bounded: `backend` is `moonraker`, `octoprint`, `prusalink`, or
+`unknown`; `trigger` is `metadata`, `thumbnail`, or `metadata_and_thumbnail`.
+Skip reasons are `deadline`, `request_limit`, `response_limit`, or `empty_source`.
+Duration outcomes are `completed`, `partial`, `timeout`, `failed`, `cancelled`,
+or `error`. File paths, printer/user IDs, URLs, credentials and exception text
+are not metric labels.
+
+One acquisition starts at most one fallback; head/tail reads and reuse of its
+parsed thumbnail count together. Retries and revalidation are new acquisitions,
+not unique files. Metadata gaps can trigger fallback even when a native image
+is ready. Time covers the bounded reads and parsing only, excluding native
+metadata/images, final source verification, database and thumbnail publication.
+`completed` means the bounded parser finished conclusively, not that it found
+every field or a valid image, or that publication succeeded. `partial` preserves
+some fallback data despite an inconclusive read; `timeout` identifies the
+per-file deadline, `cancelled` caller cancellation, and `error` an unexpected
+exception that still propagates.
+
+Timeout samples measure time spent before interruption, not the time a full
+read would have needed. They consume the **remaining** shared 15-second budget
+after native work. Do not discard them when assessing cost: doing so biases
+latency toward successful reads. Histogram boundaries are 10, 50, 100, 250,
+500, 1000, 2500, 5000, 10000, 15000 and 30000 ms, plus infinity.
+
+Prometheus translates the names below. Fallback-start percentage by backend,
+including zero fallback when acquisition samples exist:
+
+```promql
+100 * (
+  sum by (backend) (rate(printer_file_enrichment_fallback_started_total[1h]))
+  or on (backend)
+  (0 * sum by (backend) (rate(printer_file_enrichment_started_total[1h])))
+) / sum by (backend) (rate(printer_file_enrichment_started_total[1h]))
+```
+
+Approximate p95 and mean fallback time in milliseconds, across all outcomes:
+
+```promql
+histogram_quantile(0.95,
+  sum by (le, backend) (
+    rate(printer_file_enrichment_fallback_duration_milliseconds_bucket[1h])
+  )
+)
+
+sum by (backend) (rate(printer_file_enrichment_fallback_duration_milliseconds_sum[1h]))
+/
+sum by (backend) (rate(printer_file_enrichment_fallback_duration_milliseconds_count[1h]))
+```
+
+Completed attempt counts by outcome (including timeouts) and skipped attempts
+by reason over the same window:
+
+```promql
+sum by (backend, outcome) (
+  increase(printer_file_enrichment_fallback_duration_milliseconds_count[1h])
+)
+
+sum by (backend, reason) (
+  increase(printer_file_enrichment_fallback_skipped_total[1h])
+)
+```
+
+No series can mean no recorded event or no working exporter/scrape; it is not
+proof of zero cost. A zero denominator means no observed acquisition activity,
+not a measured 0% fallback rate. Windowed rates need multiple scrapes and include
+in-flight work; histogram counts appear when an attempt ends, whereas start
+counters appear immediately. These measurements can refute a fallback-cost
+hypothesis, but cannot by themselves attribute latency to printer hardware,
+networking, or parsing. Misreading them could lead operators to change budgets
+or concurrency unnecessarily, delaying previews or increasing printer load.
+
+#### Shared thumbnail storage and upgrade requirements
+
+Apply the `AddPrinterFileEnrichment` AppDbContext migration for the configured
+provider (SQLite, PostgreSQL, or SQL Server). Existing catalog rows are enriched
+on their next eligible background pass; there is no whole-catalog download.
+No slicer-context migration is required.
+
+The private store is `<thumbnail root>/.printer-file-thumbnails`. The thumbnail
+root comes from `PRINTER_FILE_THUMBNAIL_PATH`, then
+`STORAGE_PATHS:PRINTER_FILE_THUMBNAILS`, then `<content root>/printer-file-thumbnails`.
+The bundled Docker deployments set it under the persistent app-data volume
+(`/data/printer-file-thumbnails`, or `/app/data/printer-file-thumbnails` for the
+monolith compose file). It must not be inside, equal to, or a parent of the
+Gcode library or model upload roots, so library file APIs can never read or
+write cached thumbnails; an overlapping, missing, or unavailable root reports
+`storage_unavailable`, not a replica-local fallback. The root is created at
+startup, but the store never recreates it afterwards.
+**Every API replica must use the same database and the same persistent
+thumbnail volume**, with working exclusive file creation and same-directory
+atomic rename. Matching path strings on different disks do not constitute
+shared storage. Provision and verify the mount before enabling acquisition on
+replicas. Builds that stored thumbnails in `<Gcode storage
+directory>/.printer-file-thumbnails` can delete that folder after upgrading;
+missing images are re-acquired on the next enrichment pass.
+
+`PrinterFileIndex.thumbnailCacheMaxBytes` defaults to **512 MiB** and accepts
+2 MiB through 1 TiB. Database-coordinated reservations include in-flight,
+published, and retired bytes. Healthy images are never evicted to admit another
+file. At capacity, image acquisition reports `cache_full` while metadata
+continues. Increase capacity or allow obsolete artifacts to be reclaimed rather
+than deleting healthy previews to make room. Retired images have a one-hour
+grace period; crashed writes and failed deletions remain accounted for until
+cleanup succeeds.
+
+Images are immutable, SHA-256-identified artifacts with an opaque
+`thumbnailVersion`. Identical same-source bytes reuse the artifact; changed
+bytes receive a new version. Identity includes printer, root, ordinal path,
+configuration generation, size, raw modification value, and provider
+version/digest, separately from action revisions. A detected source change,
+missing/deleted file, or configuration change stops serving the old association.
+Without strong provider identity, a same-size/same-time overwrite may remain
+undetected until revalidation; a local digest cannot prove remote equality.
+
+Every GET checks current permissions, printer View ACL, registration,
+availability, revision, and configuration. Cached bytes can be served while
+busy or offline because this causes no printer I/O. Missing or corrupt local
+bytes return `404` and mark the image for background reacquisition; the request
+does not download a replacement. Image responses include a strong SHA-256 ETag,
+`Cache-Control: private, no-store`, and `X-Content-Type-Options: nosniff`.
+Clients must authenticate even when reusing a previously returned URL.
 
 Download additionally requires `ModelWrite` and the exact live Copy authority:
 `printer_files:read`, `printer_files:copy`, printer View access, and library
@@ -234,8 +551,8 @@ violations return `413`. Error bodies are ProblemDetails with non-sensitive
 `code` and `reasonCode` extensions. Unsupported preview is a normal `200`
 `Unsupported` response. Upstream transport/invalid-content failures return
 safe `409`/`503` errors, never printer URLs, credentials, or response bodies.
-The frontend should request previews only for visible items, not fan out
-across the catalog, and avoid polling deferred items aggressively.
+The frontend loads local preview records and images only for visible items,
+not the whole catalog, and avoids aggressive polling while enrichment is pending.
 
 ### Durable Copy Local and staged Queue endpoints
 
@@ -269,14 +586,12 @@ Existing uploads keep their established accounting.
 
 Copy checks the actual SHA-256, byte count, strict UTF-8 text format and metadata
 before publishing owned content. It does not authorize execution or manufacture
-calibration/promotion lineage. Queue additionally validates the captured program
-against the actual destination's safety envelope and normal compatibility
-requirements. Safety failures cannot be waived by snapshot consent.
-
-Queue accepts explicit standard heater shutdown (`M104 S0` and `M140 S0`)
-as well as `TURN_OFF_HEATERS`, and explicit motor shutdown (`M18` or `M84`).
-Later heating, motor enabling, or movement invalidates the corresponding
-shutdown evidence. Copy alone does not require an executable shutdown sequence.
+calibration/promotion lineage. Queue rejects null/empty decoded text and checks
+normal destination compatibility, but does not inspect command content or impose
+a temperature, motion, geometry, speed, flow, host-command or shutdown policy.
+Snapshot consent cannot waive integrity, authorization or compatibility failures.
+Firmware limits, trusted programs/macros and operator procedures own command
+safety; see [the G-code input-check policy](CALIBRATION_DIVERGENCES.md).
 
 Every catalog Queue stages locally, including Queue to the source printer.
 After validation, an unverified source enters `AwaitingSourceConfirmation`.
@@ -302,7 +617,7 @@ destination compatibility, or Ready/dispatch gates.
 Admission uses the existing queue pipeline inside the same database transaction
 as the durable operation-to-job link. A job pins its local asset, actual digest
 and size. Multiple copies retain the ordinary queue semantics: one job with
-`copies`, not one independent job per copy. Local safety/byte verification and
+`copies`, not one independent job per copy. Local nonempty-input/byte verification and
 authorization run again before admission; no printer network call occurs in
 that transaction. Committed jobs remain independent of later remote changes.
 An admission failure can retain its local asset and valid confirmation for

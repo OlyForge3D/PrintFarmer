@@ -618,6 +618,9 @@ public sealed class PrinterFileDeleteServiceTests
         public bool Current { get; set; } = true;
         public Func<Task>? AfterAcquire { get; set; }
 
+        public Task<IPrinterFileLease?> TryAcquireForRefreshAsync(Guid printerId, CancellationToken ct = default) =>
+            TryAcquireAsync(printerId, true, ct);
+
         public async Task<IPrinterFileLease?> TryAcquireAsync(Guid printerId, bool interactive, CancellationToken ct = default)
         {
             if (occupied)

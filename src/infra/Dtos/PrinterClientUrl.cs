@@ -1,10 +1,25 @@
-﻿namespace Farm.Infrastructure;
+﻿using System.Net;
+
+namespace Farm.Infrastructure;
 
 /// <summary>
 /// Produces credential-free HTTP URLs that authenticated clients may display or navigate to.
 /// </summary>
 public static class PrinterClientUrl
 {
+    /// <summary>
+    /// Returns only the numeric IP host of a stored HTTP(S) URL, without resolving hostnames.
+    /// </summary>
+    public static string? ExtractIpAddress(string? value)
+    {
+        return Uri.TryCreate(value, UriKind.Absolute, out Uri? uri) &&
+            uri.Scheme is "http" or "https" &&
+            uri.HostNameType is UriHostNameType.IPv4 or UriHostNameType.IPv6 &&
+            IPAddress.TryParse(uri.IdnHost, out IPAddress? address)
+                ? address.ToString()
+                : null;
+    }
+
     /// <summary>
     /// Returns whether a printer URL is an absolute HTTP(S) URL without embedded credentials.
     /// </summary>

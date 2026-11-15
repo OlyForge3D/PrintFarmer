@@ -33,6 +33,21 @@ public interface IJobQueueService
     /// <exception cref="QueueGroupAccessDeniedException">Thrown when the user lacks Submit access to the target printer group.</exception>
     Task<JobQueuePrintJobDto?> AddJobToQueueAsync(QueuePrintJobDto request, Guid? userId, CancellationToken ct);
 
+    /// <summary>
+    /// Adds a job and reports a bounded reason when automatic printer assignment cannot
+    /// admit it. Resource authorization failures continue to throw.
+    /// </summary>
+    async Task<QueueJobAddResult> AddJobToQueueWithOutcomeAsync(
+        QueuePrintJobDto request,
+        Guid? userId,
+        CancellationToken ct)
+    {
+        JobQueuePrintJobDto? job = await AddJobToQueueAsync(request, userId, ct);
+        return job is null
+            ? QueueJobAddResult.Rejected(QueueJobAddFailureReason.NoAvailablePrinter)
+            : QueueJobAddResult.Queued(job);
+    }
+
     /// <summary>Gets a print job by ID.</summary>
     Task<JobQueuePrintJobDto?> GetJobAsync(Guid id, CancellationToken ct);
 
@@ -82,4 +97,28 @@ public interface IJobQueueService
         string actorSubject,
         CancellationToken ct) =>
         UpdateJobAsync(id, request, ct);
+}
+
+/// <summary>Reasons an automatic queue submission can be rejected without creating a job.</summary>
+public enum QueueJobAddFailureReason
+{
+    GcodeFileNotFound,
+    NoAvailablePrinter,
+    PrinterModelMismatch,
+    PrinterAccessDenied,
+    NozzleMismatch,
+    MaterialMismatch,
+    QueueCapacity,
+    QueueGroupAccessDenied,
+    UnexpectedError
+}
+
+/// <summary>Queue submission result, including a bounded rejection reason when no job was created.</summary>
+public sealed record QueueJobAddResult(JobQueuePrintJobDto? Job, QueueJobAddFailureReason? FailureReason)
+{
+    public static QueueJobAddResult Queued(JobQueuePrintJobDto job) =>
+        new(job ?? throw new ArgumentNullException(nameof(job)), null);
+
+    public static QueueJobAddResult Rejected(QueueJobAddFailureReason reason) =>
+        new(null, reason);
 }

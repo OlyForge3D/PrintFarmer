@@ -35,7 +35,7 @@ public partial class DispatchScorer(
     IOperatorFeatureGate? featureGate = null,
     IFilamentCoverageService? coverageService = null,
     IFilamentFallbackGroupResolver? fallbackService = null,
-    IMutationWatermarkReader? watermarkReader = null) : IDispatchScorerWithOrigin, IJobCompatibilitySummarizer, IPrinterFileTargetValidator
+    IMutationWatermarkReader? watermarkReader = null) : IDispatchScorerWithOrigin, IBedClearConfirmedDispatchScorer, IJobCompatibilitySummarizer, IPrinterFileTargetValidator
 {
     // Factor weight constants
     private const double WeightMaterialMatch = 100;
@@ -77,10 +77,24 @@ public partial class DispatchScorer(
     /// to either path — see the caveats on issue #1705.
     /// </para>
     /// </summary>
-    public async Task<DispatchScore?> ScorePrinterForJobAsync(
+    public Task<DispatchScore?> ScorePrinterForJobAsync(
         Guid jobId,
         Guid printerId,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        ScoreSinglePrinterForJobAsync(jobId, printerId, bedClearConfirmed: false, ct);
+
+    /// <inheritdoc />
+    public Task<DispatchScore?> ScorePrinterForBedClearConfirmedJobAsync(
+        Guid jobId,
+        Guid printerId,
+        CancellationToken ct = default) =>
+        ScoreSinglePrinterForJobAsync(jobId, printerId, bedClearConfirmed: true, ct);
+
+    private async Task<DispatchScore?> ScoreSinglePrinterForJobAsync(
+        Guid jobId,
+        Guid printerId,
+        bool bedClearConfirmed,
+        CancellationToken ct)
     {
         JobScoringContext context = await LoadJobScoringContextAsync(jobId, ct).ConfigureAwait(false);
         if (context.Job is null)
@@ -117,7 +131,8 @@ public partial class DispatchScorer(
             context.ClusterMateNames,
             context.MultiSlotEnabled,
             context.GramsAware,
-            gramsContexts);
+            gramsContexts,
+            bedClearConfirmed);
     }
 
     public async Task<DispatchScoreResult> ScorePrintersForJobWithOriginAsync(
@@ -452,14 +467,15 @@ public partial class DispatchScorer(
         HashSet<string> clusterMateNames,
         bool multiSlotEnabled,
         bool gramsAware,
-        IReadOnlyDictionary<(Guid PrinterId, int Tool), PerToolGramsContext>? gramsContexts)
+        IReadOnlyDictionary<(Guid PrinterId, int Tool), PerToolGramsContext>? gramsContexts,
+        bool bedClearConfirmed = false)
     {
         Dictionary<string, FactorScore> breakdown = [];
         List<string> eliminationReasons = [];
         bool eliminated = false;
 
         // Factor 9 (pre-filter): Printer Availability
-        FactorScore availabilityScore = ScoreAvailability(printer);
+        FactorScore availabilityScore = ScoreAvailability(printer, bedClearConfirmed);
         breakdown["Availability"] = availabilityScore;
         if (availabilityScore is { IsHardRequirement: true, Score: 0 })
         {
@@ -609,7 +625,7 @@ public partial class DispatchScorer(
             eliminationReasons);
     }
 
-    private static FactorScore ScoreAvailability(Printer printer)
+    private static FactorScore ScoreAvailability(Printer printer, bool bedClearConfirmed)
     {
         List<string> issues = [];
         if (!printer.IsAvailable)
@@ -627,7 +643,9 @@ public partial class DispatchScorer(
             issues.Add("disabled");
         }
 
-        if ((printer.DispatchState?.AutoDispatchState ?? AutoDispatchState.None) == AutoDispatchState.PendingReady)
+        // Only the bed-clear confirmation handoff for this exact printer may release this gate.
+        if (!bedClearConfirmed &&
+            (printer.DispatchState?.AutoDispatchState ?? AutoDispatchState.None) == AutoDispatchState.PendingReady)
         {
             issues.Add("waiting for bed clear confirmation");
         }

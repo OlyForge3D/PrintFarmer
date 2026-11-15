@@ -1,4 +1,5 @@
 ﻿using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services.Gcode.PrinterFiles;
@@ -18,19 +19,24 @@ namespace Farm.Modules.Gcode.Controllers;
 [Authorize(Policy = "ModelRead")]
 public sealed class PrinterFileContentController(PrinterFileContentService content) : ControllerBase
 {
-    /// <summary>Fetches lightweight preview metadata on demand; no G-code parsing or import.</summary>
+    /// <summary>Returns persisted metadata and enrichment status; never contacts the printer.</summary>
     [HttpGet("{id:guid}/preview")]
     [ProducesResponseType<PrinterFilePreviewDto>(StatusCodes.Status200OK)]
     public Task<IActionResult> PreviewAsync(Guid id, [FromQuery] long observationRevision, CancellationToken ct) =>
         ExecuteAsync(async actor => Ok(await content.PreviewAsync(actor, id, observationRevision, ct)));
 
-    /// <summary>Serves only an already-captured, currently authorized image.</summary>
+    /// <summary>
+    /// Serves only a locally stored, currently authorized image. An optional <paramref name="version"/>
+    /// pins the exact artifact; a mismatch is reported as unavailable rather than serving other bytes.
+    /// </summary>
     [HttpGet("{id:guid}/thumbnail")]
-    public Task<IActionResult> ThumbnailAsync(Guid id, [FromQuery] long observationRevision, CancellationToken ct) =>
+    public Task<IActionResult> ThumbnailAsync(
+        Guid id, [FromQuery] long observationRevision, [FromQuery] Guid? version, CancellationToken ct) =>
         ExecuteAsync(async actor =>
         {
-            PrinterFilePreviewContent image = await content.ThumbnailAsync(actor, id, observationRevision, ct);
-            return File(image.Image!, image.ContentType!);
+            PrinterFilePreviewContent image = await content.ThumbnailAsync(actor, id, observationRevision, version, ct);
+            string hash = Convert.ToHexStringLower(SHA256.HashData(image.Image!));
+            return File(image.Image!, image.ContentType!, lastModified: null, new EntityTagHeaderValue($"\"{hash}\""));
         });
 
     /// <summary>Downloads to the browser without importing or creating any queue operation.</summary>

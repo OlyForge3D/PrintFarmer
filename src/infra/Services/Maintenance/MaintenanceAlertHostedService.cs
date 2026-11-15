@@ -35,7 +35,8 @@ public class MaintenanceAlertHostedService(
             "Evaluates maintenance schedules and generates alerts when maintenance is due",
             "Maintenance",
             "pf-icon-alert",
-            settings.IntervalSeconds);
+            settings.IntervalSeconds,
+            GetType());
         _serviceMonitor.ReportStarted(ServiceId);
 
         if (!settings.Enabled)

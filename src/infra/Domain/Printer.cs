@@ -464,6 +464,12 @@ public class Printer : IRevisionedEntity
     public bool ObicoEnabled { get; set; }
 
     /// <summary>
+    /// Whether PrintGuard advisory failure detection is enabled for this printer.
+    /// This selection is independent of Obico and does not require an Obico server.
+    /// </summary>
+    public bool PrintGuardEnabled { get; set; }
+
+    /// <summary>
     /// Tags assigned to this printer for categorization and filtering.
     /// Uses EF Core skip-navigation (many-to-many without explicit join entity).
     /// </summary>
@@ -482,7 +488,7 @@ public class Printer : IRevisionedEntity
 
     public bool InMaintenance { get; set; } = false;
 
-    public bool IsEnabled { get; set; } = true; // If false, printer is hidden from normal user listings until approved by admin
+    public bool IsEnabled { get; set; } = true; // Out of Service printers are hidden from normal listings and excluded from monitoring and dispatch.
 
     // AutoDispatch Ready-Gate properties
 

@@ -71,8 +71,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
         XCTAssertTrue(farmButton.waitForExistence(timeout: 5))
         XCTAssertEqual(farmButton.label, "‹ Farm")
         let webLink = app.descendants(matching: .any)["printer.detail.web"]
-        XCTAssertTrue(webLink.waitForExistence(timeout: 5))
-        XCTAssertEqual(webLink.label, "Open in web ↗")
+        XCTAssertFalse(webLink.exists, "The demo fleet has no configured native frontend URL")
         let identity = app.otherElements["printer.detail.identity"]
         XCTAssertTrue(identity.waitForExistence(timeout: 8))
         let names = app.staticTexts.matching(NSPredicate(
@@ -137,8 +136,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 if keyboard.exists { bottom = min(bottom, keyboard.frame.minY - 8) }
                 return farmScroll.frame.contains(point) && point.y < bottom ? point : nil
             }
-            // Scrolling the Farm grid in the simulator can trap the main thread in a
-            // LazyVGrid placement loop, so filter with Farm search instead of swiping.
+            // Search by name rather than scrolling through the full grid to locate a target card.
             if tapPoint() == nil, let name = Self.fixturePrinterNames[printerID] {
                 searchFarm(name)
                 _ = printerCard.waitForExistence(timeout: 8)
@@ -152,8 +150,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 .tap()
         }
 
-        /// Filters the Farm by name. Swiping the Farm LazyVGrid in the simulator can
-        /// trap the main thread in a placement loop, so tests search instead.
+        /// Filters the Farm by name so a target card can be located without scrolling the full grid.
         /// Submitting dismisses the keyboard so it stops covering cards and the dock.
         func searchFarm(_ query: String) {
             let searchButton = app.buttons["farm.search"]
@@ -274,9 +271,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             if !isIPad {
                 XCTAssertTrue(printerList.exists, "Farm printer cards must remain in a scrollable list.")
             }
-            // Swiping the Farm LazyVGrid in the simulator can trap the main thread in a
-            // placement loop (it also fails on development), so locate each card with
-            // Farm search instead. PrinterListViewModelTests covers the #3509 sort.
+            // Locate cards directly with Farm search; PrinterListViewModelTests covers the #3509 sort.
             func farmCard(_ name: String, _ detail: String? = nil) -> XCUIElement {
                 searchFarm(name)
                 let predicate = detail.map {
@@ -1079,6 +1074,68 @@ final class Issue3259MockupNormalUITests: PrinterDetailPanelsUITests.Issue3259Mo
         captureApprovedMockupScreens()
     }
 
+    func testLastFarmCardClearsBottomNavigationChrome() {
+        let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
+        XCTAssertTrue(farm.waitForExistence(timeout: 8))
+        farm.tap()
+
+        let farmScroll = app.scrollViews
+            .matching(NSPredicate(format: "identifier IN %@", ["farm.printerList", "farm.root"]))
+            .firstMatch
+        XCTAssertTrue(farmScroll.waitForExistence(timeout: 8))
+        let scanButton = app.buttons["navigation.scan"]
+        XCTAssertTrue(scanButton.waitForExistence(timeout: 8))
+        // All-filter orders offline printers last; Sovol is the only offline card in this fixture.
+        let lastFarmCard = app.buttons["farm-card-32590000-0000-0000-0000-000000000004"]
+        let precedingFarmCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000002"]
+
+        for _ in 0..<16 where
+            !lastFarmCard.isHittable
+                || lastFarmCard.frame.maxY > scanButton.frame.minY - 112
+        {
+            farmScroll.swipeUp()
+        }
+
+        XCTAssertTrue(lastFarmCard.waitForExistence(timeout: 8), "The final offline Farm card must exist.")
+        XCTAssertTrue(lastFarmCard.label.contains("Sovol SV06"))
+        XCTAssertTrue(precedingFarmCard.waitForExistence(timeout: 8), "The prior idle card must exist.")
+        let precedingCardFrame = precedingFarmCard.frame
+        let lastCardFrame = lastFarmCard.frame
+        let precedingCardComesFirst =
+            precedingCardFrame.minY < lastCardFrame.minY - 1
+                || (
+                    abs(precedingCardFrame.minY - lastCardFrame.minY) <= 1
+                        && precedingCardFrame.minX < lastCardFrame.minX
+                )
+        XCTAssertTrue(
+            precedingCardComesFirst,
+            "The final sorted Farm card must follow the preceding card in grid reading order."
+        )
+        let visibleFarmCards = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "farm-card-")
+        ).allElementsBoundByIndex.filter(\.isHittable)
+        let lastVisibleFarmCard = visibleFarmCards.max {
+            if abs($0.frame.minY - $1.frame.minY) > 1 {
+                return $0.frame.minY < $1.frame.minY
+            }
+            return $0.frame.minX < $1.frame.minX
+        }
+        XCTAssertEqual(
+            lastVisibleFarmCard?.identifier,
+            lastFarmCard.identifier,
+            "The final sorted Farm card must be the bottom-most visible card."
+        )
+        XCTAssertTrue(lastFarmCard.isHittable, "The final Farm card must scroll above bottom navigation.")
+        XCTAssertLessThanOrEqual(
+            lastFarmCard.frame.maxY,
+            scanButton.frame.minY - 112,
+            isIPad
+                ? "The final Farm card must retain 112 points of clearance above the Scan footer and home-indicator area."
+                : "The final Farm card must retain 112 points of clearance above the Scan footer and tab bar."
+        )
+    }
+
     /// The "Camera" header sits above the media, which spans the card width (#3496).
     func testCameraHeaderSitsAboveFullWidthMedia() {
         openFarmCard("10000000-0001-0000-0000-000000000001")
@@ -1163,6 +1220,103 @@ final class Issue3259MockupNormalUITests: PrinterDetailPanelsUITests.Issue3259Mo
             rerunRow.waitForExistence(timeout: 8),
             "A successful authenticated rerun should add the new copy to the queue."
         )
+    }
+}
+
+@MainActor
+final class FarmScrollControlUITests: PrintFarmerUITestCase {
+    override var waitsForNavigationReadiness: Bool { true }
+    override var additionalLaunchArguments: [String] {
+        [
+            "--uitesting-issue3259-visual-acceptance",
+            "-pf_theme_mode", "dark",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL",
+            "--uitesting-issue3259-control-idle",
+        ]
+    }
+
+    private func attachScreen(_ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Issue 3620 \(name)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    /// #3620: openFarmCard uses search, which bypasses the failing unsearched Farm swipe.
+    func testUnsearchedFarmScrollReachesIdlePrinter() {
+        let provenance = XCTAttachment(string: [
+            "launchArguments=\(app.launchArguments.joined(separator: " "))",
+            "device=\(ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? "unknown")",
+            "systemVersion=\(UIDevice.current.systemVersion)",
+            "windowPoints=\(app.windows.firstMatch.frame)",
+        ].joined(separator: "\n"))
+        provenance.name = "Issue 3620 unsearched Farm provenance"
+        provenance.lifetime = .keepAlways
+        add(provenance)
+
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
+        XCTAssertTrue(farm.waitForExistence(timeout: 8))
+        farm.tap()
+        let cardIdentifier = "farm-card-10000000-0001-0000-0000-000000000001"
+        // On iPad the inherited farm.root ID also labels the horizontal filter scroll.
+        let farmScroll = app.scrollViews
+            .matching(NSPredicate(format: "identifier IN %@", ["farm.printerList", "farm.root"]))
+            .containing(.button, identifier: cardIdentifier)
+            .firstMatch
+        XCTAssertTrue(farmScroll.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.searchFields.firstMatch.exists)
+        attachScreen("farm-unsearched-before-scroll")
+
+        let card = app.buttons[cardIdentifier]
+        func tapPoint() -> CGPoint? {
+            guard card.exists, card.isHittable else { return nil }
+            let frame = card.frame
+            let point = CGPoint(x: frame.midX, y: frame.minY + min(44, frame.height / 2))
+            var bottom = farmScroll.frame.maxY
+            let scan = app.buttons["navigation.scan"]
+            if scan.exists { bottom = min(bottom, scan.frame.minY - 8) }
+            let keyboard = app.keyboards.firstMatch
+            if keyboard.exists { bottom = min(bottom, keyboard.frame.minY - 8) }
+            return farmScroll.frame.contains(point) && point.y < bottom ? point : nil
+        }
+
+        var swipeCount = 0
+        for _ in 0..<16 {
+            farmScroll.swipeUp()
+            swipeCount += 1
+            if tapPoint() != nil { break }
+        }
+        XCTAssertGreaterThan(swipeCount, 0, "The unsearched control must exercise a real Farm swipe")
+        let scrollEvidence = XCTAttachment(string: "swipeCount=\(swipeCount)")
+        scrollEvidence.name = "Issue 3620 executed Farm swipes"
+        scrollEvidence.lifetime = .keepAlways
+        add(scrollEvidence)
+        attachScreen("farm-unsearched-after-scroll")
+        XCTAssertFalse(app.searchFields.firstMatch.exists, "Scrolling must not activate Farm search")
+        guard let point = tapPoint() else {
+            let geometry = XCTAttachment(string: [
+                "scrollIdentifier=\(farmScroll.identifier)",
+                "scrollFrame=\(farmScroll.frame)",
+                "cardExists=\(card.exists)",
+                "cardHittable=\(card.isHittable)",
+                "cardFrame=\(card.frame)",
+                "scanFrame=\(app.buttons["navigation.scan"].frame)",
+            ].joined(separator: "\n"))
+            geometry.name = "Issue 3620 rejected tap-point geometry"
+            geometry.lifetime = .keepAlways
+            add(geometry)
+            XCTFail("The top of Prusa MK4 #1 must be reachable without search")
+            return
+        }
+        XCTAssertTrue(card.label.contains("Prusa MK4 #1"))
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: point.x, dy: point.y))
+            .tap()
+
+        XCTAssertTrue(app.buttons["printer.detail.farm"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.otherElements["printer.detail.identity"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["No active print"].waitForExistence(timeout: 8))
+        attachScreen("idle-detail-from-unsearched-farm")
     }
 }
 
@@ -1587,6 +1741,7 @@ final class Issue3496SnapshotCameraLayoutUITests: Issue3496CameraLayoutUITests {
         // Same header in every mode: the badge is gone (#3496 N08).
         XCTAssertFalse(app.staticTexts["SNAPSHOT"].exists)
         XCTAssertFalse(app.staticTexts["LIVE"].exists)
+        XCTAssertFalse(app.staticTexts["printer.detail.camera.livepaused"].exists)
         let named = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         named.name = "status-camera-header-full-width-media"
         named.lifetime = .keepAlways
@@ -1614,6 +1769,8 @@ final class Issue3496MjpegCameraLayoutUITests: Issue3496CameraLayoutUITests {
         let media = app.descendants(matching: .any)["printer.detail.camera.media"]
         let toggle = app.buttons["printer.detail.camera.livetoggle"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        let liveViewPaused = app.staticTexts["printer.detail.camera.livepaused"]
+        XCTAssertFalse(liveViewPaused.exists, "Live mode does not show the paused message")
         XCTAssertGreaterThanOrEqual(toggle.frame.minY, media.frame.minY - 1, "The mode toggle sits on the media, not in the header")
         XCTAssertTrue(
             app.descendants(matching: .any)["printer.detail.camera.stream.placeholder"].waitForExistence(timeout: 5),
@@ -1625,9 +1782,12 @@ final class Issue3496MjpegCameraLayoutUITests: Issue3496CameraLayoutUITests {
         // R3514-B12: a stream-only camera must stay switchable after choosing snapshot.
         toggle.tap()
         XCTAssertTrue(app.buttons["Switch to livestream"].waitForExistence(timeout: 5), "Toggle stays reachable in snapshot mode")
+        XCTAssertTrue(liveViewPaused.waitForExistence(timeout: 5))
+        XCTAssertEqual(liveViewPaused.label, "Live view paused")
         XCTAssertEqual(app.staticTexts["printer.detail.camera.title"].label, "Camera")
         app.buttons["Switch to livestream"].tap()
         XCTAssertTrue(app.buttons["Switch to snapshot"].waitForExistence(timeout: 5))
+        XCTAssertFalse(liveViewPaused.exists, "Live mode hides the paused message")
         XCTAssertTrue(
             app.descendants(matching: .any)["printer.detail.camera.stream.placeholder"].waitForExistence(timeout: 5),
             "Livestream returns after switching back"
@@ -1961,7 +2121,7 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
         card.tap()
         // Status no longer renders sensors; writable ones are read back from
         // the Control tab's Heat segment (idle-only; Tune has no sensors, #3540).
-        // Read-only sensors are verified via SignalR only.
+        // Read-only sensors and fans (no app controls, #3552) are verified via SignalR only.
         let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
         guard selector.waitForExistence(timeout: 8) else {
             throw NSError(
@@ -2054,13 +2214,21 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
 
         let updatedSensors = try XCTUnwrap(updatedPayload["sensors"] as? [[String: Any]])
         let fanValue = try XCTUnwrap(Self.readingValue(updatedSensors, sensorID: fanID, quantity: "FanSpeed"))
-        let increase = app.buttons["printer.controls.sensor.\(fanID).FanSpeed.increase"]
-        XCTAssertTrue(increase.waitForExistence(timeout: 12), "\(printer.name) must expose the writable fan control.")
-        attachScreenshot(named: "\(printer.name) live fan control")
+        // Fans have no app controls (#3552), so drive the fan through the same
+        // backend sensor endpoint the removed stepper used.
+        let expectedFanValue = Self.nextFanSpeed(after: fanValue)
+        XCTAssertTrue((0...100).contains(expectedFanValue), "FanSpeed request \(expectedFanValue) must stay within 0–100.")
+        XCTAssertNotEqual(expectedFanValue, fanValue, "FanSpeed request must change the reported fan value.")
         let fanUpdateCount = observer.updateCount
-        increase.tap()
+        try await setSensorValue(
+            credentials,
+            token: token,
+            printerID: printer.id,
+            sensorID: fanID,
+            quantity: "FanSpeed",
+            value: expectedFanValue
+        )
 
-        let expectedFanValue = fanValue + 1
         let fanEvent = try XCTUnwrap(observer.waitForUpdate(after: fanUpdateCount, timeout: 30) { event in
             guard let payload = try? Self.jsonObject(event.payload),
                   let sensors = payload["sensors"] as? [[String: Any]] else { return false }
@@ -2073,8 +2241,20 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
             try canonicalJSON(withoutSensorReadings(fanPayload)),
             "A fan-only printerupdated must not alter non-sensor printer fields."
         )
-        let fanReadback = app.descendants(matching: .any)["printer.controls.sensor.\(fanID).FanSpeed.value"]
-        assertFieldValueContains(fanReadback, text: expectedFanValue.formatted(), timeout: 20)
+        // Prove the Heat panel content is loaded before asserting fan controls are absent,
+        // so absence cannot pass on an unloaded or read-only panel.
+        let heatGroup = app.descendants(matching: .any)["printer.controls.heat-group"]
+        XCTAssertTrue(heatGroup.waitForExistence(timeout: 12), "\(printer.name) must show the loaded Heat panel.")
+        XCTAssertTrue(
+            heatGroup.descendants(matching: .any)["printer.controls.hotend.target"].waitForExistence(timeout: 12),
+            "\(printer.name) Heat panel must render its nozzle target before checking fan controls."
+        )
+        let fanControls = app.descendants(matching: .any)
+        for suffix in ["value", "increase", "decrease"] {
+            let id = "printer.controls.sensor.\(fanID).FanSpeed.\(suffix)"
+            XCTAssertFalse(fanControls[id].exists, "\(id) must not render: fans have no app controls (#3552)")
+        }
+        attachScreenshot(named: "\(printer.name) live fan update without fan controls")
 
         var controlRequest = URLRequest(url: credentials.controlURL.appending(path: "/restart-api"))
         controlRequest.httpMethod = "POST"
@@ -2143,6 +2323,11 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
         return try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
+    /// Next whole-percent FanSpeed (step 1, 0–100) that differs from `current`, even when fractional.
+    static func nextFanSpeed(after current: Double) -> Double {
+        current >= 100 ? 99 : min(100, max(0, current.rounded(.down) + 1))
+    }
+
     private func setSensorValue(
         _ credentials: Credentials,
         token: String,
@@ -2152,7 +2337,8 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
         value: Double
     ) async throws {
         let body: [String: Any] = ["quantity": quantity, "value": value]
-        let path = "/api/printers/\(printerID)/sensors/\(sensorID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? sensorID)"
+        // apiRequest uses URL.appending(path:), which percent-encodes this raw path once.
+        let path = "/api/printers/\(printerID)/sensors/\(sensorID)"
         _ = try await apiRequest(credentials, token: token, path: path, method: "POST", body: body)
     }
 

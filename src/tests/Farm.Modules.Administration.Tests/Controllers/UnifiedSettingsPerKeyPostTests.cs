@@ -61,6 +61,51 @@ public class UnifiedSettingsPerKeyPostTests : IClassFixture<UnifiedSettingsPerKe
         PropertyNameCaseInsensitive = true,
     };
 
+    [Fact]
+    public async Task FarmIdentity_DefaultsAndSave_PreservesValidatedIdentityAsync()
+    {
+        const string endpoint = "/api/settings/FarmIdentity";
+        using HttpClient admin = await _factory.CreateAdminClientAsync();
+        JsonObject original = (await admin.GetFromJsonAsync<JsonObject>(endpoint))!;
+        original["farmName"]!.GetValue<string>().Should().Be("PrintFarmer");
+        original["timeZone"]!.GetValue<string>().Should().Be("UTC");
+
+        JsonObject[] metadata = (await admin.GetFromJsonAsync<JsonObject[]>("/api/settings/metadata"))!;
+        metadata.Should().Contain(m => m["key"]!.GetValue<string>() == "FarmIdentity" &&
+            m["group"]!.GetValue<string>() == "FarmIdentity");
+
+        using HttpResponseMessage saved = await PostWithCurrentRevisionAsync(admin, endpoint,
+            new FarmIdentitySettings { FarmName = "Workshop", TimeZone = "America/Los_Angeles" });
+        saved.StatusCode.Should().Be(HttpStatusCode.OK);
+        JsonObject persisted = (await admin.GetFromJsonAsync<JsonObject>(endpoint))!;
+        persisted["farmName"]!.GetValue<string>().Should().Be("Workshop");
+        persisted["timeZone"]!.GetValue<string>().Should().Be("America/Los_Angeles");
+
+        using HttpResponseMessage invalid = await PostWithCurrentRevisionAsync(admin, endpoint,
+            new FarmIdentitySettings { FarmName = "Discard me", TimeZone = "Pacific Standard Time" });
+        invalid.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        JsonObject error = (await invalid.Content.ReadFromJsonAsync<JsonObject>())!;
+        error["errors"]!["timeZone"].Should().NotBeNull();
+        JsonObject afterInvalid = (await admin.GetFromJsonAsync<JsonObject>(endpoint))!;
+        afterInvalid["farmName"]!.GetValue<string>().Should().Be("Workshop");
+        afterInvalid["timeZone"]!.GetValue<string>().Should().Be("America/Los_Angeles");
+
+        using HttpResponseMessage stale = await admin.PostAsJsonAsync(endpoint, original);
+        stale.StatusCode.Should().Be(HttpStatusCode.Conflict);
+    }
+
+    [Fact]
+    public async Task FarmIdentity_AuthenticatedReaderCannotWrite_AnonymousCannotReadAsync()
+    {
+        const string endpoint = "/api/settings/FarmIdentity";
+        using HttpClient reader = await _factory.CreateAuthenticatedClientAsync(
+            username: "identity-reader", email: "reader@example.com", password: "ReaderPassword123!");
+        (await reader.GetAsync(endpoint)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await reader.PostAsJsonAsync(endpoint, new FarmIdentitySettings())).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        using HttpClient anonymous = _factory.CreateClient();
+        (await anonymous.GetAsync(endpoint)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
     public async Task InitializeAsync()
     {
         await _factory.ResetDataAsync();

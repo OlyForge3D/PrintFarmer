@@ -274,7 +274,7 @@
         "path": "src/tests/Farm.Modules.Printers.Tests/Controllers/PrintersControllerTestConnectionTests.cs",
         "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
         "matchSha256": "2b37ca011dc0baf5ac3ceff7569d873e97e370f6c6cfa28ebfdc8fba20ed280a",
-        "contentSha256": "123344e4c95e9ab437be6c672afca61333dd55a66341ed26a4498200532399db",
+        "contentSha256": "caed15fd7f27eda9fa884c0b77e68ec72e743e43235e4775c9c097e8558ebb14",
         "reason": "Synthetic credentialed printer.local URL tests rejection before network egress."
       },
       {
@@ -292,6 +292,13 @@
         "reason": "Synthetic credentialed example.test URL tests untrusted API base rejection."
       },
       {
+        "path": "src/tests/Farm.Web.Api.Tests/Health/PrintGuardHealthCheckTests.cs",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "7f8183fd094a7b10753ce6a5f1a4388aa1afeda990c4134417045c78fcec9a2d",
+        "contentSha256": "f8963b246d7aa643be90d002a25ba5b25e6f73a72d13a272a409f72f172d19ac",
+        "reason": "Synthetic credentialed provider.invalid URL tests invalid PrintGuard configuration rejection before network egress."
+      },
+      {
         "path": "src/tests/Farm.Web.Api.Tests/Integration/PrinterImportFacadeIntegrationTests.cs",
         "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
         "matchSha256": "a28b8176f57374f4f478f28ad1530d57fff8e37cdb58a74e5146350154124e29",
@@ -302,15 +309,29 @@
         "path": "src/tests/Farm.Web.Api.Tests/Security/PrinterEndpointRedactionTests.cs",
         "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
         "matchSha256": "2b37ca011dc0baf5ac3ceff7569d873e97e370f6c6cfa28ebfdc8fba20ed280a",
-        "contentSha256": "39462edbbafd4f4286966fbd4ccff61453a853c41828f7114364881b1a10b8bc",
+        "contentSha256": "449456b4fb95ec2af4f1adba175501fe48164cc7b706dcafc524a3f1c5b11b38",
         "reason": "Synthetic printer credentials test endpoint redaction."
       },
       {
         "path": "src/tests/Farm.Web.Api.Tests/Security/SensitiveSerializationTests.cs",
         "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
         "matchSha256": "2b37ca011dc0baf5ac3ceff7569d873e97e370f6c6cfa28ebfdc8fba20ed280a",
-        "contentSha256": "d0a8b86f0072001a7dec25cdd3f2055d0f75eda1d1b3ca087a2896cdd7b869a0",
+        "contentSha256": "e42e916c2e6f74b1386ddd3ea1ffb8a4ba839030ab01ac33342b75e7ee6c87d0",
         "reason": "Synthetic printer URL tests removal of embedded credentials from computed URLs."
+      },
+      {
+        "path": "src/tests/Farm.Web.Api.Tests/Security/SensitiveSerializationTests.cs",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "d0059160055f82d5aa8ab0f2a5d89dafc805f11758bda3b2c134534b9631c81b",
+        "contentSha256": "e42e916c2e6f74b1386ddd3ea1ffb8a4ba839030ab01ac33342b75e7ee6c87d0",
+        "reason": "Synthetic HTTPS printer URL tests canonical detail serialization strips embedded credentials."
+      },
+      {
+        "path": "mobile/PrintFarmerTests/ViewModels/PrinterDetailViewModelTests.swift",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "a28b8176f57374f4f478f28ad1530d57fff8e37cdb58a74e5146350154124e29",
+        "contentSha256": "f6f7aa40f6e71852247b4715bad3edf59e532682b079a696f3e6321275a6e5bf",
+        "reason": "Synthetic printer URL tests the iOS native web link rejects embedded credentials."
       }
     ]
   },

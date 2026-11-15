@@ -153,7 +153,7 @@ public sealed class PrinterFileQueueService(
                 }
 
                 GcodeSafetyResult<GcodeSafetyReport> validation = safety.Validate(new(
-                    PrinterGcodeSafetyLimits.Build(destination), text, GcodeSafetyCheckpoint.BeforeQueueing));
+                    text, GcodeSafetyCheckpoint.BeforeQueueing));
                 if (!validation.IsValid)
                 {
                     throw new PrinterFileCommandException(validation.Problems[0].Code);
@@ -211,10 +211,6 @@ public sealed class PrinterFileQueueService(
         catch (DecoderFallbackException)
         {
             return await BlockAsync(actorId, operationId, "unsupported_gcode_encoding", ct);
-        }
-        catch (GcodeSafetyGeometryException)
-        {
-            return await BlockAsync(actorId, operationId, "destination_safety_geometry_invalid", ct);
         }
         catch (CalibrationQueueIncompatibleException)
         {

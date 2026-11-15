@@ -29,6 +29,7 @@ import {
   type SettingsCommandItem,
 } from '@/features/settings/settings-navigation';
 import { useSettingsSearchIndex } from '@/features/settings/hooks/useSettingsSearchIndex';
+import { commandPaletteShortcutLabel } from '@/features/settings/components/commandPaletteShortcut';
 
 const MAX_VISIBLE_ITEMS = 8;
 const COMMIT_DEBOUNCE_MS = 200;
@@ -51,15 +52,17 @@ export interface WorkspaceSearchResultsProps {
    * instant after typing never retains a stale query.
    */
   onSelect: (item: SettingsCommandItem, queryText: string) => void;
+  onOpenPalette?: () => void;
   className?: string;
 }
 
-export function WorkspaceSearchResults({ initialQuery, onQueryChange, onQueryCommit, onSelect, className }: WorkspaceSearchResultsProps) {
+export function WorkspaceSearchResults({ initialQuery, onQueryChange, onQueryCommit, onSelect, onOpenPalette, className }: WorkspaceSearchResultsProps) {
   const [query, setQuery] = useState(initialQuery);
   const [isFocused, setIsFocused] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [pendingLocalCommitQuery, setPendingLocalCommitQuery] = useState<string | null>(null);
   const listboxId = useId();
+  const shortcutLabel = useMemo(() => commandPaletteShortcutLabel(), []);
   const inputRef = useRef<HTMLInputElement>(null);
   const onQueryCommitRef = useRef(onQueryCommit);
   // Refs must not be written during render (React 19 disallows it) — keep the
@@ -180,6 +183,14 @@ export function WorkspaceSearchResults({ initialQuery, onQueryChange, onQueryCom
   }, [onSelect, query]);
 
   const handleInputKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (onOpenPalette && event.key.toLowerCase() === 'k' && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      setIsFocused(false);
+      onOpenPalette();
+      return;
+    }
+
     if (event.key === 'Escape') {
       if (isOpen) {
         event.preventDefault();
@@ -213,7 +224,7 @@ export function WorkspaceSearchResults({ initialQuery, onQueryChange, onQueryCom
       event.preventDefault();
       commitSelection(rankedResults[currentActiveIndex].item);
     }
-  }, [activeIndex, commitSelection, isOpen, rankedResults, setActiveResult]);
+  }, [activeIndex, commitSelection, isOpen, onOpenPalette, rankedResults, setActiveResult]);
 
   const handleClear = useCallback(() => {
     setQueryAndNotify('');
@@ -223,10 +234,9 @@ export function WorkspaceSearchResults({ initialQuery, onQueryChange, onQueryCom
   return (
     <div className={clsx('relative w-full max-w-xs', className)}>
       <div className="relative">
-        <SearchIcon
-          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-pf-text-tertiary"
-          ariaLabel=""
-        />
+        <span aria-hidden="true">
+          <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-pf-text-tertiary" />
+        </span>
         <Input
           ref={inputRef}
           value={query}
@@ -234,14 +244,15 @@ export function WorkspaceSearchResults({ initialQuery, onQueryChange, onQueryCom
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           onKeyDown={handleInputKeyDown}
-          placeholder="Search all settings"
+          placeholder={`Search all settings (${shortcutLabel})`}
           aria-label="Search all settings"
           role="combobox"
           aria-autocomplete="list"
           aria-expanded={isOpen}
           aria-controls={isOpen ? listboxId : undefined}
           aria-activedescendant={isOpen ? activeOptionId : undefined}
-          className="h-9 pl-9 pr-8 text-sm"
+          className="pf-control py-0 pl-9 pr-8 text-sm"
+          data-role="field"
         />
         {query ? (
           <Button

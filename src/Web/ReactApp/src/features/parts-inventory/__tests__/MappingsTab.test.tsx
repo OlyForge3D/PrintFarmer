@@ -1,5 +1,6 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import userEvent from '@testing-library/user-event';
 
 const mockUseMappings = vi.fn();
 const mockUseParts = vi.fn();
@@ -18,6 +19,32 @@ vi.mock('../components/MappingFormModal', () => ({
 import { MappingsTab } from '../components/MappingsTab';
 
 describe('MappingsTab', () => {
+  it('sorts quantities within each source independently and keeps removal tied to the displayed mapping', async () => {
+    mockUseMappings.mockReturnValue({
+      data: [
+        { id: 'm1', sku: 'HIGH', quantity: 10, gcodeFileId: 'g1', printProjectFileId: null },
+        { id: 'm2', sku: 'LOW', quantity: 2, gcodeFileId: 'g1', printProjectFileId: null },
+        { id: 'm3', sku: 'OTHER', quantity: 4, gcodeFileId: 'g2', printProjectFileId: null },
+      ],
+      isLoading: false, error: null,
+    });
+    const user = userEvent.setup();
+    render(<MappingsTab />);
+    const [first, second] = screen.getAllByRole('table');
+    const rows = () => within(first).getAllByRole('row').slice(1).map(row => row.firstElementChild?.textContent);
+    const button = within(first).getByRole('button', { name: 'Quantity' });
+    await user.click(button);
+    expect(rows()).toEqual(['LOW', 'HIGH']);
+    expect(within(second).getByRole('button', { name: 'Quantity' }).closest('th')).toHaveAttribute('aria-sort', 'none');
+    await user.keyboard('{Enter}');
+    expect(rows()).toEqual(['HIGH', 'LOW']);
+    await user.keyboard(' ');
+    expect(rows()).toEqual(['HIGH', 'LOW']);
+    expect(button.closest('th')).toHaveAttribute('aria-sort', 'none');
+    await user.click(within(first).getByRole('button', { name: 'Remove mapping for LOW' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('to LOW');
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseParts.mockReturnValue({ data: [] });

@@ -7,6 +7,11 @@
 - **Delimiter**: Comma (`,`)
 - **Header**: First row must contain column names (case-insensitive)
 
+CSV and JSON configuration exports do not carry a separate expected-offline
+acknowledgement. Imports do not infer service state: new printers default to In
+Service, and an explicit `isenabled=false` imports them Out of Service.
+Existing-printer duplicate detection is unchanged.
+
 ## Required Fields
 
 These fields must be present in every row:
@@ -24,7 +29,7 @@ These fields must be present in every row:
 | `manufacturername` | string | "Prusa" | "Unknown" | Manufacturer name (portable between systems) |
 | `modelname` | string | "MK4" | "Unknown" | Model name (portable between systems) |
 | `notes` | string | "Office printer" | null | Admin notes (max 1000 chars) |
-| `isenabled` | boolean | true/false | true | Controls visibility to users; false = pending approval |
+| `isenabled` | boolean | true/false | true | In Service when true; Out of Service when false |
 | `backendport` | integer | 7125 | null | Port for printer API |
 | `frontendport` | integer | 80 | null | Port for web UI |
 | `camerastreamurl` | string | "rtsp://192.168.1.100/stream" | null | Camera stream URL |
@@ -491,4 +496,3 @@ dotnet run --project src/tools/AdminCli -- \
 - Sample CSV generation: `dotnet run --project src/tools/AdminCli -- --sample-csv --output sample.csv`
 - Discovery command: `dotnet run --project src/tools/AdminCli -- --discover --range 192.168.1.0/24 --format csv --output discovered.csv`
 - Setup status check: `dotnet run --project src/tools/AdminCli -- --status`
-

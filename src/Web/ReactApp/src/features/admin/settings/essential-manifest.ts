@@ -30,6 +30,7 @@
  * `JsonPropertyName` (which is what the metadata API exposes as `property.name`).
  */
 const ESSENTIAL_SETTINGS_MAP: Readonly<Record<string, ReadonlySet<string>>> = {
+  FarmIdentity: new Set(['farmName', 'timeZone']),
   // System / logging — retention window and the on/off toggle are asked about
   // early because they impact disk usage and audit visibility.
   SystemLog: new Set(['enabled', 'retentionDays']),
@@ -64,9 +65,8 @@ const ESSENTIAL_SETTINGS_MAP: Readonly<Record<string, ReadonlySet<string>>> = {
   // common case, and nozzle-tagging is more niche.
   AutoTagging: new Set(['materialTagEnabled', 'colorTagEnabled']),
 
-  // Obico — turn detection on/off, and control whether it can pause the print.
-  // Timing/threshold tuning stays advanced.
-  Obico: new Set(['enabled', 'autoPauseOnFailure']),
+  // Obico — turn failure detection on/off. Timing/threshold tuning stays advanced.
+  Obico: new Set(['enabled']),
 
   // Maintenance — the master feature toggle.
   MaintenanceAlerts: new Set(['enabled']),
@@ -81,6 +81,16 @@ const ESSENTIAL_SETTINGS_MAP: Readonly<Record<string, ReadonlySet<string>>> = {
 
   // Slicer — which UI mode users see and which modes are available.
   SlicerSettings: new Set(['slicerMode', 'enabledModes']),
+  QueuePlanning: new Set(['workdayStartHourUtc', 'workdayEndHourUtc']),
+  ShiftPlan: new Set(['maintenanceLeadMinutes']),
+  SpoolCoverage: new Set(['runoutWarningLeadMinutes', 'queuedShortageWarningsEnabled']),
+  HistorySeeding: new Set(['enabled']),
+  PrintStatisticsSync: new Set(['enabled']),
+  OperatorFeatures: new Set([
+    'attentionEnabled', 'nativePushEnabled', 'filamentCoverageEnabled',
+    'guidedSwapEnabled', 'multiSlotFallbackEnabled', 'shiftPlanEnabled',
+    'printedPartsInventoryEnabled', 'offlineWriteReplayEnabled',
+  ]),
 };
 
 export function isEssentialProperty(sectionKey: string, propertyName: string): boolean {

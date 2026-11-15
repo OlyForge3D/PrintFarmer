@@ -16,6 +16,11 @@ public sealed class FailureDetectionIncident
     public Guid PrinterId { get; set; }
 
     /// <summary>
+    /// Gets or sets the failure-detection provider that reported the incident.
+    /// </summary>
+    public string Provider { get; set; } = "Obico";
+
+    /// <summary>
     /// Gets or sets the printer that raised the incident.
     /// </summary>
     public Printer? Printer { get; set; }

@@ -71,16 +71,17 @@ export function SettingsModeToggle({ mode, onModeChange, helperText }: SettingsM
               }}
               type="button"
               variant="unstyled"
+              data-role="button"
               role="radio"
               aria-checked={selected}
               aria-label={`${option.label}: ${option.description}`}
               tabIndex={selected ? 0 : -1}
               onClick={() => onModeChange(option.value)}
               className={clsx(
-                'rounded px-3 py-1 text-sm font-medium transition-colors inline-flex items-center justify-center',
+                'pf-control px-3 text-sm font-medium transition-colors inline-flex items-center justify-center',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-offset-1 focus-visible:ring-offset-pf-bg-0',
                 selected
-                  ? 'bg-pf-accent text-pf-bg-0 shadow-sm'
+                  ? 'bg-pf-accent-bg text-[var(--pf-on-accent)] shadow-sm'
                   : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-1',
               )}
             >

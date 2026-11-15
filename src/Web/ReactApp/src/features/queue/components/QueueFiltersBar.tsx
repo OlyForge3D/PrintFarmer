@@ -1,6 +1,7 @@
-import { RefreshIcon, ClearFiltersIcon } from "@/common/components/icons/MdiIcons";
-import { Button, Select, Input } from "@/common/components/ui";
+import { Select, Input } from "@/common/components/ui";
+import { FiltersDisclosure, Toolbar, RefreshButton } from "@/common/components/ui/toolbar";
 import { useState, useCallback } from "react";
+import type { ReactNode } from "react";
 
 export interface TableFiltersBarProps {
   onStatusChange: (status: string | null) => void;
@@ -9,6 +10,7 @@ export interface TableFiltersBarProps {
   onSortChange: (sortBy: "priority" | "deadline" | "deadline_desc") => void;
   onRefresh: () => void;
   isLoading?: boolean;
+  viewControls?: ReactNode;
 }
 
 // Terminal states (Completed/Failed/Cancelled) are intentionally excluded here: the Print
@@ -37,6 +39,7 @@ export function TableFiltersBar({
   onSortChange,
   onRefresh,
   isLoading = false,
+  viewControls,
 }: TableFiltersBarProps) {
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
   const [selectedMaterial, setSelectedMaterial] = useState<string | null>(null);
@@ -74,12 +77,10 @@ export function TableFiltersBar({
     setSelectedStatus(null);
     setSelectedMaterial(null);
     setSelectedModel(null);
-    setSelectedSortBy("priority");
     onStatusChange(null);
     onMaterialChange(null);
     onModelChange(null);
-    onSortChange("priority");
-  }, [onStatusChange, onMaterialChange, onModelChange, onSortChange]);
+  }, [onStatusChange, onMaterialChange, onModelChange]);
 
   const handleSortChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -90,87 +91,87 @@ export function TableFiltersBar({
     [onSortChange]
   );
 
-  const hasActiveFilters = selectedStatus || selectedMaterial || selectedModel || selectedSortBy !== "priority";
+  const activeFilterCount = [selectedStatus, selectedMaterial, selectedModel].filter(Boolean).length;
 
   return (
-    <div className="flex flex-wrap items-center gap-3 bg-pf-bg-1 border border-pf-border rounded-lg px-3 py-2">
-      <div className="w-full sm:w-36 shrink-0">
-        <Select
-          value={selectedStatus || ""}
-          onChange={handleStatusChange}
-          className="w-full text-sm"
-          aria-label="Filter by status"
-        >
-          <option value="">Active Jobs</option>
-          {STATUS_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </Select>
-      </div>
+    <Toolbar aria-label="Queue controls" className="bg-pf-bg-1 border border-pf-border rounded-lg px-3 py-2">
+      <FiltersDisclosure activeCount={activeFilterCount} onReset={handleClearFilters}
+        controls={trigger => (
+          <Toolbar.Controls>
+            {trigger}
+            <div className="w-full sm:w-40 shrink-0">
+              <Select
+                value={selectedSortBy}
+                onChange={handleSortChange}
+                className="pf-control w-full py-0 text-sm"
+                data-role="field"
+                aria-label="Sort by"
+              >
+                <option value="priority">Sort: Priority</option>
+                <option value="deadline">Sort: Deadline (Soonest)</option>
+                <option value="deadline_desc">Sort: Deadline (Latest)</option>
+              </Select>
+            </div>
 
-      <div className="w-full sm:w-40 shrink-0">
-        <Input
-          type="text"
-          value={selectedModel || ""}
-          onChange={handleModelChange}
-          placeholder="Printer model..."
-          className="w-full text-sm"
-          aria-label="Filter by printer model"
-        />
-      </div>
-
-      <div className="w-full sm:w-36 shrink-0">
-        <Select
-          value={selectedMaterial || ""}
-          onChange={handleMaterialChange}
-          className="w-full text-sm"
-          aria-label="Filter by material"
-        >
-          <option value="">All Materials</option>
-          {MATERIAL_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </Select>
-      </div>
-
-      <div className="w-full sm:w-40 shrink-0">
-        <Select
-          value={selectedSortBy}
-          onChange={handleSortChange}
-          className="w-full text-sm"
-          aria-label="Sort queue jobs"
-        >
-          <option value="priority">Sort: Priority</option>
-          <option value="deadline">Sort: Deadline (Soonest)</option>
-          <option value="deadline_desc">Sort: Deadline (Latest)</option>
-        </Select>
-      </div>
-
-      <div className="flex items-center gap-1 w-full sm:w-auto sm:ml-auto justify-end shrink-0">
-        <Button
-          onClick={onRefresh}
-          disabled={isLoading}
-          variant="subtle"
-          size="sm"
-          iconCenter={<RefreshIcon />}
-          title="Refresh data"
-          aria-label="Refresh data"
-        />
-        {hasActiveFilters && (
-          <Button
-            onClick={handleClearFilters}
-            variant="subtle"
-            size="sm"
-            iconCenter={<ClearFiltersIcon />}
-            title="Reset all filters"
-            aria-label="Reset all filters"
-          />
+            <div className="flex flex-wrap items-center gap-1 w-full sm:w-auto sm:ml-auto justify-end shrink-0">
+              {viewControls}
+              <RefreshButton
+                onClick={onRefresh}
+                busy={isLoading}
+                variant="subtle"
+                title="Refresh data"
+                aria-label="Refresh data"
+              />
+            </div>
+          </Toolbar.Controls>
         )}
-      </div>
-    </div>
+      >
+        <div className="w-full sm:w-36 shrink-0">
+          <Select
+            value={selectedStatus || ""}
+            onChange={handleStatusChange}
+            className="pf-control w-full py-0 text-sm"
+            data-role="field"
+            aria-label="Filter by status"
+          >
+            <option value="">Active Jobs</option>
+            {STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+
+        <div className="w-full sm:w-40 shrink-0">
+          <Input
+            type="text"
+            value={selectedModel || ""}
+            onChange={handleModelChange}
+            placeholder="Printer model..."
+            className="pf-control w-full py-0 text-sm"
+            data-role="field"
+            aria-label="Filter by printer model"
+          />
+        </div>
+
+        <div className="w-full sm:w-36 shrink-0">
+          <Select
+            value={selectedMaterial || ""}
+            onChange={handleMaterialChange}
+            className="pf-control w-full py-0 text-sm"
+            data-role="field"
+            aria-label="Filter by material"
+          >
+            <option value="">All Materials</option>
+            {MATERIAL_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+      </FiltersDisclosure>
+    </Toolbar>
   );
 }

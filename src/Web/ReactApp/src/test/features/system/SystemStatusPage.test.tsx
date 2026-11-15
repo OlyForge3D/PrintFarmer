@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { useQuery } from '@tanstack/react-query';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { SystemStatusPage } from '@/features/system/pages/SystemStatusPage';
@@ -59,4 +60,37 @@ it('reports failed observation rather than claiming current status', () => {
   render(<SystemStatusPage />);
   expect(screen.getByText('Failed to load system status')).toBeVisible();
   expect(screen.queryByText(/System status is current/)).not.toBeInTheDocument();
+});
+
+it.each(['Service', 'Application version', 'Engine version', 'Health'])('cycles service %s and leaves missing versions last', async label => {
+  const services = [
+    { name: 'Zeta', version: '2.0', engineVersion: '3.0', health: SystemServiceHealth.Healthy },
+    { name: 'Alpha', version: '1.0', engineVersion: '2.0', health: SystemServiceHealth.Critical },
+    { name: 'Missing', version: '', engineVersion: null, health: SystemServiceHealth.Degraded },
+  ];
+  useQueryMock.mockReturnValue({ data: {
+    app: { version: '1.0', hostname: 'test', uptime: '1h' },
+    cpu: { cores: 4, usagePercent: 10 }, memory: { usedBytes: 0, totalBytes: 0 },
+    disk: { usedBytes: 0, totalBytes: 0, archiveBytes: 0, databaseBytes: 0 },
+    services, database: { engine: 'SQLite', version: '3.45', printerCount: 0, archiveCount: 0 },
+  }, dataUpdatedAt: 0 } as ReturnType<typeof useQuery>);
+  const user = userEvent.setup();
+  render(<SystemStatusPage />);
+  const table = screen.getByRole('table');
+  const order = () => within(table).getAllByRole('row').slice(1).map(row => within(row).getByRole('rowheader').textContent);
+  const header = within(table).getByRole('columnheader', { name: label });
+  const button = within(header).getByRole('button', { name: label });
+  const nullable = label === 'Application version' || label === 'Engine version';
+  expect(header).toHaveAttribute('aria-sort', 'none');
+  await user.click(button);
+  expect(header).toHaveAttribute('aria-sort', 'ascending');
+  expect(order()).toEqual(nullable ? ['Alpha', 'Zeta', 'Missing'] : ['Alpha', 'Missing', 'Zeta']);
+  button.focus();
+  await user.keyboard(' ');
+  expect(header).toHaveAttribute('aria-sort', 'descending');
+  expect(order()).toEqual(nullable ? ['Zeta', 'Alpha', 'Missing'] : ['Zeta', 'Missing', 'Alpha']);
+  await user.keyboard('{Enter}');
+  expect(header).toHaveAttribute('aria-sort', 'none');
+  expect(order()).toEqual(['Zeta', 'Alpha', 'Missing']);
+  expect(services.map(service => service.name)).toEqual(['Zeta', 'Alpha', 'Missing']);
 });

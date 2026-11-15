@@ -70,21 +70,43 @@ public sealed class BackendHttpTransport
     /// <param name="completionOption">When the returned task should complete.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The upstream response.</returns>
+    public Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        HttpCompletionOption completionOption,
+        CancellationToken ct) =>
+        SendAsync(request, completionOption, beforeSend: null, ct);
+
+    /// <summary>
+    /// Sends a request and reports every wire attempt through <paramref name="beforeSend"/> so callers
+    /// that enforce a per-operation request budget can count the Digest retry that follows a challenge,
+    /// which is invisible to the caller of a single <see cref="SendAsync(HttpRequestMessage, HttpCompletionOption, CancellationToken)"/>.
+    /// </summary>
+    /// <param name="request">The request to send.</param>
+    /// <param name="completionOption">When the returned task should complete.</param>
+    /// <param name="beforeSend">
+    /// Invoked immediately before each send, including the authenticated retry. When it throws, that attempt
+    /// is not sent and the exception propagates to the caller. May be <see langword="null"/>.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The upstream response.</returns>
     public async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         HttpCompletionOption completionOption,
+        Action? beforeSend,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         if (_authenticator is null)
         {
+            beforeSend?.Invoke();
             return await _httpClient.SendAsync(request, completionOption, ct).ConfigureAwait(false);
         }
 
         // Pre-authenticate from the cached challenge so a rewound body is not required.
         _authenticator.TryApplyCachedAuthorization(request);
 
+        beforeSend?.Invoke();
         HttpResponseMessage response = await _httpClient
             .SendAsync(request, completionOption, ct)
             .ConfigureAwait(false);
@@ -104,6 +126,7 @@ public sealed class BackendHttpTransport
             .ConfigureAwait(false);
         _authenticator.ApplyAuthorization(retryRequest);
 
+        beforeSend?.Invoke();
         return await _httpClient.SendAsync(retryRequest, completionOption, ct).ConfigureAwait(false);
     }
 }

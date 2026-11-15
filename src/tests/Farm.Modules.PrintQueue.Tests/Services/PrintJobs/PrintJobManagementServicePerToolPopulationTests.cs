@@ -359,6 +359,50 @@ public class PrintJobManagementServicePerToolPopulationTests
         Assert.Equal(12.0, dto.ToolRequirements[0].EstimatedGrams);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData(0.0)]
+    [InlineData(83.5)]
+    [InlineData(5000.0)]
+    public async Task EnqueueJobAsync_FilamentEstimate_IsAdvisoryAndNeverRejectsAdmission(double? estimatedGrams)
+    {
+        // Queue admission must never reject on low/zero/unknown filament weight; filament
+        // sufficiency is enforced only at dispatch time (claim/preflight/override review).
+        var gcodeId = Guid.NewGuid();
+        var gcode = new GcodeFile
+        {
+            Id = gcodeId,
+            Name = "heavy.gcode",
+            FileName = "heavy.gcode",
+            EstimatedFilamentWeightG = estimatedGrams,
+            FilamentPerExtruderType = JsonSerializer.Serialize(new[] { "PLA" }),
+            FilamentPerExtruderWeightG = estimatedGrams is null
+                ? null
+                : JsonSerializer.Serialize(new[] { estimatedGrams.Value }),
+        };
+
+        var repo = new Mock<IPrintJobManagementRepository>();
+        repo.Setup(r => r.GetGcodeFileAsync(gcodeId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcode);
+        repo.Setup(r => r.GetMaxQueuePositionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
+        PrintJob? added = null;
+        repo.Setup(r => r.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()))
+            .Callback<PrintJob, CancellationToken>((j, _) => added = j)
+            .ReturnsAsync((PrintJob j, CancellationToken _) => j);
+
+        PrintJobManagementService service = CreateService(repo);
+
+        QueuedPrintJobDto dto = await service.EnqueueJobAsync(
+            new EnqueueQueueJobRequest { GcodeFileId = gcodeId.ToString() },
+            "user-1");
+
+        Assert.NotNull(added);
+        Assert.Equal(PrintJobStatus.Queued, added!.Status);
+        Assert.Equal(estimatedGrams, added.EstimatedFilamentUsage);
+        Assert.Equal(added.Id.ToString(), dto.Id);
+    }
+
     [Fact]
     public void ToWireRequirements_OmitsUnknownInternalEntries_AndDoesNotSynthesizeScalarT0()
     {

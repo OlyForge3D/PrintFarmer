@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState, useRef } from 'react';
 import { FileBrowser, type FileBrowserHandle } from '@/features/fileBrowser/components/FileBrowser';
 import {
   type ColumnDef,
+  type FileBrowserFilterActions,
   type FileItem,
   type FileQueryState,
   type UseFileBrowserConfig,
@@ -12,7 +13,7 @@ import { PrintablesBrowserModal } from '@/features/models3d/components/Printable
 import { PrintablesImportModal } from '@/features/models3d/components/PrintablesImportModal';
 import { Button, TagChip } from '@/common/components/ui';
 import { PrintablesIcon } from '@/common/components/icons/PrintablesIcon';
-import { TagIcon, UploadIcon, EyeIcon, LayersTripleOutlineIcon, FilterIcon, DownloadIcon, DeleteIcon, FolderPlusIcon } from '@/common/components/icons/MdiIcons';
+import { TagIcon, UploadIcon, EyeIcon, LayersTripleOutlineIcon, DownloadIcon, DeleteIcon, FolderPlusIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import type { Model, Model3DSearchResponse } from '@/types/models';
 import { apiClient } from '@/services/api';
@@ -39,7 +40,7 @@ const formatBytes = (bytes?: number) => {
 };
 
 const modelColumns: ColumnDef[] = [
-  { key: 'fileName', label: 'Name', sortable: true },
+  { key: 'fileName', label: 'Name', sortable: true, sortKey: 'name' },
   {
     key: 'fileType',
     label: 'Type',
@@ -50,6 +51,7 @@ const modelColumns: ColumnDef[] = [
   },
   {
     key: 'fileSize',
+    sortKey: 'size',
     label: 'Size',
     sortable: true,
     align: 'right',
@@ -57,6 +59,7 @@ const modelColumns: ColumnDef[] = [
   },
   {
     key: 'uploadedAt',
+    sortKey: 'date',
     label: 'Uploaded',
     sortable: true,
     render: (file) => (file.uploadedAt ? new Date(file.uploadedAt).toLocaleString() : '—'),
@@ -105,7 +108,7 @@ interface ModelsFileBrowserProps {
   onDeleteModels?: (modelIds: string[]) => Promise<void>;
   onShowTagModal?: () => void;
   onShowSingleTagModal?: (model: Model) => void;
-  onToggleTagFilterPanel?: () => void;
+  filterActions?: FileBrowserFilterActions;
   selectedModelIds?: string[];
   onSelectionChange?: (ids: string[]) => void;
   onOpenModel?: (model: Model) => void;
@@ -188,7 +191,7 @@ export const ModelsFileBrowser = ({
   selectedTags = [],
   onShowTagModal,
   onShowSingleTagModal,
-  onToggleTagFilterPanel,
+  filterActions,
   selectedModelIds,
   onSelectionChange,
   onOpenModel,
@@ -375,7 +378,7 @@ export const ModelsFileBrowser = ({
   const renderActions = useCallback(
     (file: FileItem) => {
       if (file.isDirectory) return null;
-      
+
       const model = file.meta?.model3d as Model | undefined;
       if (!model) return null;
 
@@ -434,16 +437,6 @@ export const ModelsFileBrowser = ({
 
   const extraToolbarActions = (
     <>
-      {onToggleTagFilterPanel && (
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          onClick={onToggleTagFilterPanel}
-          title="Filter by tags"
-          iconCenter={<FilterIcon className="h-4 w-4" />}
-        />
-      )}
       {hasPermission('3d_models', 'create') && (
         <Button
           type="button"
@@ -501,6 +494,7 @@ export const ModelsFileBrowser = ({
         config={config as any}
         sortOptions={sortOptions}
         columns={modelColumns}
+        filterActions={filterActions}
         renderItemActions={renderActions}
         extraToolbarActions={extraToolbarActions}
         viewMode={viewMode}

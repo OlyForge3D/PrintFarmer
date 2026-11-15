@@ -65,6 +65,15 @@ describe('buildSlicerProfileJson', () => {
     }));
     expect(payload.overrides).toEqual({ layer_height: 0.28, sparse_infill_density: '15%' });
   });
+
+  it('only overrides the native bed surface on explicit selection, never filament temperatures', () => {
+    const overrides = { layer_height: '0.2', curr_bed_type: 'Cool Plate', bed_temperature_formula: 'by_highest_temp' };
+    expect(parse(buildSlicerProfileJson({ ...base, overrides, bedType: '' })).overrides).toEqual(overrides);
+    expect(parse(buildSlicerProfileJson({ ...base, overrides, bedType: 'Textured PEI Plate' })).overrides)
+      .toEqual({ ...overrides, curr_bed_type: 'Textured PEI Plate' });
+    expect(overrides.curr_bed_type).toBe('Cool Plate');
+    expect(buildSlicerProfileJson({ ...base, bedType: 'Textured PEI Plate' })).not.toContain('plate_temp');
+  });
 });
 
 describe('stripProcessPresetPrefix', () => {

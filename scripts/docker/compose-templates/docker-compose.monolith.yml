@@ -25,6 +25,7 @@ services:
       # Storage paths
       - GCODE_STORAGE_PATH=/app/gcode
       - MODEL_UPLOAD_PATH=/app/models
+      - PRINTER_FILE_THUMBNAIL_PATH=/app/data/printer-file-thumbnails
       - SLICER_PROFILES_PATH=/app/profiles
       - ArtifactStorage__RootPath=/app/data/artifacts
     volumes:

@@ -68,6 +68,28 @@ async function loadModal(modalCamera: DisplayCameraDto = camera, lockPrinterId?:
 }
 
 describe('EditCameraModal configuration', () => {
+  it.each(['', '   '])('sends an explicit empty description when cleared to %j', async (description) => {
+    await loadModal({ ...camera, description: 'Camera from vt01 printer' });
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: description } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Camera' }));
+    await waitFor(() => expect(service.updateCamera).toHaveBeenCalledWith(
+      camera.id,
+      expect.objectContaining({ description: '' }),
+    ));
+    const request = service.updateCamera.mock.calls[0][1];
+    expect(JSON.parse(JSON.stringify(request))).toHaveProperty('description', '');
+  });
+
+  it('sends a trimmed replacement description', async () => {
+    await loadModal({ ...camera, description: 'Old description' });
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: '  Workshop camera  ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Camera' }));
+    await waitFor(() => expect(service.updateCamera).toHaveBeenCalledWith(
+      camera.id,
+      expect.objectContaining({ description: 'Workshop camera' }),
+    ));
+  });
+
   it('blocks editing and saving while configuration loads, never using display proxy URLs', () => {
     service.getCameraConfig.mockReturnValue(new Promise(() => {}));
     renderModal();

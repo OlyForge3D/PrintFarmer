@@ -137,36 +137,38 @@ public sealed class ProfileTaskCheckService : BackgroundService
                 .GroupBy(p => p.ModelId)
                 .ToList();
 
-            int tasksCreated = 0;
-            int tasksUpdated = 0;
+            if (printersByModel.Count == 0)
+            {
+                return;
+            }
+
+            Guid[] modelIds = printersByModel.Select(group => group.Key).ToArray();
+            HashSet<Guid> coveredModels = await machineModelProfileRepo.GetPrinterModelIdsWithProfilesAsync(modelIds, ct);
+            coveredModels.UnionWith(await machineProfileRepo.GetPrinterModelIdsWithProfilesAsync(modelIds, ct));
+            Guid[] missingModelIds = modelIds.Where(id => !coveredModels.Contains(id)).ToArray();
+            if (missingModelIds.Length == 0)
+            {
+                _logger.LogInformation("[ProfileTaskCheck] All printer models have profiles");
+                return;
+            }
+
+            Dictionary<Guid, ProfileTaskModelDto> models = (await catalogService.GetProfileTaskModelsAsync(missingModelIds, ct))
+                .ToDictionary(model => model.Id);
+            int tasksChecked = 0;
 
             foreach (var group in printersByModel)
             {
                 Guid modelId = group.Key;
                 var modelPrinters = group.ToList();
 
-                // Check if this model has imported slicer profiles (either MachineModelProfile OR MachineProfile)
-                MachineModelProfile? modelProfile = await machineModelProfileRepo.GetByPrinterModelIdAsync(modelId, ct);
-                bool hasMachineProfiles = await machineProfileRepo.HasAnyForPrinterModelAsync(modelId, ct);
-
-                if (modelProfile != null || hasMachineProfiles)
+                if (coveredModels.Contains(modelId))
                 {
-                    // Model already has profiles imported, skip
-                    _logger.LogDebug("[ProfileTaskCheck] Model {ModelId} already has profiles (modelProfile: {Value1}, machineProfiles: {HasMachineProfiles}), skipping", modelId, modelProfile != null, hasMachineProfiles);
                     continue;
                 }
 
-                // Check if task already exists for this model
-                bool hasExistingTask = await taskService.HasPendingProfileImportTaskAsync(modelId, ct);
-
-                // Get model details for task title
-                PrinterModelDto? modelDto = await catalogService.GetModelByIdAsync(modelId, ct);
-                ManufacturerDto? manufacturerDto = modelDto != null
-                    ? await catalogService.GetManufacturerByIdAsync(modelDto.ManufacturerId, ct)
-                    : null;
-
+                models.TryGetValue(modelId, out ProfileTaskModelDto? modelDto);
                 string modelName = modelDto?.Name ?? "Unknown Model";
-                string manufacturerName = manufacturerDto?.Name ?? "Unknown";
+                string manufacturerName = modelDto?.ManufacturerName ?? "Unknown";
 
                 // Skip "Unknown" model - these are placeholder assignments
                 if (modelName.Equals("Unknown", StringComparison.OrdinalIgnoreCase) ||
@@ -176,31 +178,16 @@ public sealed class ProfileTaskCheckService : BackgroundService
                     continue;
                 }
 
-                // Create or update task for each printer in this model group
-                foreach (Printer printer in modelPrinters)
-                {
-                    CreateProfileImportTaskDto dto = new(
-                        PrinterModelId: modelId,
-                        PrinterModelName: modelName,
-                        ManufacturerName: manufacturerName,
-                        PrinterId: printer.Id);
-
-                    await taskService.CreateOrUpdateProfileImportTaskAsync(dto, ct);
-                }
-
-                if (hasExistingTask)
-                {
-                    tasksUpdated++;
-                    _logger.LogDebug("[ProfileTaskCheck] Updated task for {ManufacturerName} {ModelName} with {ModelPrintersCount} printers", manufacturerName, modelName, modelPrinters.Count);
-                }
-                else
-                {
-                    tasksCreated++;
-                    _logger.LogInformation("[ProfileTaskCheck] Created task: Import profiles for {ManufacturerName} {ModelName} ({ModelPrintersCount} printers waiting)", manufacturerName, modelName, modelPrinters.Count);
-                }
+                CreateProfileImportTaskBatchDto dto = new(
+                    PrinterModelId: modelId,
+                    PrinterModelName: modelName,
+                    ManufacturerName: manufacturerName,
+                    PrinterIds: modelPrinters.Select(printer => printer.Id).Distinct().ToArray());
+                await taskService.CreateOrUpdateProfileImportTaskAsync(dto, ct);
+                tasksChecked++;
             }
 
-            _logger.LogInformation("[ProfileTaskCheck] Check complete. Tasks created: {TasksCreated}, Tasks updated: {TasksUpdated}", tasksCreated, tasksUpdated);
+            _logger.LogInformation("[ProfileTaskCheck] Check complete. Model task groups checked: {TasksChecked}", tasksChecked);
         }
         catch (Exception ex)
         {

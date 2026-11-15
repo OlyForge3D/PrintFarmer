@@ -108,6 +108,7 @@ describe('EditPrinterModal', () => {
         backendPort: 7125,
         frontendPort: 80,
         obicoEnabled: false,
+        printGuardEnabled: false,
         toolheads: [],
       },
     });
@@ -367,6 +368,36 @@ describe('EditPrinterModal', () => {
     });
   });
 
+  it('enables save when only PrintGuard monitoring is toggled and submits it independently', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <EditPrinterModal
+        printerId="printer-1"
+        isOpen
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />
+    );
+
+    const saveButton = await screen.findByRole('button', { name: /save changes/i });
+    expect(saveButton).toBeDisabled();
+    await user.click(screen.getByLabelText(/enable printguard monitoring for this printer/i));
+    await waitFor(() => expect(saveButton).toBeEnabled());
+    await user.click(saveButton);
+
+    await waitFor(() => {
+      expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'printer-1',
+        reviewedRowVersion: 'printer-v1',
+        printer: expect.objectContaining({
+          obicoEnabled: false,
+          printGuardEnabled: true,
+        }),
+      }));
+    });
+  });
+
   describe('Show external spool (QidiBox Rack)', () => {
     const qidiDetails = (overrides: Record<string, unknown> = {}) => ({
       rowVersion: 'printer-v1',
@@ -469,7 +500,7 @@ describe('EditPrinterModal', () => {
 
     const checkbox = await screen.findByLabelText(/enable obico monitoring for this printer/i);
     expect(checkbox).toBeDisabled();
-    expect(screen.getByText(/configure and enable a linked camera/i)).toBeInTheDocument();
+    expect(screen.getByText(/configure and enable a linked camera.*obico/i)).toBeInTheDocument();
   });
 
   it('enables Obico checkbox when at least one enabled linked camera is configured', async () => {
@@ -615,6 +646,37 @@ describe('EditPrinterModal', () => {
     const checkbox = await screen.findByLabelText(/enable obico monitoring for this printer/i);
     expect(checkbox).not.toBeDisabled();
     expect(checkbox).toBeChecked();
+  });
+
+  it('requires an enabled linked camera to enable PrintGuard, but permits disabling it', async () => {
+    const user = userEvent.setup();
+    mockUsePrinterCameras.mockReturnValue({ data: [] });
+    mockUsePrinterDetails.mockReturnValue({
+      data: {
+        name: 'qp4-1',
+        serverUrl: 'http://qp4-1.local',
+        originalServerUrl: 'http://qp4-1.local',
+        backend: 'Moonraker',
+        printGuardEnabled: true,
+        toolheads: [],
+      },
+    });
+
+    render(
+      <EditPrinterModal
+        printerId="printer-1"
+        isOpen
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />
+    );
+
+    const checkbox = await screen.findByLabelText(/enable printguard monitoring for this printer/i);
+    expect(checkbox).toBeEnabled();
+    expect(checkbox).toBeChecked();
+    await user.click(checkbox);
+    expect(checkbox).not.toBeChecked();
+    expect(checkbox).toBeDisabled();
   });
 
   // #1865: a failed connection test (e.g. an unreachable/rejected Moonraker URL) must

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useId } from 'react';
 import { 
   Button, 
   Input, 
@@ -8,9 +8,9 @@ import {
   Badge,
   DataTable,
   type DataTableColumn,
-  ViewToggle,
-  gridTableOptions,
 } from '@/common/components/ui';
+import { CatalogHeader, CatalogModelToolbar, CatalogResultsSummary } from './CatalogModelToolbar';
+import { filterCatalogModels } from './catalogModelFilters';
 import { Modal } from '@/common/components/modals/Modal';
 import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { ComponentModelCard, type NozzleModelCardData } from '@/common/components/ComponentModelCard';
@@ -104,6 +104,8 @@ export function NozzlesCatalog() {
 
   // View toggle state (grid vs table) - persisted per tab
   const [view, setView] = useCatalogViewMode('nozzles');
+  const [searchValue, setSearchValue] = useState('');
+  const [selectedManufacturerId, setSelectedManufacturerId] = useState<string | undefined>();
 
   // Define columns for DataTable with built-in sorting
   const columns = useMemo<DataTableColumn<NozzleModelCardData>[]>(() => [
@@ -342,7 +344,8 @@ export function NozzlesCatalog() {
     );
   }
 
-  const cards = (nozzleModels ?? []).map(toCardData);
+  const allCards = (nozzleModels ?? []).map(toCardData);
+  const cards = filterCatalogModels(allCards, searchValue, selectedManufacturerId);
 
   return (
     <div className="space-y-4">
@@ -353,30 +356,39 @@ export function NozzlesCatalog() {
         </Tabs.List>
         <Tabs.Panels>
           <Tabs.Panel id="models">
-      <div className="space-y-4">
-      {/* Header with Add button */}
-      <div className="flex justify-between items-center">
-        <h2 className="text-lg font-semibold text-pf-text-primary">
-          Nozzle Models ({cards.length})
-        </h2>
-        <div className="flex items-center gap-2">
-          <Button 
-            onClick={handleAddClick} 
-            size="sm"
+        <div className="space-y-4">
+        {/* Header with Add button */}
+        <CatalogHeader title="Nozzle Models">
+            <Button
+              control
+              onClick={handleAddClick}
             title="Add new nozzle model"
             iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
           >
             Add
           </Button>
-          <ViewToggle value={view} onChange={setView} options={gridTableOptions} />
-        </div>
-      </div>
+      </CatalogHeader>
+      <CatalogModelToolbar
+        modelLabel="nozzle models"
+        context={CatalogContext.Nozzles}
+        searchValue={searchValue}
+        onSearchChange={setSearchValue}
+        manufacturerId={selectedManufacturerId}
+        onManufacturerChange={setSelectedManufacturerId}
+        view={view}
+        onViewChange={setView}
+      />
+      <CatalogResultsSummary shownCount={cards.length} totalCount={allCards.length} itemLabel="nozzle models" />
 
       {/* Grid or Table view of nozzle cards */}
-      {cards.length === 0 ? (
+      {allCards.length === 0 ? (
         <div className="text-center py-12 text-pf-text-secondary">
           <p>No nozzle models defined yet.</p>
           <p className="mt-2">Click "Add Nozzle" to create your first one.</p>
+        </div>
+      ) : cards.length === 0 ? (
+        <div className="text-center py-12 text-pf-text-secondary">
+          <p>No nozzle models match the current filters.</p>
         </div>
       ) : view === 'grid' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -538,6 +550,7 @@ function NozzleForm({
   isSubmitting,
   submitLabel,
 }: NozzleFormProps) {
+  const fieldId = useId();
   const [customDiameter, setCustomDiameter] = useState('');
   const [showCustomDiameter, setShowCustomDiameter] = useState(false);
 
@@ -589,10 +602,11 @@ function NozzleForm({
       </FormField>
 
       <div className="grid grid-cols-3 gap-4">
-        <FormField label="Diameter (mm)" required error={formErrors.diameter}>
+        <FormField label="Diameter (mm)" htmlFor={`${fieldId}-diameter`} required error={formErrors.diameter}>
           {showCustomDiameter ? (
             <div className="flex gap-2">
               <Input
+                id={`${fieldId}-diameter`}
                 type="number"
                 step="0.01"
                 min="0.1"
@@ -623,6 +637,7 @@ function NozzleForm({
             </div>
           ) : (
             <Select
+              id={`${fieldId}-diameter`}
               value={formState.diameter}
               onChange={(e) => handleDiameterChange(e.target.value)}
             >
@@ -636,8 +651,9 @@ function NozzleForm({
           )}
         </FormField>
 
-        <FormField label="Material" required error={formErrors.nozzleMaterialId}>
+        <FormField label="Material" htmlFor={`${fieldId}-material`} required error={formErrors.nozzleMaterialId}>
           <Select
+            id={`${fieldId}-material`}
             value={formState.nozzleMaterialId}
             onChange={(e) => onMaterialChange(e.target.value)}
           >
@@ -667,6 +683,7 @@ function NozzleForm({
 
       <FormField
         label="Hardness"
+        htmlFor={`${fieldId}-hardness`}
         helper={
           formState.hardnessOverride === 'Auto'
             ? (() => {
@@ -679,6 +696,7 @@ function NozzleForm({
         }
       >
         <Select
+          id={`${fieldId}-hardness`}
           value={formState.hardnessOverride}
           onChange={(e) => onFieldChange('hardnessOverride', e.target.value)}
         >
