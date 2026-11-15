@@ -6,6 +6,10 @@ import type { MoveRequest } from '@/types/api';
 import {
   HomeIcon,
   DisableMotorsIcon,
+  ArrowUpIcon,
+  ArrowDownIcon,
+  ArrowLeftIcon,
+  ArrowRightIcon,
 } from '@/common/components/icons/MdiIcons';
 import { getHomeButtonStyle } from '@/features/printers/utils/homeButtonStyle';
 import { knownHomedAxes } from '@/features/printers/utils/homedAxes';
@@ -15,6 +19,7 @@ import {
 } from '@/features/printers/constants/temperaturePresets';
 
 interface MovementControlSectionProps {
+  layout?: 'card' | 'sidebar';
   // Position state
   moveX: number | string;
   moveY: number | string;
@@ -24,9 +29,9 @@ interface MovementControlSectionProps {
   extrudeSpeed: number;
   
   // Printer state
-  printerX?: number;
-  printerY?: number;
-  printerZ?: number;
+  printerX?: number | null;
+  printerY?: number | null;
+  printerZ?: number | null;
   homedAxes?: string;
   hotendTemp?: number;
   
@@ -60,6 +65,7 @@ interface MovementControlSectionProps {
 }
 
 export function MovementControlSection({
+  layout = 'card',
   moveX,
   moveY,
   moveZ,
@@ -103,11 +109,11 @@ export function MovementControlSection({
   const isAllHomed = isXYHomed && isZHomed;
 
   return (
-    <div className="mb-2">
-      <div className="flex flex-wrap gap-6 items-start">
+    <div className={layout === 'sidebar' ? undefined : 'mb-2'}>
+      <div className={layout === 'sidebar' ? 'flex flex-wrap gap-4 items-start' : 'flex flex-wrap gap-6 items-start'}>
         {/* Left Column: Move */}
-        <div className="flex flex-col gap-2 items-start">
-          <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
+        <div className={layout === 'sidebar' ? 'flex flex-col gap-1 items-start' : 'flex flex-col gap-2 items-start'}>
+          <div className={layout === 'sidebar' ? 'text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide' : 'text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1'}>
             Move
           </div>
           <div className="flex gap-2 items-start">
@@ -130,7 +136,7 @@ export function MovementControlSection({
                 aria-label="Jog Y positive"
                 padSize="small"
               >
-                ▲
+                {layout === 'sidebar' ? <ArrowUpIcon className="h-4 w-4" /> : '▲'}
               </MotionControlButton>
               <ControlPadButton
                 disabled={!canDisableMotors}
@@ -148,7 +154,7 @@ export function MovementControlSection({
                 aria-label="Jog X negative"
                 padSize="small"
               >
-                ◀
+                {layout === 'sidebar' ? <ArrowLeftIcon className="h-4 w-4" /> : '◀'}
               </MotionControlButton>
               <MotionControlButton
                 disabled={movementActionPending || !canHomeXY}
@@ -166,7 +172,7 @@ export function MovementControlSection({
                 aria-label="Jog X positive"
                 padSize="small"
               >
-                ▶
+                {layout === 'sidebar' ? <ArrowRightIcon className="h-4 w-4" /> : '▶'}
               </MotionControlButton>
 
               {/* Bottom row */}
@@ -177,7 +183,7 @@ export function MovementControlSection({
                 aria-label="Jog Y negative"
                 padSize="small"
               >
-                ▼
+                {layout === 'sidebar' ? <ArrowDownIcon className="h-4 w-4" /> : '▼'}
               </MotionControlButton>
               <div></div>
             </div>
@@ -287,13 +293,19 @@ export function MovementControlSection({
             </div>
           </div>
           {/* Move distance slider */}
-          <MoveDistanceSlider value={step} onChange={onStepChange} disabled={!canSetStep} />
+          {layout === 'card' && <MoveDistanceSlider value={step} onChange={onStepChange} disabled={!canSetStep} />}
         </div>
 
         {/* Right content (Control/Filament) — same level as Move column */}
         {rightContent}
       </div>
 
+      {layout === 'sidebar' && (
+        <div className="my-4">
+          <div className="text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide mb-1">Step Size</div>
+          <MoveDistanceSlider value={step} onChange={onStepChange} disabled={!canSetStep} />
+        </div>
+      )}
       <PrinterCoordinateRow
         values={{ X: moveX, Y: moveY, Z: moveZ }}
         positions={{ X: printerX, Y: printerY, Z: printerZ }}
