@@ -207,6 +207,7 @@ public sealed class MoonrakerSubscriptionService(
             }
 
             IMoonrakerClient moonrakerClient = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
+            DateTime observationStartedAtUtc = DateTime.UtcNow;
             long? originWatermark = await OriginWatermark
                 .CaptureAsync(watermarkReader, _logger, "Moonraker immediate refresh", ct)
                 .ConfigureAwait(false);
@@ -250,7 +251,7 @@ public sealed class MoonrakerSubscriptionService(
             _statusCacheWriter.UpdateStatus(
                 statusUpdate.ToStatusDto(compositeStatus.CameraSnapshotUrl, compositeStatus.PrintTimeLeftSeconds)
                     with
-                { RawActivityState = compositeStatus.State },
+                { RawActivityState = compositeStatus.State, ObservationStartedAtUtc = observationStartedAtUtc },
                 originWatermark);
 
             await hub!.Clients.Group(
@@ -1237,6 +1238,7 @@ public sealed class MoonrakerSubscriptionService(
 
         while (ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
         {
+            DateTime observationStartedAtUtc = DateTime.UtcNow;
             _ = sb.Clear();
             WebSocketReceiveResult result;
             long? originWatermark;
@@ -1273,6 +1275,7 @@ public sealed class MoonrakerSubscriptionService(
 
             try
             {
+                _printerStates.GetOrAdd(printer.Id, _ => new PrinterState()).ObservationStartedAtUtc = observationStartedAtUtc;
                 await ProcessJsonRpcMessageAsync(sb.ToString(), printer, originWatermark, ct);
             }
             catch (JsonException jsonEx)
@@ -3318,7 +3321,7 @@ public sealed class MoonrakerSubscriptionService(
                 Sensors = sensors,
             };
             _statusCacheWriter.UpdateStatus(
-                cacheUpdate with { RawActivityState = state.State }, state.OriginWatermark);
+                cacheUpdate with { RawActivityState = state.State, ObservationStartedAtUtc = state.ObservationStartedAtUtc }, state.OriginWatermark);
 
             _logger.LogDebug("[MoonrakerSubscriptionService] Broadcasting printerupdated for {PrinterId} via SignalR", printerId);
             await hub!.Clients.Group(
@@ -3833,6 +3836,7 @@ public sealed class MoonrakerSubscriptionService(
             IMoonrakerClient moonrakerClient = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
 
             // Get comprehensive status using existing HTTP endpoint
+            DateTime observationStartedAtUtc = DateTime.UtcNow;
             long? originWatermark = await OriginWatermark
                 .CaptureAsync(watermarkReader, _logger, "Moonraker HTTP status", ct)
                 .ConfigureAwait(false);
@@ -3885,7 +3889,7 @@ public sealed class MoonrakerSubscriptionService(
                         compositeStatus.CameraSnapshotUrl,
                         compositeStatus.PrintTimeLeftSeconds);
                     _statusCacheWriter.UpdateStatus(
-                        cacheUpdate with { RawActivityState = compositeStatus.State }, originWatermark);
+                        cacheUpdate with { RawActivityState = compositeStatus.State, ObservationStartedAtUtc = observationStartedAtUtc }, originWatermark);
 
                     // HTTP reachability proves Moonraker is online, not that known-shutdown Klippy is ready.
                     _ = _klippyReadyState.TryAdd(printer.Id, compositeStatus.IsOnline);

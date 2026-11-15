@@ -155,6 +155,22 @@ Eight themes ship over one CSS variable contract: Mission Control (the default),
 - Status is shown by color **and** shape or glyph, never by color alone.
 - Flat surfaces separated by hairlines. Shadows are minimal.
 
+## Cross-surface conventions
+
+Preserve the incumbent glyph for an action, sensor or status unless an explicitly
+scoped redesign changes it. Heater and status glyphs use semantic active-state
+color together with a non-color cue; unknown telemetry must not imply activity.
+Secondary explanatory text belongs in an accessible tooltip or native
+disclosure, not extra inline labels. Essential values, units, status, errors and
+field labels stay visible.
+
+Table and card views, and web and native clients, must preserve the same action
+meaning, availability, permissions, reported state and outcomes. Adapt layout
+and interaction to the platform; parity is not pixel identity. The detailed
+[cross-surface contract](src/Web/ReactApp/src/design-system/DESIGN-LANGUAGE.md#cross-surface-conventions)
+and [native adaptation](mobile/DESIGN.md#cross-surface-conventions) describe
+existing heater differences without authorizing changes to hardware behavior.
+
 ## Colors
 
 Cool, low-chroma navy surfaces carry one saturated teal accent. Semantic and status colors appear only where they report state.

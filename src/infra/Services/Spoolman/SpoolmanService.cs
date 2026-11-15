@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
@@ -20,6 +21,11 @@ namespace Farm.Infrastructure.Services.Spoolman;
 
 public class SpoolmanService(HttpClient http, ISettingsService settingsService, ILogger<SpoolmanService> logger, IEgressGuard egressGuard) : ISpoolmanService
 {
+    private static readonly JsonSerializerOptions TagScanJsonOptions = new()
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+
     /// <summary>
     /// Density applied when a caller creates a filament without one. Spoolman requires
     /// <c>density</c> (it has no default) and rejects the payload with HTTP 422 otherwise.
@@ -883,6 +889,49 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     }
 
     /// <inheritdoc/>
+    public async Task<SpoolmanFilamentDto?> FindFilamentByIdAsync(int filamentId, CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new SpoolmanApiException("Spoolman is not configured.");
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/filament/{filamentId}";
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(15));
+            using HttpResponseMessage response = await http.GetAsync(url, cts.Token);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return null;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new SpoolmanApiException(response.StatusCode, $"get filament {filamentId}", null);
+            }
+
+            string json = await response.Content.ReadAsStringAsync(cts.Token);
+            using JsonDocument doc = JsonDocument.Parse(json);
+            return SpoolmanJsonParser.ParseFilament(doc.RootElement);
+        }
+        catch (SpoolmanApiException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new SpoolmanApiException($"Spoolman filament {filamentId} could not be loaded.", ex);
+        }
+    }
+
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<SpoolmanVendorDto>> ListVendorsAsync(CancellationToken ct)
     {
         SpoolmanConfigDto? cfg = GetConfig();
@@ -1131,6 +1180,169 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     /// <inheritdoc/>
     public async Task DeleteFilamentFromSpoolmanAsync(int filamentId, CancellationToken ct)
     {
+        SpoolmanFilamentDeletePreview preview = await PreviewFilamentDeleteAsync(filamentId, ct);
+        EnsureNoActiveSpools(preview);
+        if (preview.ArchivedSpoolIds.Length > 0)
+        {
+            throw new InvalidOperationException(
+                $"This filament has {preview.ArchivedSpoolIds.Length} archived spool(s). Delete it individually to review and confirm permanent deletion of those spools.");
+        }
+
+        await DeleteFilamentCoreAsync(filamentId, ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpoolmanFilamentDeletePreview> PreviewFilamentDeleteAsync(int filamentId, CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new InvalidOperationException("Spoolman is not configured.");
+        }
+
+        // Spoolman's unbounded list defaults to excluding archived spools. Never use the
+        // display cache or a failed-read-as-empty fallback to authorize a destructive action.
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}{SpoolApiPath}?filament.id={filamentId}&allow_archived=true";
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(15));
+        using HttpResponseMessage response = await http.GetAsync(url, cts.Token);
+        await EnsureSpoolmanSuccessAsync(response, $"check spools for filament {filamentId}", cts.Token);
+        using JsonDocument doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cts.Token));
+        if (doc.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException("Could not verify the filament's spools. Refresh and try again; nothing was deleted.");
+        }
+
+        HashSet<int> ids = [];
+        List<int> archived = [];
+        int activeCount = 0;
+        foreach (JsonElement spool in doc.RootElement.EnumerateArray())
+        {
+            if (spool.ValueKind != JsonValueKind.Object
+                || !spool.TryGetProperty("id", out JsonElement id) || !id.TryGetInt32(out int spoolId)
+                || spoolId <= 0 || !ids.Add(spoolId)
+                || !spool.TryGetProperty("filament", out JsonElement filament)
+                || filament.ValueKind != JsonValueKind.Object
+                || !filament.TryGetProperty("id", out JsonElement reference)
+                || !reference.TryGetInt32(out int referenceId) || referenceId != filamentId)
+            {
+                throw new InvalidOperationException("Spoolman returned unexpected spool references. Refresh and try again; nothing was deleted.");
+            }
+
+            if (spool.TryGetProperty("archived", out JsonElement flag) && flag.ValueKind == JsonValueKind.True)
+            {
+                archived.Add(spoolId);
+            }
+            else
+            {
+                activeCount++;
+            }
+        }
+
+        if (response.Headers.TryGetValues("X-Total-Count", out IEnumerable<string>? totals)
+            && (!int.TryParse(string.Join(",", totals), out int total) || total != ids.Count))
+        {
+            throw new InvalidOperationException("Spoolman returned an incomplete spool list. Cannot safely delete this filament.");
+        }
+
+        return new SpoolmanFilamentDeletePreview(activeCount, [.. archived.Order()]);
+    }
+
+    /// <inheritdoc/>
+    public async Task DeleteFilamentWithArchivedSpoolsAsync(int filamentId, int[] archivedSpoolIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(archivedSpoolIds);
+        HashSet<int> remaining = [.. archivedSpoolIds];
+        if (remaining.Count != archivedSpoolIds.Length || remaining.Any(id => id <= 0))
+        {
+            throw new ArgumentException("Confirmed archived spool IDs must be unique positive IDs.", nameof(archivedSpoolIds));
+        }
+
+        await CheckConfirmedSpoolsAsync(filamentId, remaining, ct);
+        List<int> deleted = [];
+        try
+        {
+            foreach (int spoolId in archivedSpoolIds)
+            {
+                // Other clients can change Spoolman between requests. Recheck the entire
+                // remaining set before each delete, never expand the confirmed set.
+                await CheckConfirmedSpoolsAsync(filamentId, remaining, ct);
+                await DeleteSpoolFromSpoolmanAsync(spoolId, ct);
+                deleted.Add(spoolId);
+                remaining.Remove(spoolId);
+                await WaitForDeletedSpoolsAsync(filamentId, remaining, deleted, ct);
+            }
+
+            await CheckConfirmedSpoolsAsync(filamentId, remaining, ct);
+            await DeleteFilamentCoreAsync(filamentId, ct);
+        }
+        catch (Exception ex)
+        {
+            string deletedIds = deleted.Count == 0 ? "none" : string.Join(", ", deleted);
+            throw new InvalidOperationException(
+                $"Deletion incomplete for filament {filamentId}. Confirmed deleted archived spool IDs: {deletedIds}. "
+                + $"Filament deletion was not confirmed. Refresh inventory before retrying; a timed-out request may have completed in Spoolman. {ex.Message}", ex);
+        }
+    }
+
+    private async Task CheckConfirmedSpoolsAsync(int filamentId, HashSet<int> confirmedIds, CancellationToken ct)
+    {
+        SpoolmanFilamentDeletePreview preview = await PreviewFilamentDeleteAsync(filamentId, ct);
+        EnsureNoActiveSpools(preview);
+        if (!confirmedIds.SetEquals(preview.ArchivedSpoolIds))
+        {
+            throw new InvalidOperationException("The filament's spool list changed. Refresh and review the deletion confirmation again.");
+        }
+    }
+
+    private async Task WaitForDeletedSpoolsAsync(
+        int filamentId, HashSet<int> remainingIds, List<int> deletedIds, CancellationToken ct)
+    {
+        using var visibility = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        visibility.CancelAfter(TimeSpan.FromSeconds(5));
+        try
+        {
+            int delayMilliseconds = 100;
+            while (true)
+            {
+                SpoolmanFilamentDeletePreview preview = await PreviewFilamentDeleteAsync(filamentId, visibility.Token);
+                EnsureNoActiveSpools(preview);
+                HashSet<int> visibleIds = [.. preview.ArchivedSpoolIds];
+                if (!remainingIds.IsSubsetOf(visibleIds)
+                    || visibleIds.Any(id => !remainingIds.Contains(id) && !deletedIds.Contains(id)))
+                {
+                    throw new InvalidOperationException("The filament's spool list changed. Refresh and review the deletion confirmation again.");
+                }
+
+                if (remainingIds.SetEquals(visibleIds))
+                {
+                    return;
+                }
+
+                // Older Spoolman versions acknowledge DELETE before committing its transaction.
+                // Retry only stale references to acknowledged deletions, never new or active spools.
+                await Task.Delay(TimeSpan.FromMilliseconds(delayMilliseconds), visibility.Token);
+                delayMilliseconds = Math.Min(delayMilliseconds * 2, 1000);
+            }
+        }
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            throw new InvalidOperationException(
+                "Spoolman did not confirm visibility of the acknowledged spool deletions within 5 seconds. Refresh inventory before retrying.", ex);
+        }
+    }
+
+    private static void EnsureNoActiveSpools(SpoolmanFilamentDeletePreview preview)
+    {
+        if (preview.ActiveSpoolCount > 0)
+        {
+            throw new InvalidOperationException(
+                $"Cannot delete this filament: {preview.ActiveSpoolCount} active spool(s) still reference it. Move or archive those spools first.");
+        }
+    }
+
+    private async Task DeleteFilamentCoreAsync(int filamentId, CancellationToken ct)
+    {
         SpoolmanConfigDto? cfg = GetConfig();
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
         {
@@ -1143,8 +1355,8 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         cts.CancelAfter(TimeSpan.FromSeconds(15));
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Delete, url);
-        HttpResponseMessage response = await http.SendAsync(httpRequest, cts.Token);
-        response.EnsureSuccessStatusCode();
+        using HttpResponseMessage response = await http.SendAsync(httpRequest, cts.Token);
+        await EnsureSpoolmanSuccessAsync(response, $"delete filament {filamentId}. Check for newly added spools and review Spoolman's logs", cts.Token);
     }
 
     /// <inheritdoc/>
@@ -1696,6 +1908,179 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     }
 
     /// <inheritdoc/>
+    public async Task<SpoolmanTagScanResultDto> ScanTagAsync(SpoolmanTagScanRequest request, CancellationToken ct)
+    {
+        string normalizedUid = NormalizeNfcTagUid(request.Uid);
+        if (request.PayloadB64 is { Length: > 4096 })
+        {
+            throw new ArgumentException("NFC tag payload must not exceed 4096 base64 characters.", nameof(request));
+        }
+
+        string? normalizedFormat = string.IsNullOrWhiteSpace(request.Format) ? null : request.Format.Trim();
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new SpoolmanApiException(
+                HttpStatusCode.ServiceUnavailable,
+                "scan a tag",
+                "Spoolman is not configured.");
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/tag/scan";
+        using var content = new StringContent(
+            JsonSerializer.Serialize(
+                new
+                {
+                    uid = normalizedUid,
+                    format = normalizedFormat,
+                    payload_b64 = request.PayloadB64,
+                    create = false
+                },
+                TagScanJsonOptions),
+            System.Text.Encoding.UTF8,
+            "application/json");
+        using HttpResponseMessage response = await http.PostAsync(url, content, ct);
+        await EnsureTagApiSuccessAsync(response, "scan a tag", ct);
+
+        using JsonDocument document = await JsonDocument.ParseAsync(
+            await response.Content.ReadAsStreamAsync(ct),
+            cancellationToken: ct);
+        JsonElement root = document.RootElement;
+        int? matchedSpoolId = TryGetInt(root, "matched_spool_id");
+        int? matchedFilamentId = TryGetInt(root, "matched_filament_id");
+        SpoolmanSpoolDto? spool = TryGetObject(root, "spool", SpoolmanJsonParser.ParseSpool);
+        SpoolmanFilamentDto? filament = TryGetObject(root, "filament", SpoolmanJsonParser.ParseFilament);
+        bool created = root.TryGetProperty("created", out JsonElement createdElement) &&
+            createdElement.ValueKind == JsonValueKind.True;
+        JsonElement? decoded = root.TryGetProperty("decoded", out JsonElement decodedElement)
+            ? decodedElement.Clone()
+            : null;
+
+        return new SpoolmanTagScanResultDto(matchedSpoolId, matchedFilamentId, spool, filament, created, decoded);
+    }
+
+    /// <inheritdoc/>
+    public async Task LinkTagToSpoolAsync(int spoolId, string uid, CancellationToken ct)
+    {
+        string normalizedUid = NormalizeNfcTagUid(uid);
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new SpoolmanApiException(
+                HttpStatusCode.ServiceUnavailable,
+                "link a tag",
+                "Spoolman is not configured.");
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/spool/{spoolId}/tag";
+        using var content = new StringContent(
+            JsonSerializer.Serialize(new { uid = normalizedUid }),
+            System.Text.Encoding.UTF8,
+            "application/json");
+        using HttpResponseMessage response = await http.PostAsync(url, content, ct);
+        await EnsureTagApiSuccessAsync(response, $"link a tag to spool {spoolId}", ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task UnlinkTagFromSpoolAsync(int spoolId, string uid, CancellationToken ct)
+    {
+        string normalizedUid = NormalizeNfcTagUid(uid);
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new SpoolmanApiException(
+                HttpStatusCode.ServiceUnavailable,
+                "unlink a tag",
+                "Spoolman is not configured.");
+        }
+
+        string escapedUid = Uri.EscapeDataString(normalizedUid);
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/spool/{spoolId}/tag/{escapedUid}";
+        using HttpResponseMessage response = await http.DeleteAsync(url, ct);
+        await EnsureTagApiSuccessAsync(response, $"unlink a tag from spool {spoolId}", ct);
+    }
+
+    private static string NormalizeNfcTagUid(string uid)
+    {
+        if (string.IsNullOrWhiteSpace(uid))
+        {
+            throw new ArgumentException("An NFC tag UID is required.", nameof(uid));
+        }
+
+        string normalized = new string(uid.Where(static character =>
+            character is not ':' and not '-' and not ' ' and not '\t' and not '\r' and not '\n').ToArray())
+            .ToUpperInvariant();
+        if (normalized.Length is 0 or > 64)
+        {
+            throw new ArgumentException("The NFC tag UID must contain between 1 and 64 characters.", nameof(uid));
+        }
+
+        return normalized;
+    }
+
+    private static int? TryGetInt(JsonElement element, string propertyName)
+    {
+        return element.TryGetProperty(propertyName, out JsonElement value) &&
+            value.ValueKind == JsonValueKind.Number &&
+            value.TryGetInt32(out int parsed)
+                ? parsed
+                : null;
+    }
+
+    private static T? TryGetObject<T>(
+        JsonElement element,
+        string propertyName,
+        Func<JsonElement, T> parse)
+        where T : class
+    {
+        return element.TryGetProperty(propertyName, out JsonElement value) &&
+            value.ValueKind == JsonValueKind.Object
+                ? parse(value)
+                : null;
+    }
+
+    private static async Task EnsureTagApiSuccessAsync(
+        HttpResponseMessage response,
+        string operation,
+        CancellationToken ct)
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        string body = await response.Content.ReadAsStringAsync(ct);
+        if (response.StatusCode == HttpStatusCode.NotFound && IsMissingTagEndpoint(body))
+        {
+            throw new SpoolmanApiException(
+                HttpStatusCode.ServiceUnavailable,
+                operation,
+                "The connected Spoolman server does not support NFC tag APIs. Update it to a tag-enabled build.");
+        }
+
+        throw new SpoolmanApiException(
+            response.StatusCode,
+            operation,
+            ParseSpoolmanErrorDetail(body));
+    }
+
+    private static bool IsMissingTagEndpoint(string body)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(body);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("detail", out JsonElement detail)
+                && detail.ValueKind == JsonValueKind.String
+                && string.Equals(detail.GetString(), "Not Found", StringComparison.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <inheritdoc/>
     public async Task<SpoolmanSpoolDto> CreateSpoolInSpoolmanAsync(SpoolmanSpoolRequest request, CancellationToken ct)
     {
         SpoolmanConfigDto? cfg = GetConfig();
@@ -1761,8 +2146,8 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         cts.CancelAfter(TimeSpan.FromSeconds(15));
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Delete, url);
-        HttpResponseMessage response = await http.SendAsync(httpRequest, cts.Token);
-        response.EnsureSuccessStatusCode();
+        using HttpResponseMessage response = await http.SendAsync(httpRequest, cts.Token);
+        await EnsureSpoolmanSuccessAsync(response, $"delete spool {spoolId}", cts.Token);
     }
 
     /// <inheritdoc/>

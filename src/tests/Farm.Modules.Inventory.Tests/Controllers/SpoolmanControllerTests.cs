@@ -61,6 +61,10 @@ public class SpoolmanControllerTests
     [InlineData(nameof(SpoolmanController.TestAsync))]
     [InlineData(nameof(SpoolmanController.ClearConfigAsync))]
     [InlineData(nameof(SpoolmanController.ScanNetworkAsync))]
+    [InlineData(nameof(SpoolmanController.DeleteFilamentAsync))]
+    [InlineData(nameof(SpoolmanController.BulkDeleteFilamentsAsync))]
+    [InlineData(nameof(SpoolmanController.PreviewFilamentDeleteAsync))]
+    [InlineData(nameof(SpoolmanController.ConfirmFilamentDeleteAsync))]
     public void PrivilegedNetworkAndConfigurationActions_RequireAdmin(string methodName)
     {
         // Issue #1467: these actions used to be gated by the "RequireAdmin" role-backed policy
@@ -74,6 +78,55 @@ public class SpoolmanControllerTests
 
         Assert.Equal("spoolman", attribute.Resource);
         Assert.Equal("admin", attribute.Action);
+    }
+
+    [Fact]
+    public async Task PreviewFilamentDeleteAsync_ArchivedSpools_ReturnsReferencesWithoutDeleting()
+    {
+        var preview = new SpoolmanFilamentDeletePreview(0, [3, 5]);
+        _spoolmanServiceMock.Setup(s => s.PreviewFilamentDeleteAsync(10, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(preview);
+
+        ActionResult<SpoolmanFilamentDeletePreview> result = await _controller.PreviewFilamentDeleteAsync(10, CancellationToken.None);
+
+        Assert.Same(preview, Assert.IsType<OkObjectResult>(result.Result).Value);
+        _spoolmanServiceMock.Verify(s => s.DeleteFilamentWithArchivedSpoolsAsync(
+            It.IsAny<int>(), It.IsAny<int[]>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ConfirmFilamentDeleteAsync_ExplicitConsent_PassesOnlyConfirmedIds()
+    {
+        int[] ids = [3, 5];
+
+        IActionResult result = await _controller.ConfirmFilamentDeleteAsync(
+            10, new SpoolmanConfirmFilamentDeleteRequest(ids), CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(result);
+        _spoolmanServiceMock.Verify(s => s.DeleteFilamentWithArchivedSpoolsAsync(10, ids, CancellationToken.None), Times.Once);
+    }
+
+    [Fact]
+    public async Task ConfirmFilamentDeleteAsync_MissingConsent_RejectsWithoutDeleting()
+    {
+        IActionResult result = await _controller.ConfirmFilamentDeleteAsync(
+            10, new SpoolmanConfirmFilamentDeleteRequest(null!), CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        _spoolmanServiceMock.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ConfirmFilamentDeleteAsync_ChangedSpools_ReturnsActionableReason()
+    {
+        _spoolmanServiceMock.Setup(s => s.DeleteFilamentWithArchivedSpoolsAsync(10, It.IsAny<int[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("The filament's spool list changed. Review confirmation again."));
+
+        IActionResult result = await _controller.ConfirmFilamentDeleteAsync(
+            10, new SpoolmanConfirmFilamentDeleteRequest([3]), CancellationToken.None);
+
+        var failure = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Contains("spool list changed", System.Text.Json.JsonSerializer.Serialize(failure.Value));
     }
 
     [Fact]

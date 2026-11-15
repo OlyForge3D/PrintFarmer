@@ -20,4 +20,11 @@ public interface IGcodeThumbnailExtractorService
     /// <param name="gcodeContent">The G-code text content to extract thumbnail from.</param>
     /// <param name="ct">Cancellation token for the operation.</param>
     Task<string?> ExtractAndSaveThumbnailFromTextAsync(string gcodeContent, CancellationToken ct = default);
+
+    /// <summary>
+    /// Saves the thumbnail from metadata that has already been extracted.
+    /// </summary>
+    /// <param name="metadata">Previously extracted metadata, or null when extraction was unavailable.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    Task<string?> SaveThumbnailAsync(GcodeMetadataExtracted? metadata, CancellationToken ct = default);
 }

@@ -21,11 +21,11 @@ async function mountSidebar(page: Page, scope: 'system' | 'user' = 'system') {
 }
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 600 }]) {
-  test(`admin sidebar scrolls to System Config without moving content at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+  test(`admin sidebar scrolls to System without moving content at ${viewport.width}x${viewport.height}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await mountSidebar(page);
     const nav = page.getByRole('navigation', { name: 'Farm & Admin Settings categories' });
-    await expect(nav.getByRole('button', { name: 'Farm Defaults', exact: true })).toBeVisible();
+    await expect(nav.getByRole('button', { name: 'Farm Identity', exact: true })).toBeVisible();
     const scroller = nav.locator(':scope > div');
     const dimensions = await scroller.evaluate(element => ({
       client: element.clientHeight,
@@ -40,20 +40,20 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 600
     await nav.hover();
     await page.mouse.wheel(0, dimensions.scroll);
     await expect.poll(() => scroller.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
-    const system = nav.getByRole('button', { name: 'System Config', exact: true });
+    const system = nav.getByRole('button', { name: 'System', exact: true });
     await expect(system).toBeInViewport();
     await system.click();
     await expect(page.getByRole('status', { name: 'Selected destination' }))
-      .toHaveText('/admin/settings?tab=general&sub=system');
+      .toHaveText('/admin/settings?tab=system');
     expect(await page.locator('.pf-settings-scroll-pane').evaluate(element => element.scrollTop)).toBe(0);
 
     await scroller.evaluate(element => { element.scrollTop = 0; });
-    await nav.getByRole('button', { name: 'Farm Defaults', exact: true }).focus();
+    await nav.getByRole('button', { name: 'Farm Identity', exact: true }).focus();
     await page.keyboard.press('End');
     await expect(system).toBeFocused();
     await expect(system).toBeInViewport();
     await page.keyboard.press('Home');
-    await expect(nav.getByRole('button', { name: 'Farm Defaults', exact: true })).toBeFocused();
+    await expect(nav.getByRole('button', { name: 'Farm Identity', exact: true })).toBeFocused();
     expect(await scroller.evaluate(element => element.scrollTop)).toBe(0);
     expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight)).toBe(true);
   });
@@ -69,20 +69,20 @@ test('a short personal navigation list keeps its content height instead of filli
   expect(await nav.locator(':scope > div').evaluate(element => element.scrollHeight === element.clientHeight)).toBe(true);
 });
 
-test('mobile navigation still scrolls to System Config and restores trigger focus', async ({ page }) => {
+test('mobile navigation still scrolls to System and restores trigger focus', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 600 });
   await mountSidebar(page);
-  const trigger = page.getByRole('button', { name: 'Settings section: Farm Defaults', exact: true });
+  const trigger = page.getByRole('button', { name: 'Settings section: Farm Identity', exact: true });
   await trigger.click();
   const menu = page.getByRole('navigation', { name: 'Settings categories', exact: true });
-  const system = menu.getByRole('button', { name: 'System Config', exact: true });
+  const system = menu.getByRole('button', { name: 'System', exact: true });
   await system.scrollIntoViewIfNeeded();
   await expect(system).toBeInViewport();
   await system.click();
   await expect(menu).not.toBeVisible();
   await expect(trigger).toBeFocused();
   await expect(page.getByRole('status', { name: 'Selected destination' }))
-    .toHaveText('/admin/settings?tab=general&sub=system');
+    .toHaveText('/admin/settings?tab=system');
 });
 
 for (const width of [390, 1440]) {

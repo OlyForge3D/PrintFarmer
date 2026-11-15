@@ -67,7 +67,6 @@ public class GcodeFilesServiceTests
         var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
         var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
         var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
-        var chunkedUpload = new Mock<IChunkedUploadService>(MockBehavior.Strict);
 
         string storageDir = Path.Join(Path.GetTempPath(), "pfarm-gcode-tests", Guid.NewGuid().ToString());
         storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
@@ -82,7 +81,7 @@ public class GcodeFilesServiceTests
             originalFileName: "missing.gcode",
             thumbnailPath: null,
             virtualDirectory: "/jobs",
-            chunkedUploadService: chunkedUpload.Object,
+            metadata: null,
             ct: CancellationToken.None);
 
         // Assert
@@ -432,10 +431,6 @@ public class GcodeFilesServiceTests
         storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
         var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
         var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
-        var chunkedUpload = new Mock<IChunkedUploadService>(MockBehavior.Strict);
-        chunkedUpload.Setup(c => c.ExtractMetadataFromFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(metadata);
-
         Mock<IFolderManagementService> mockFolderService = CreateFolderServiceMock("prints/models");
         var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
         var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockFolderService.Object, CreateStoredFileOperationsServiceMock().Object, new Mock<IPrintFarmerTelemetryService>(MockBehavior.Loose).Object);
@@ -446,7 +441,7 @@ public class GcodeFilesServiceTests
             originalFileName: "cool-model.gcode",
             thumbnailPath: thumbnailSource,
             virtualDirectory: "/prints/models/",
-            chunkedUploadService: chunkedUpload.Object,
+            metadata: metadata,
             ct: CancellationToken.None);
 
         // Assert

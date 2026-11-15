@@ -363,10 +363,11 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
         {/* Template selector (create mode only) */}
         {!isEditMode && templates.length > 0 && (
           <div>
-            <label className="block text-sm font-medium text-pf-text-primary mb-1">
+            <label htmlFor="project-template" className="block text-sm font-medium text-pf-text-primary mb-1">
               Start from Template
             </label>
             <Select
+              id="project-template"
               value={selectedTemplate}
               onChange={(e) => handleTemplateChange(e.target.value)}
               className="bg-pf-bg-2 border-pf-border rounded-lg! px-3! py-2!"
@@ -424,10 +425,11 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
         {/* Priority, Status, and Due Date row */}
         <div className={`grid gap-4 ${isEditMode ? 'grid-cols-3' : 'grid-cols-2'}`}>
           <div>
-            <label className="block text-sm font-medium text-pf-text-primary mb-1">
+            <label htmlFor="project-priority" className="block text-sm font-medium text-pf-text-primary mb-1">
               Priority
             </label>
             <Select
+              id="project-priority"
               value={priority}
               onChange={(e) => setPriority(Number(e.target.value))}
               className="bg-pf-bg-2 border-pf-border rounded-lg! px-3! py-2!"
@@ -442,10 +444,11 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
           {/* Status (edit mode only) */}
           {isEditMode && (
             <div>
-              <label className="block text-sm font-medium text-pf-text-primary mb-1">
+              <label htmlFor="project-status" className="block text-sm font-medium text-pf-text-primary mb-1">
                 Status
               </label>
               <Select
+                id="project-status"
                 value={status}
                 onChange={(e) => setStatus(e.target.value as PrintProjectStatus)}
                 className="bg-pf-bg-2 border-pf-border rounded-lg! px-3! py-2!"

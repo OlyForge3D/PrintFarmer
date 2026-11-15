@@ -135,6 +135,7 @@ public sealed class OctoPrintWebSocketAdapter(
             {
                 try
                 {
+                    DateTime observationStartedAtUtc = DateTime.UtcNow;
                     long? originWatermark = await OriginWatermark
                         .CaptureAsync(watermarkReader, _logger, "OctoPrint WebSocket status", ct)
                         .ConfigureAwait(false);
@@ -153,7 +154,7 @@ public sealed class OctoPrintWebSocketAdapter(
                         string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
                         _logger.LogDebug("OctoPrint WebSocket {PrinterId}: Received message: {Value1}...", _printerId, message.Substring(0, Math.Min(100, message.Length)));
 
-                        await HandleWebSocketMessageAsync(message, originWatermark, ct);
+                        await HandleWebSocketMessageAsync(message, originWatermark, observationStartedAtUtc, ct);
                         _consecutiveFailures = 0;
                     }
                 }
@@ -196,10 +197,12 @@ public sealed class OctoPrintWebSocketAdapter(
     /// </summary>
     /// <param name="message">The raw WebSocket message to handle.</param>
     /// <param name="originWatermark">Watermark captured before receiving the message.</param>
+    /// <param name="observationStartedAtUtc">Time captured before receiving this live message.</param>
     /// <param name="ct">Cancellation token for the async operation.</param>
     private async Task HandleWebSocketMessageAsync(
         string message,
         long? originWatermark,
+        DateTime observationStartedAtUtc,
         CancellationToken ct)
     {
         try
@@ -214,7 +217,7 @@ public sealed class OctoPrintWebSocketAdapter(
                 OctoPrintStatusData? printerStatus = ParsePrinterStatus(currentObj);
                 if (printerStatus != null)
                 {
-                    await BroadcastStatusAsync(printerStatus, originWatermark, ct);
+                    await BroadcastStatusAsync(printerStatus, originWatermark, observationStartedAtUtc, ct);
                 }
             }
             else if (root.TryGetProperty("reauthRequired", out _))
@@ -235,10 +238,12 @@ public sealed class OctoPrintWebSocketAdapter(
     /// </summary>
     /// <param name="status">The OctoPrint status data to broadcast.</param>
     /// <param name="originWatermark">Watermark captured before observing the status.</param>
+    /// <param name="observationStartedAtUtc">Start of the live observation, preserved through enrichment.</param>
     /// <param name="ct">Cancellation token for the async operation.</param>
     private async Task BroadcastStatusAsync(
         OctoPrintStatusData status,
         long? originWatermark,
+        DateTime observationStartedAtUtc,
         CancellationToken ct)
     {
         try
@@ -271,7 +276,7 @@ public sealed class OctoPrintWebSocketAdapter(
 
             // Update cache before broadcasting to clients
             _statusCacheWriter.UpdateStatus(
-                cacheUpdate with { RawActivityState = status.State }, originWatermark);
+                cacheUpdate with { RawActivityState = status.State, ObservationStartedAtUtc = observationStartedAtUtc }, originWatermark);
 
             // Create SignalR update (PrinterStatusUpdate - includes HomedAxes)
             var signalRUpdate = new PrinterStatusUpdate(

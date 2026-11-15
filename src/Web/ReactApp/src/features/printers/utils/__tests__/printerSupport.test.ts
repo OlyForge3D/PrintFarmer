@@ -1,5 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { canMove, canSetStep, canUseManualMove, getPrinterSupport } from '../printerSupport';
+import { canEmergencyStop, canMove, canSetStep, canUseManualMove, getPrinterSupport } from '../printerSupport';
+
+describe('printerSupport emergency-stop gating', () => {
+  const support = getPrinterSupport();
+
+  it('keeps emergency stop available for an online Out of Service printer', () => {
+    expect(canEmergencyStop({ isOnline: true, isEnabled: false, support })).toBe(true);
+  });
+
+  it('does not offer emergency stop while offline', () => {
+    expect(canEmergencyStop({ isOnline: false, isEnabled: false, support })).toBe(false);
+  });
+
+  it('does not offer emergency stop without backend control support', () => {
+    expect(canEmergencyStop({
+      isOnline: true,
+      isEnabled: false,
+      support: { ...support, supportsControlOperations: false },
+    })).toBe(false);
+  });
+});
 
 describe('printerSupport movement gating (#1909)', () => {
   const support = getPrinterSupport();

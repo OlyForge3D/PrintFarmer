@@ -2,6 +2,13 @@
 
 ### Features
 
+- Regroup admin settings into Failure Detection, Costs & Energy, Planning,
+  Operator Features and a single System page (#3745). Move browser slicer modes
+  into Slicing, auto-tagging/custom fields into Data, and global maintenance
+  policy into Maintenance Settings. Combine NFC readers and bindings on one
+  Hardware page. Remove duplicate farm-rate editors while retaining per-record
+  overrides, persisted setting keys/API contracts and bounded legacy-link/pin migration.
+
 - Route Obico monitoring per print instead of permanently pinning printers
   (#3693). Reserve healthy pool capacity through warmup, pauses, and API
   restarts; release it when prints end. Unavailable monitoring never blocks
@@ -75,6 +82,12 @@
   genesis before its four general slots become operational.
 
 ### Fixes
+
+- Reject passkey login for inactive accounts without issuing access or refresh
+  tokens. Main-API bearer authentication now checks current account status so
+  previously issued tokens stop working after deactivation (#3652). Recognized
+  account-store failures are logged and fail closed without masking cancellation
+  or unrelated programming errors.
 
 - Preserve native filament setting types when saving editor changes, including
   boolean vectors, percent suffixes and unedited extruder entries (#3643).

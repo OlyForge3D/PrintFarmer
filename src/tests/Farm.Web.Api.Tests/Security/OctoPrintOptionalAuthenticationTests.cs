@@ -14,6 +14,7 @@ using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Repositories.Api;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Security;
+using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Quota;
@@ -60,6 +61,7 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
     private readonly Mock<IGcodeFilesService> _files = new(MockBehavior.Strict);
     private readonly Mock<IJobQueueService> _queue = new(MockBehavior.Strict);
     private readonly Mock<IRateLimitService> _rateLimits = new();
+    private readonly Mock<ITokenRevocationService> _tokenRevocationService = new();
     private readonly IHost _host;
     private HttpClient _client = null!;
     private OctoPrintSettings _settings = new();
@@ -67,6 +69,11 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
 
     public OctoPrintOptionalAuthenticationTests()
     {
+        _tokenRevocationService
+            .Setup(service => service.IsTokenRevokedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        string databaseName = $"octoprint-optional-auth-{Guid.NewGuid()}";
         var settingsService = new Mock<ISettingsService>();
         settingsService.Setup(service => service.Get<OctoPrintSettings>()).Returns(() => _settings);
         _users.Setup(repository => repository.GetUserEntityAsync(_userId, It.IsAny<CancellationToken>()))
@@ -114,7 +121,9 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
             .ConfigureServices((context, services) =>
             {
                 services.AddPrintFarmerAuthentication(context.Configuration, context.HostingEnvironment);
+                services.AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase(databaseName));
                 services.AddLogging();
+                services.AddSingleton(_tokenRevocationService.Object);
                 services.AddSingleton<CapturingWarningLoggerProvider>();
                 services.AddSingleton<ILoggerProvider>(serviceProvider =>
                     serviceProvider.GetRequiredService<CapturingWarningLoggerProvider>());
@@ -147,6 +156,17 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await _host.StartAsync();
+        using IServiceScope scope = _host.Services.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        db.Users.Add(new User
+        {
+            Id = _userId,
+            Username = "slicer-user",
+            Email = "slicer-user@example.com",
+            PasswordHash = "unused",
+            IsActive = true
+        });
+        await db.SaveChangesAsync();
         _client = _host.GetTestClient();
     }
 
@@ -389,7 +409,7 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
 
         using HttpResponseMessage response = await UploadAsync();
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         AssertNoSideEffects();
     }
 

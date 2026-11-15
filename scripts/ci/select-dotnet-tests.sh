@@ -360,7 +360,7 @@ load_changed_files() {
 #                     create-npm-notices.mjs, mirroring the Docker build) and
 #                     want_dependency_compliance, but never the .NET build.
 #   docs            — docs/**, *.md, LICENSE, .editorconfig outside src/
-#   frontend        — src/Web/**
+#   frontend        — src/Web/**, site/**
 #   api             — src/api/**
 #   infra           — src/infra/** (conservatively includes App model drift).
 #                     Selects Farm.Infrastructure.Tests (issue #2033) directly;
@@ -614,8 +614,8 @@ classify_path() {
     docs/*|*.md|LICENSE|.gitignore|.gitattributes|.editorconfig)
       printf 'docs' ; return ;;
 
-    # Frontend.
-    src/Web/*)
+    # Frontend and static marketing site.
+    src/Web/*|site/*)
       printf 'frontend' ; return ;;
   esac
 

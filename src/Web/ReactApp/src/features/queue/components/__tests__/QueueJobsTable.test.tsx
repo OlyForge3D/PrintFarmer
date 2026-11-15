@@ -728,7 +728,7 @@ describe("QueueJobsTable Component", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Move second.gcode up" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Move up second.gcode" })).toBeEnabled();
     const source = container.querySelector('[data-job-id="job-2"]');
     const target = container.querySelector('[data-job-id="job-1"]');
     expect(source).not.toBeNull();

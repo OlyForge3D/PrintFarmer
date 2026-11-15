@@ -10,6 +10,16 @@ gh issue view <number>
 
 For more information, see GitHub CLI documentation: https://cli.github.com/manual/gh_issue
 
+## Native Design Authority
+
+For native UI work, use [PRODUCT.md](PRODUCT.md) and [DESIGN.md](DESIGN.md)
+with the SwiftUI source as the platform-specific product and design authority.
+The design document captures incumbent components rather than authorizing a
+redesign. Follow the UI shape and review ceremony in
+[`../.squad/ceremonies.md`](../.squad/ceremonies.md) and
+[`../.squad/ralph-instructions.md`](../.squad/ralph-instructions.md).
+Source-only review does not replace simulator, accessibility or device evidence.
+
 ## Simulator Testing
 
 Use the shared resolver, not a name-only destination. The approved default is

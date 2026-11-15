@@ -86,6 +86,9 @@ public interface IQueueRepository
     /// <param name="ct">Cancellation token for async operation</param>
     Task<List<PrintJob>> GetPrintJobsForPrinterAsync(Guid printerId, CancellationToken ct);
 
+    /// <summary>Reads only occupying, queued, and assigned job facts in bounded printer-ID batches.</summary>
+    Task<List<IdleWindowJobInput>> GetIdleWindowJobInputsAsync(IReadOnlyCollection<Guid> printerIds, CancellationToken ct);
+
     /// <summary>
     /// Get the currently printing or starting job for a printer.
     /// </summary>

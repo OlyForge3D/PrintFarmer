@@ -18,6 +18,16 @@ Authorization: Bearer <token>
 
 Tokens are obtained via login and typically stored in secure HttpOnly cookies.
 
+Passkey login requires a currently active account; disabled accounts receive
+neither an access token nor a refresh token. The main API checks persisted account
+status on every bearer authentication, including SignalR connection requests.
+Previously issued access tokens are rejected once the account is deactivated.
+Recognized database/store failures are logged with their original exception and
+fail authentication closed. Unrecognized or untyped infrastructure failures
+propagate as server errors and never authorize the token. Caller cancellation
+and unrelated programming errors also propagate rather than becoming
+account-rejection responses.
+
 Controller actions fail closed through a global authorization fallback policy.
 Only explicitly reviewed actions opt out, including authentication and first-run
 setup flows, health and capability probes, browser thumbnail resources, and
@@ -44,6 +54,42 @@ See [bootstrap configuration](GETTING_STARTED.md#first-administrator-bootstrap-p
 when the host environment is `Development`. The effective bypass state is logged
 at startup, and a configured bypass is ignored in every other environment.
 
+## Spoolman NFC tags
+
+`POST /api/spoolman/tags/scan` resolves an NFC UID against Spoolman's persistent
+tag mapping. It accepts `{ "uid": "E0040108662F6FBC" }` and optional
+`format`/`payloadB64` fields. Scans are non-mutating: an unknown UID returns
+null matches and does not create a tag binding or spool. A known UID resolves
+to at most one spool or filament. Tag-link operations use the existing
+`spoolman:admin` permission:
+
+| Route | Request | Result |
+| --- | --- | --- |
+| `POST /api/spoolman/spools/{id}/tag` | `{ "uid": "E0040108662F6FBC" }` | `204` when linked |
+| `DELETE /api/spoolman/spools/{id}/tag/{uid}` | — | `204` when unlinked |
+
+CoreNFC UIDs are sent as uppercase hexadecimal in the byte order returned by
+the platform. For ISO15693, this is the canonical E0-first UID; readers that
+report a different order must normalize at their device boundary. UID identity
+is separate from NDEF contents and spool/printer/tray context.
+
+OpenPrintTag scans send only the payload from an
+`application/vnd.openprinttag` NDEF MIME record as base64 with
+`format: "openprinttag"`. The Scan API never creates a mapping implicitly;
+unknown tags require an explicit link or a user-confirmed create-and-link flow.
+Filament-linked tags open spool intake for that filament and retain their
+filament binding. The iOS writer emits CBOR using the OpenPrintTag
+specification source pinned at
+[`060e420`](https://github.com/OpenPrintTag/openprinttag-specification/tree/060e420892d66c062c8af440c97701aab96bac79).
+The specification has no separate wire-version field. OpenPrintTag writing is
+for NFC-V/ISO15693 tags; legacy OpenSpool and prior PrintFarmer tag content
+remain readable.
+
+An attached Spoolman instance must provide the tag scan and link endpoints. An
+older Spoolman deployment returns an explicit endpoint error; PrintFarmer does
+not treat that failure as an unknown UID or silently fall back to embedded
+payload identity.
+
 ## Response Format
 
 All API responses use camelCase JSON (for TypeScript compatibility):
@@ -61,6 +107,14 @@ Connection credentials and private service addresses are write-only configuratio
 Printer, slicer, worker, queue, artifact, capability, and real-time response
 contracts never return API keys, usernames, passwords, worker keys, internal
 paths, backend endpoints, or private service URLs.
+
+`GET /api/printers` includes `ipAddress` for each accessible printer when its
+stored connection URL has a numeric IPv4 or IPv6 host. The value is only the
+normalized address (IPv6 without brackets), never a URL, port, path, query,
+fragment or embedded credentials. Hostnames are not resolved during list
+requests; hostname-only, missing, invalid and non-HTTP(S) addresses return no IP
+value. The field is independent of online status and does not restore the
+suppressed `backendUrl`, `originalServerUrl` or credentials.
 
 ## User Printer-Control Preference
 
@@ -1841,6 +1895,29 @@ validation, storage, cancellation, or database commit fails.
 ```
 
 The updated ETag is also returned in the `ETag` response header.
+
+### Add Local-Library G-code Files to a Project
+
+The Files page's Add to Project action sends one
+`POST /api/projects/{id}/files` with the complete nonempty array of file requests.
+All request fields are forwarded, including material, filament, quantity,
+notes and plate metadata. Empty client selections return `[]` without a request
+(the endpoint itself rejects an empty list with `400 Bad Request`).
+
+The existing endpoint skips missing G-code IDs, files already in the project
+and repeated IDs within the batch. Its response is the actual added DTO array,
+with no guaranteed ordering; the success notification counts those DTOs, not
+selected IDs, including zero when everything was skipped. On success the client
+invalidates the `['projects']` and `['project', projectId]` query keys.
+
+Unlike the former serial single-file requests, the batch uses at most one
+database save, not independently committed per-file additions. HTTP failures
+propagate to the existing error notification, leave the modal open and do not
+trigger success invalidations or automatic singleton retries. True single-file
+callers retain their singleton helper.
+
+For 50 selections this reduces POST count from 50 to 1 (98% fewer requests),
+not a measured wall-clock speedup.
 
 ### Bulk Delete Local-Library Files
 

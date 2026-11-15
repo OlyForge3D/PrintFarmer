@@ -26,8 +26,8 @@ import { Button, FormField, Input, Select, Textarea } from '@/common/components/
 import { DashboardWidget } from '@/common/components/DashboardWidget';
 import { Modal } from '@/common/components/modals/Modal';
 import {
-  describeTaskSource,
   formatTaskAnchorHint,
+  describeTaskSource,
   getAnchorGroupLabel,
   getShiftTaskDetails,
 } from '../shiftPlanTaskDetails';
@@ -94,8 +94,6 @@ function TaskItem({
   const isActionable = !details.isUnknownKind;
   const isRowBusy = pendingActionTaskIds.has(task.id);
 
-  const ariaLabel = `${task.title} — ${sourceLabel}${anchorHint ? `, ${anchorHint}` : ''}`;
-
   const handleActivate = () => {
     onNavigate(task);
   };
@@ -130,17 +128,17 @@ function TaskItem({
         className={buttonClasses}
         onClick={handleActivate}
         disabled={!isActionable}
-        aria-label={ariaLabel}
         aria-busy={isRowBusy || undefined}
         data-testid="tasks-widget-row-primary"
       >
-        <div className="shrink-0 mt-0.5">
+        <div className="shrink-0 mt-0.5" aria-hidden="true">
           <div className="p-2 rounded-lg bg-pf-warning/10">
             <TaskTypeIcon taskType={task.taskType} className="h-5 w-5 text-pf-warning" />
           </div>
         </div>
         <div className="flex-1 min-w-0">
           <h4 className="text-sm font-medium text-pf-text-primary truncate">{task.title}</h4>
+          <span className="sr-only"> — {sourceLabel}</span>
           {task.description && (
             <p className="text-xs text-pf-text-secondary mt-0.5 line-clamp-2">{task.description}</p>
           )}

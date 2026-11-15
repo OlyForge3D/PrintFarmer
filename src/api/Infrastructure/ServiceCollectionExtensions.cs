@@ -229,6 +229,7 @@ public static class ServiceCollectionExtensions
 
         // Optional barcode scan diagnostics
         _ = services.AddScoped<IBarcodeScanLogService, Farm.Infrastructure.Services.Spoolman.BarcodeScanLogService>();
+        _ = services.AddScoped<IScanCodeAliasService, Farm.Infrastructure.Services.Spoolman.ScanCodeAliasService>();
 
         // Auto-dispatch trigger (singleton event bus between scoped services and background service)
         var autoDispatchTrigger = new Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchTrigger();
@@ -660,6 +661,9 @@ public static class ServiceCollectionExtensions
 
         // Register the printer status cache (singleton in Infrastructure - shared across all layers)
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.PrinterStatusCache>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.PrinterMonitoringService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterMonitoringReader>(
+            sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterMonitoringService>());
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusSnapshotReader>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheWriter>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());

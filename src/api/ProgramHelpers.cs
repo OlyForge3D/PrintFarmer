@@ -240,6 +240,15 @@ internal static class ProgramHelpers
             OnTokenValidated = async context =>
             {
                 string sub = context.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "<none>";
+                string? accountFailure = await JwtAccountEligibility.GetFailureAsync(
+                    context.HttpContext, context.Principal,
+                    startupUls ?? startupLogger ?? context.HttpContext.RequestServices.GetService<ILogger<Program>>());
+                if (accountFailure is not null)
+                {
+                    context.Fail(accountFailure);
+                    return;
+                }
+
                 string roles = string.Join(',', context.Principal?.FindAll(System.Security.Claims.ClaimTypes.Role)?.Select(c => c.Value) ?? Array.Empty<string>());
                 try
                 {
@@ -275,28 +284,37 @@ internal static class ProgramHelpers
                     token ??= context.SecurityToken?.ToString();
                     if (!string.IsNullOrEmpty(token))
                     {
-                        ITokenRevocationService? tokenRevocationService = context.HttpContext.RequestServices.GetService<ITokenRevocationService>();
-                        if (tokenRevocationService != null)
+                        ITokenRevocationService tokenRevocationService = context.HttpContext.RequestServices.GetRequiredService<ITokenRevocationService>();
+                        bool isRevoked = await tokenRevocationService.IsTokenRevokedAsync(token, context.HttpContext.RequestAborted);
+                        if (isRevoked)
                         {
-                            bool isRevoked = await tokenRevocationService.IsTokenRevokedAsync(token);
-                            if (isRevoked)
+                            if (startupUls != null)
                             {
-                                if (startupUls != null)
-                                {
-                                    startupUls.LogWarning("[JWT][OnTokenValidated] Token revoked for user: {Sub}", sub);
-                                }
-                                else
-                                {
-                                    startupLogger?.LogWarning("[JWT][OnTokenValidated] Token revoked for user: {User}", sub);
-                                }
-
-                                context.Fail("This token has been revoked.");
+                                startupUls.LogWarning("[JWT][OnTokenValidated] Token revoked for user: {Sub}", sub);
                             }
+                            else
+                            {
+                                startupLogger?.LogWarning("[JWT][OnTokenValidated] Token revoked for user: {User}", sub);
+                            }
+
+                            context.Fail("This token has been revoked.");
                         }
                     }
                 }
-                catch
+                catch (Exception ex) when (AuthenticationStoreFailure.IsRecoverable(ex, context.HttpContext.RequestAborted))
                 {
+                    context.Fail("Token revocation status could not be verified.");
+                    ILogger? errorLogger = startupLogger
+                        ?? context.HttpContext.RequestServices.GetService<ILoggerFactory>()
+                            ?.CreateLogger("Farm.Web.Api.JwtBearer");
+                    if (startupUls != null)
+                    {
+                        startupUls.LogError(ex, "[JWT][OnTokenValidated] Token revocation status could not be verified");
+                    }
+                    else
+                    {
+                        errorLogger?.LogError(ex, "[JWT][OnTokenValidated] Token revocation status could not be verified");
+                    }
                 }
             },
             OnChallenge = context =>

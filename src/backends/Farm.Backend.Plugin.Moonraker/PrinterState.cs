@@ -7,6 +7,8 @@ internal sealed class PrinterState
 {
     public long? OriginWatermark { get; private set; }
 
+    public DateTime? ObservationStartedAtUtc { get; set; }
+
     public void IncludeOrigin(long? originWatermark)
     {
         OriginWatermark = originWatermark;

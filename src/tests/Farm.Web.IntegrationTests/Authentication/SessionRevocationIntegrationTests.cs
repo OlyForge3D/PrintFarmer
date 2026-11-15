@@ -19,6 +19,7 @@ namespace Farm.Web.Api.Tests.Authentication;
 [Collection("Sequential")]
 public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicationFactory>
 {
+    private static int _nextClientIpSuffix;
     private readonly CustomWebApplicationFactory _factory;
 
     public SessionRevocationIntegrationTests(CustomWebApplicationFactory factory)
@@ -26,7 +27,13 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
         _factory = factory;
     }
 
-    private HttpClient CreateClient() => _factory.CreateClient();
+    private HttpClient CreateClient()
+    {
+        HttpClient client = _factory.CreateClient();
+        int suffix = Interlocked.Increment(ref _nextClientIpSuffix) % 254 + 1;
+        client.DefaultRequestHeaders.Add("X-Forwarded-For", $"192.0.2.{suffix}");
+        return client;
+    }
 
     [Fact]
     public async Task RevokeAllUserSessions_ShouldInvalidateTokens()
@@ -61,6 +68,53 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", userToken);
         HttpResponseMessage afterRevocationResponse = await client.GetAsync("/api/users");
         _ = afterRevocationResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "revoked token should be rejected");
+    }
+
+    [Fact]
+    public async Task AdminPasswordChange_RevokesAccessAndRefreshTokens()
+    {
+        using HttpClient client = CreateClient();
+        (string? adminToken, _) = await CreateAdminUserAsync();
+        string username = $"admin-password-{Guid.NewGuid():N}";
+        (string? userToken, Guid userId) = await CreateRegularUserAsync(
+            username,
+            $"{username}@example.com",
+            "TestPassword123!");
+
+        HttpResponseMessage loginResponse = await client.PostAsJsonAsync(
+            "/api/auth/login",
+            new { usernameOrEmail = username, password = "TestPassword123!" });
+        loginResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        AuthenticationResult userLogin = (await loginResponse.Content.ReadFromJsonAsync<AuthenticationResult>())!;
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+        using HttpResponseMessage changeResponse = await client.PostAsJsonAsync(
+            $"/api/users/{userId}/change-password",
+            new { newPassword = "ChangedPassword123!", confirmNewPassword = "ChangedPassword123!" });
+        string changeResponseBody = await changeResponse.Content.ReadAsStringAsync();
+        changeResponse.StatusCode.Should().Be(HttpStatusCode.OK, because: changeResponseBody);
+
+        foreach (string? token in new[] { userToken, userLogin.Token })
+        {
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            using HttpResponseMessage me = await client.GetAsync("/api/auth/me");
+            me.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+
+        client.DefaultRequestHeaders.Authorization = null;
+        using HttpResponseMessage oldRefresh = await client.PostAsJsonAsync(
+            "/api/auth/refresh",
+            new { refreshToken = userLogin.RefreshToken });
+        oldRefresh.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+        using HttpResponseMessage freshLogin = await client.PostAsJsonAsync(
+            "/api/auth/login",
+            new { usernameOrEmail = username, password = "ChangedPassword123!" });
+        freshLogin.StatusCode.Should().Be(HttpStatusCode.OK);
+        AuthenticationResult fresh = (await freshLogin.Content.ReadFromJsonAsync<AuthenticationResult>())!;
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", fresh.Token);
+        using HttpResponseMessage freshMe = await client.GetAsync("/api/auth/me");
+        freshMe.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [Fact]
@@ -246,6 +300,9 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
             // User might already exist, try login
             LoginRequest loginRequest = new LoginRequest { UsernameOrEmail = username, Password = password };
             HttpResponseMessage loginResponse = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
+            Assert.True(
+                loginResponse.IsSuccessStatusCode,
+                $"Login failed with {(int)loginResponse.StatusCode}: {await loginResponse.Content.ReadAsStringAsync()}");
             AuthenticationResult? loginResult = await loginResponse.Content.ReadFromJsonAsync<AuthenticationResult>();
             return (loginResult!.Token!, loginResult.User!.Id);
         }
@@ -267,6 +324,9 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
             // Login after activation
             LoginRequest loginRequest = new LoginRequest { UsernameOrEmail = username, Password = password };
             HttpResponseMessage loginResponse = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
+            Assert.True(
+                loginResponse.IsSuccessStatusCode,
+                $"Login failed with {(int)loginResponse.StatusCode}: {await loginResponse.Content.ReadAsStringAsync()}");
             AuthenticationResult? loginResult = await loginResponse.Content.ReadFromJsonAsync<AuthenticationResult>();
             return (loginResult!.Token!, loginResult.User!.Id);
         }
@@ -288,6 +348,9 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
             HttpClient client = CreateClient();
             LoginRequest loginRequest = new LoginRequest { UsernameOrEmail = "testadmin", Password = "AdminPassword123!" };
             HttpResponseMessage loginResponse = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
+            Assert.True(
+                loginResponse.IsSuccessStatusCode,
+                $"Login failed with {(int)loginResponse.StatusCode}: {await loginResponse.Content.ReadAsStringAsync()}");
             AuthenticationResult? loginResult = await loginResponse.Content.ReadFromJsonAsync<AuthenticationResult>();
             return (loginResult!.Token!, loginResult.User!.Id);
         }

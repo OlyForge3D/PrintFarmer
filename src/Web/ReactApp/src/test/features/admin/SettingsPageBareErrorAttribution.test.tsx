@@ -114,7 +114,12 @@ async function renderPage() {
   return result;
 }
 
-describe('SettingsPage — wrong-section error attribution', () => {
+describe.each(['legacy Axios', 'normalized ApiError'] as const)('SettingsPage — wrong-section error attribution (%s)', (errorShape) => {
+  const saveError = (data: { errors: Record<string, string>; message?: string }) =>
+    errorShape === 'normalized ApiError'
+      ? { statusCode: 400, message: data.message ?? 'Validation failed', data }
+      : { response: { data } };
+
   beforeEach(() => {
     window.localStorage.setItem('pf.settings.mode', 'everything');
     saveSettingsMock.mockReset();
@@ -128,9 +133,9 @@ describe('SettingsPage — wrong-section error attribution', () => {
     // metadata and picked the FIRST section that declared `enabled` — which
     // for this fixture is Obico, ordered before Telegram — so the error
     // rendered under the wrong control.
-    saveSettingsMock.mockRejectedValueOnce({
-      response: { data: { errors: { enabled: 'Bot token is required to enable Telegram' } } },
-    });
+    saveSettingsMock.mockRejectedValueOnce(saveError({
+      errors: { enabled: 'Bot token is required to enable Telegram' },
+    }));
 
     const { container } = await renderPage();
 
@@ -173,9 +178,9 @@ describe('SettingsPage — wrong-section error attribution', () => {
     // Backend returns a dotted key naming Obico even though the caller posted
     // Telegram (e.g. cross-section validation). The dotted key must win over
     // the default-section fallback.
-    saveSettingsMock.mockRejectedValueOnce({
-      response: { data: { errors: { 'ObicoSettings.enabled': 'Requires an Obico server URL' } } },
-    });
+    saveSettingsMock.mockRejectedValueOnce(saveError({
+      errors: { 'ObicoSettings.enabled': 'Requires an Obico server URL' },
+    }));
 
     const { container } = await renderPage();
     fireEvent.click(screen.getByLabelText('Telegram Enabled'));
@@ -210,14 +215,10 @@ describe('SettingsPage — wrong-section error attribution', () => {
     // reached the user only via the save banner — and only if the top-level `message` carried it,
     // which it didn't. This test locks in that the reason lands on the section itself.
     const reason = 'Bot token is required when Telegram is enabled.';
-    saveSettingsMock.mockRejectedValueOnce({
-      response: {
-        data: {
-          message: reason,
-          errors: { TelegramSettings: reason },
-        },
-      },
-    });
+    saveSettingsMock.mockRejectedValueOnce(saveError({
+      message: reason,
+      errors: { TelegramSettings: reason },
+    }));
 
     const { container } = await renderPage();
 

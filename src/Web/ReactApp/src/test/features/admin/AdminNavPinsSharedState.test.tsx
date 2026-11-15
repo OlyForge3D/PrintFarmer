@@ -249,6 +249,7 @@ describe('Admin nav pins: shared state across Control Center and Layout (Issue 2
         pinnedItemIds: [],
         adminPinnedItemIds: pinned ? ['ops-workers'] : [],
       });
+
       // Only a native event: the same-tab save helper must not mask a failure.
       localStorage.setItem(storageKey, newValue);
       fireEvent(window, createStorageEvent({ key: storageKey, newValue }));
@@ -263,6 +264,27 @@ describe('Admin nav pins: shared state across Control Center and Layout (Issue 2
       }
       expect(screen.queryByRole('link', { name: 'Projects' })).not.toBeInTheDocument();
     }
+  });
+
+  it('migrates legacy settings pins on the first provider render and persists canonical ids after unpinning', async () => {
+    seedPins('user-1', ['ops-workers', 'gen-farm', 'auto-costs', 'hw-nfc-bindings', 'hw-nfc']);
+    const user = userEvent.setup();
+    renderShell();
+
+    expect(pinsRenderLog[0]).toEqual(['ops-workers', 'auto-costs', 'hw-nfc']);
+    await screen.findByTestId('admin-hub-operations');
+    const adminRail = screen.getByRole('region', { name: 'Admin' });
+    expect(within(adminRail).getByRole('link', { name: 'Costs & Energy' }))
+      .toHaveAttribute('href', '/admin/settings?tab=costs');
+    expect(within(adminRail).getByRole('link', { name: 'NFC' }))
+      .toHaveAttribute('href', '/admin/settings?tab=hardware&sub=nfc');
+
+    await user.click(screen.getByRole('button', { name: 'Pin admin links' }));
+    await user.click(screen.getByRole('button', { name: 'Unpin Costs & Energy from navbar' }));
+    expect(within(adminRail).queryByRole('link', { name: 'Costs & Energy' })).not.toBeInTheDocument();
+    expect(within(adminRail).getAllByRole('link', { name: 'NFC' })).toHaveLength(1);
+    const saved = JSON.parse(localStorage.getItem(getNavPreferencesStorageKey('user-1')) ?? '{}');
+    expect(saved.adminPinnedItemIds).toEqual(['ops-workers', 'hw-nfc']);
   });
 
   it.each(['remove', 'clear', 'malformed'])('clears admin pins in every consumer on remote %s', async (reset) => {

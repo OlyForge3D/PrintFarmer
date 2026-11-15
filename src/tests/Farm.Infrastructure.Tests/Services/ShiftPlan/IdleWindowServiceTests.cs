@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.ShiftPlan;
@@ -82,6 +83,68 @@ public class IdleWindowServiceTests
         IReadOnlyList<IdleWindow> windows = await svc.GetIdleWindowsAsync(TimeSpan.FromMinutes(1));
 
         Assert.Empty(windows);
+    }
+
+    [Fact]
+    public async Task GetIdleWindowsAsync_AssignedJobWithNoEta_EmitsNoWindow()
+    {
+        SetupQueueData([BuildPrinter(autoDispatch: true)], [BuildJob(PrinterId, PrintJobStatus.Assigned, estimateMinutes: null)]);
+        SetupDb(globalEnabled: true, AutoDispatchMode.Auto, [], printerReady: true);
+
+        Assert.Empty(await BuildService().GetIdleWindowsAsync(TimeSpan.FromMinutes(1)));
+        _scorer.Verify(s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetIdleWindowsWithIndeterminateAsync_RecoveryBlockedGlobalCandidate_IsNotScored()
+    {
+        PrintJob blocked = BuildJob(null, PrintJobStatus.Queued);
+        blocked.BlockedReasonCode = JobBlockedReasonCode.OperatorRecoveryRequired;
+        SetupQueueData([BuildPrinter(autoDispatch: true)], []);
+        SetupDb(globalEnabled: true, AutoDispatchMode.Auto, [blocked], printerReady: true);
+
+        IdleWindowResult result = await BuildService().GetIdleWindowsWithIndeterminateAsync(TimeSpan.Zero);
+
+        Assert.False(Assert.Single(result.Windows).IsDispatchEligibleNow);
+        Assert.Empty(result.IndeterminatePrinterIds);
+        _scorer.Verify(s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetIdleWindowsWithIndeterminateAsync_BatchAndOriginScorer_UsesOldestInputOriginAndFixedClock()
+    {
+        PrintJob candidate = BuildJob(null, PrintJobStatus.Queued);
+        SetupQueueData([BuildPrinter(autoDispatch: true)], []);
+        SetupDb(globalEnabled: true, AutoDispatchMode.Auto, [candidate], printerReady: true);
+        var watermark = new Mock<IMutationWatermarkReader>();
+        watermark.Setup(r => r.GetCurrentAsync(It.IsAny<CancellationToken>())).ReturnsAsync(42);
+        var scorer = new Mock<IDispatchScorerWithOrigin>();
+        scorer.Setup(s => s.ScorePrintersForJobWithOriginAsync(candidate.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DispatchScoreResult([], 40));
+        DateTime now = new(2026, 11, 14, 20, 0, 0, DateTimeKind.Utc);
+        var service = new IdleWindowService(
+            _queue.Object, scorer.Object, _dbFactory.Object, NullLogger<IdleWindowService>.Instance,
+            watermark.Object, new FixedClock(now));
+
+        IdleWindowResult result = await service.GetIdleWindowsWithIndeterminateAsync(TimeSpan.Zero);
+
+        Assert.Equal(new IdleWindow(PrinterId, "TestPrinter", now, DateTime.MaxValue, false), Assert.Single(result.Windows));
+        Assert.Equal(40, result.OriginWatermark);
+        Assert.Empty(result.IndeterminatePrinterIds);
+        _queue.Verify(q => q.GetIdleWindowJobInputsAsync(
+            It.Is<IReadOnlyCollection<Guid>>(ids => ids.SequenceEqual(new[] { PrinterId })),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _queue.Verify(q => q.GetPrintJobsForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetIdleWindowsWithIndeterminateAsync_NoPrinters_DoesNotReadJobs()
+    {
+        SetupQueueData([], []);
+        IdleWindowResult result = await BuildService().GetIdleWindowsWithIndeterminateAsync(TimeSpan.Zero);
+        Assert.Empty(result.Windows);
+        Assert.Empty(result.IndeterminatePrinterIds);
+        _queue.Verify(q => q.GetIdleWindowJobInputsAsync(It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     /// <summary>
@@ -378,14 +441,9 @@ public class IdleWindowServiceTests
         _queue.Setup(q => q.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(printers);
 
-        foreach (Printer printer in printers)
-        {
-            List<PrintJob> jobsForPrinter = printerJobs
-                .Where(j => j.AssignedPrinterId == printer.Id)
-                .ToList();
-            _queue.Setup(q => q.GetPrintJobsForPrinterAsync(printer.Id, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(jobsForPrinter);
-        }
+        _queue.Setup(q => q.GetIdleWindowJobInputsAsync(It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(printerJobs.Select(j => new IdleWindowJobInput(
+                j.Id, j.AssignedPrinterId, j.Status, j.Priority, j.QueuePosition, j.QueuedAt)).ToList());
     }
 
     private void SetupDb(
@@ -442,4 +500,9 @@ public class IdleWindowServiceTests
             _scorer.Object,
             _dbFactory.Object,
             NullLogger<IdleWindowService>.Instance);
+
+    private sealed class FixedClock(DateTime now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => new(now);
+    }
 }

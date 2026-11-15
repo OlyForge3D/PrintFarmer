@@ -55,35 +55,44 @@ public class GcodeThumbnailExtractorService(
 
         try
         {
-            // Extract metadata which includes thumbnail
             GcodeMetadataExtracted extractedMetadata = await _metadataExtractor.ExtractMetadataAsync(gcodeContent);
+            return await SaveThumbnailAsync(extractedMetadata, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to extract and save thumbnail from G-code content");
+            return null;
+        }
+    }
 
-            if (extractedMetadata?.ThumbnailData == null || extractedMetadata.ThumbnailData.Length == 0)
-            {
-                _logger.LogDebug("No thumbnail data extracted from G-code content");
-                return null;
-            }
+    /// <inheritdoc />
+    public async Task<string?> SaveThumbnailAsync(GcodeMetadataExtracted? metadata, CancellationToken ct = default)
+    {
+        if (metadata?.ThumbnailData is not { Length: > 0 } thumbnailData)
+        {
+            _logger.LogDebug("No thumbnail data extracted from G-code content");
+            return null;
+        }
 
-            _logger.LogInformation("Found thumbnail data: {Length} bytes", extractedMetadata.ThumbnailData.Length);
+        try
+        {
+            _logger.LogInformation("Found thumbnail data: {Length} bytes", thumbnailData.Length);
 
-            // Create thumbnails directory if needed (same as GCODE files directory now)
             string thumbnailDir = _storagePathService.GetThumbnailDirectory();
             _logger.LogInformation("Using thumbnail directory: {ThumbnailDir}", thumbnailDir);
             _ = Directory.CreateDirectory(thumbnailDir);
 
-            // Save thumbnail with temporary GUID name - will be renamed by FinalizeChunkedUploadAsync
-            // to match the GCODE file ID with _thumb.png suffix
             string thumbnailFileName = $"{Guid.NewGuid()}_thumb.png";
             string thumbnailPath = Path.Join(thumbnailDir, thumbnailFileName);
 
-            await File.WriteAllBytesAsync(thumbnailPath, extractedMetadata.ThumbnailData, ct);
+            await File.WriteAllBytesAsync(thumbnailPath, thumbnailData, ct);
             _logger.LogInformation("Extracted and saved thumbnail to {ThumbnailPath}", thumbnailPath);
 
             return thumbnailPath;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to extract and save thumbnail from G-code content");
+            _logger.LogWarning(ex, "Failed to save extracted G-code thumbnail");
             return null;
         }
     }

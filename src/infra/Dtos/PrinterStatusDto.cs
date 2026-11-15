@@ -49,6 +49,10 @@ public record PrinterStatusDto(
     [JsonIgnore]
     public string? RawActivityState { get; init; }
 
+    /// <summary>Producer evidence captured before a live backend observation, never on cache replay.</summary>
+    [JsonIgnore]
+    public DateTime? ObservationStartedAtUtc { get; init; }
+
     /// <summary>
     /// Backend-neutral sensors and fans (issue #3406), bounded and deduplicated by
     /// <see cref="PrinterSensorNormalizer"/> on assignment. Empty for backends without sensor telemetry.
