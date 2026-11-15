@@ -4,8 +4,11 @@ using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Farm.Backend.Plugin.Core;
+using Farm.Backend.Plugin.Moonraker;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers;
+using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
@@ -16,6 +19,7 @@ using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Settings;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -450,11 +454,8 @@ public class FilamentCoverageSpoolResolverTests
         await using AppDbContext db = CreateContext();
         db.Printers.Add(PrinterWithSpool("http://moon.local", PrinterBackend.Moonraker, 42));
         await db.SaveChangesAsync();
-        Mock<IBackendClientFactory> factory = new();
-        Exception failure = unsupportedBackend
-            ? new ArgumentException("unsupported backend")
-            : new InvalidOperationException("backend not registered");
-        factory.Setup(service => service.GetClient((int)PrinterBackend.Moonraker)).Throws(failure);
+        using ServiceProvider provider = new ServiceCollection().BuildServiceProvider();
+        BackendClientFactory factory = CreateBackendFactory(!unsupportedBackend, provider);
         Mock<ISpoolmanService> central = new();
         central.Setup(service => service.GetConfig()).Returns(new SpoolmanConfigDto("http://central.local"));
         central.Setup(service => service.ListSpoolsAsync(
@@ -463,7 +464,7 @@ public class FilamentCoverageSpoolResolverTests
             .ReturnsAsync(SpoolmanReadResult.Ok<SpoolmanSpoolDto>([Spool(42, 321)], 1));
         FilamentCoverageSpoolResolver resolver = new(
             central.Object,
-            factory.Object,
+            factory,
             NullLogger<FilamentCoverageSpoolResolver>.Instance,
             db);
         CanonicalSpoolIdentity native = new(SpoolSourceKind.MoonrakerNative, "http://moon.local", 42);
@@ -478,25 +479,56 @@ public class FilamentCoverageSpoolResolverTests
         result[managed].ErrorReason.Should().BeNull();
     }
 
-    [Fact]
-    public async Task ResolveAsync_UnexpectedNativeFactoryFailure_Propagates()
+    [Theory]
+    [InlineData("wrapped")]
+    [InlineData("invalid-operation")]
+    [InlineData("argument")]
+    [InlineData("cancellation")]
+    public async Task ResolveAsync_UnexpectedNativeFactoryFailure_Propagates(string failureKind)
     {
         await using AppDbContext db = CreateContext();
         db.Printers.Add(PrinterWithSpool("http://moon.local", PrinterBackend.Moonraker, 42));
         await db.SaveChangesAsync();
-        Mock<IBackendClientFactory> factory = new();
-        factory.Setup(service => service.GetClient((int)PrinterBackend.Moonraker))
-            .Throws(new NotSupportedException("unexpected failure"));
+        using CancellationTokenSource cancellation = new();
+        Exception failure = failureKind switch
+        {
+            "wrapped" => new NotSupportedException("unexpected activation failure"),
+            "invalid-operation" => new InvalidOperationException("unexpected activation failure"),
+            "argument" => new ArgumentException("unexpected activation failure"),
+            "cancellation" => new OperationCanceledException("cancelled activation", cancellation.Token),
+            _ => throw new ArgumentOutOfRangeException(nameof(failureKind)),
+        };
+        using ServiceProvider provider = new ServiceCollection()
+            .AddSingleton<IMoonrakerClient>(_ =>
+            {
+                if (failureKind == "cancellation")
+                {
+                    cancellation.Cancel();
+                }
+
+                throw failure;
+            })
+            .BuildServiceProvider();
+        BackendClientFactory factory = CreateBackendFactory(true, provider);
         FilamentCoverageSpoolResolver resolver = new(
             new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
-            factory.Object,
+            factory,
             NullLogger<FilamentCoverageSpoolResolver>.Instance,
             db);
         CanonicalSpoolIdentity identity = new(SpoolSourceKind.MoonrakerNative, "http://moon.local", 42);
 
-        Func<Task> resolve = async () => await resolver.ResolveAsync([identity], CancellationToken.None);
+        Func<Task> resolve = async () => await resolver.ResolveAsync([identity], cancellation.Token);
 
-        await resolve.Should().ThrowAsync<NotSupportedException>();
+        Exception? thrown = await Record.ExceptionAsync(resolve);
+        if (failureKind == "wrapped")
+        {
+            thrown.Should().BeOfType<InvalidOperationException>()
+                .Which.InnerException.Should().BeSameAs(failure);
+        }
+        else
+        {
+            thrown.Should().BeSameAs(failure);
+        }
     }
 
     [Fact]
@@ -1679,6 +1711,14 @@ public class FilamentCoverageSpoolResolverTests
                 FleetResolveTimeoutMs = fleetTimeoutMs,
             });
         return settings.Object;
+    }
+
+    private static BackendClientFactory CreateBackendFactory(bool registered, IServiceProvider provider)
+    {
+        Mock<IBackendPluginRegistry> registry = new();
+        registry.Setup(service => service.GetAllExtendedPlugins())
+            .Returns(registered ? [new MoonrakerBackendPlugin()] : []);
+        return new BackendClientFactory(provider, registry.Object, NullLogger<BackendClientFactory>.Instance);
     }
 
     private static AppDbContext CreateContext()

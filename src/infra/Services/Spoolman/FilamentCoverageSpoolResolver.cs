@@ -311,7 +311,7 @@ public sealed class FilamentCoverageSpoolResolver(
             {
                 client = _backendClientFactory.GetClient((int)PrinterBackend.Moonraker);
             }
-            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            catch (Exception ex) when (ex is UnsupportedBackendClientException or BackendClientNotRegisteredException)
             {
                 _logger.LogDebug(
                     ex,
