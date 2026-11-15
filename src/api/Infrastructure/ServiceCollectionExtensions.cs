@@ -485,8 +485,8 @@ public static class ServiceCollectionExtensions
 
         return new Fido2Configuration
         {
-            ServerDomain = relyingPartyId,
-            ServerName = GetConfigurationValueOrDefault(configuration, "WebAuthn:RelyingPartyName", "PrintFarmer"),
+            RPID = relyingPartyId,
+            RPName = GetConfigurationValueOrDefault(configuration, "WebAuthn:RelyingPartyName", "PrintFarmer"),
             Origins = new HashSet<string>
             {
                 origin,
