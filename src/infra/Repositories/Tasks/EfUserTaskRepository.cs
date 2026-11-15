@@ -70,6 +70,20 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
     }
 
     /// <inheritdoc />
+    public async Task<UserTask?> GetLatestDismissedByEntityAsync(UserTaskType taskType, string entityType, Guid entityId, CancellationToken ct = default)
+    {
+        return await _db.UserTasks.AsNoTracking()
+            .Where(t =>
+                t.TaskType == taskType &&
+                t.EntityType == entityType &&
+                t.EntityId == entityId &&
+                t.Status == UserTaskStatus.Dismissed)
+            .OrderByDescending(t => t.DismissedAt)
+            .ThenByDescending(t => t.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    /// <inheritdoc />
     public async Task<UserTask?> GetOpenBySourceAsync(UserTaskSourceKind sourceKind, string sourceId, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(sourceId))

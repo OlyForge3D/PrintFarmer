@@ -2070,7 +2070,8 @@ public class PrintersService(
                 null,
                 p.InMaintenance,
                 p.IsEnabled,
-                p.Model != null && p.ServiceState != null && p.ServiceState.LastModelSyncAt != null && p.Model.UpdatedAt > p.ServiceState.LastModelSyncAt))
+                p.Model != null && p.ServiceState != null && p.ServiceState.LastModelSyncAt != null && p.Model.UpdatedAt > p.ServiceState.LastModelSyncAt,
+                p.Model != null ? p.Model.UpdatedAt : null))
             .ToListAsync(ct);
 
         IReadOnlyDictionary<Guid, PrinterStatusDto> cachedStatuses = _statusCache.GetAllStatuses();

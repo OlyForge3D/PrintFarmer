@@ -126,7 +126,7 @@ public sealed class ProfileTaskScanBatchTests(ITestOutputHelper output)
                 int expectedAppSql = workload switch
                 {
                     "covered" => 1,
-                    "missing" => legacy ? 1 + (5 * models) + (6 * printers) : 1 + Chunks(models) + (6 * models),
+                    "missing" => legacy ? 1 + (6 * models) + (6 * printers) : 1 + Chunks(models) + (7 * models),
                     _ => legacy ? 1 + (5 * models) + printers : 1 + Chunks(models) + models
                 };
                 Assert.Equal(expectedAppSql, fixture.AppCommands.Total);
@@ -152,6 +152,48 @@ public sealed class ProfileTaskScanBatchTests(ITestOutputHelper output)
                 }
             }
         }
+    }
+
+    [Fact]
+    public async Task Scan_DismissedImportPersistsAcrossScans_NewPrinterGetsNewTask()
+    {
+        await using Fixture fixture = await Fixture.CreateAsync(2, 1);
+        await fixture.ScanAsync();
+        UserTask original = await fixture.App.UserTasks.SingleAsync();
+        original.Status = UserTaskStatus.Dismissed;
+        original.DismissedAt = DateTime.UtcNow;
+        await fixture.App.SaveChangesAsync();
+        fixture.App.ChangeTracker.Clear();
+        fixture.Reset();
+
+        await fixture.ScanAsync();
+        await fixture.ScanAsync();
+
+        Assert.Equal(1, await fixture.App.UserTasks.CountAsync());
+        Assert.Empty(fixture.Events);
+        Assert.Equal(0, fixture.AppCommands.TaskWrites);
+        Assert.Equal(0, fixture.CountEvents);
+
+        Printer addedPrinter = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "New fixture printer",
+            ModelId = fixture.ModelIds[0],
+            ManufacturerId = fixture.Printers[0].ManufacturerId,
+            ServerUrl = "http://fixture.invalid",
+        };
+        fixture.App.Printers.Add(addedPrinter);
+        await fixture.App.SaveChangesAsync();
+        fixture.App.ChangeTracker.Clear();
+
+        await fixture.ScanAsync();
+
+        UserTask newTask = await fixture.App.UserTasks.AsNoTracking().SingleAsync(t => t.Status == UserTaskStatus.Pending);
+        Assert.NotEqual(original.Id, newTask.Id);
+        Assert.Contains(addedPrinter.Id, JsonSerializer.Deserialize<Guid[]>(newTask.RelatedEntityIdsJson!)!);
+        Assert.Equal(UserTaskStatus.Dismissed, (await fixture.App.UserTasks.AsNoTracking().SingleAsync(t => t.Id == original.Id)).Status);
+        Assert.Single(fixture.Events);
+        Assert.Equal(1, fixture.CountEvents);
     }
 
     [Fact]

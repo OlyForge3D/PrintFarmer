@@ -83,6 +83,11 @@
 
 ### Fixes
 
+- Keep Printer Dashboard maintenance/configuration banner dismissals across
+  refresh without hiding newer catalog revisions; respect dismissed
+  profile-import tasks on periodic scans. Clarify missing-import tasks and use a
+  consistent responsive three-column widget grid (#3837).
+
 - Reject passkey login for inactive accounts without issuing access or refresh
   tokens. Main-API bearer authentication now checks current account status so
   previously issued tokens stop working after deactivation (#3652). Recognized

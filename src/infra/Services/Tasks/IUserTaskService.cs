@@ -171,7 +171,10 @@ public interface IUserTaskService
     /// </summary>
     Task<UserTaskDto> CreateOrUpdateProfileImportTaskAsync(CreateProfileImportTaskDto dto, CancellationToken ct = default);
 
-    /// <summary>Unions a model's printer group in one guarded logical mutation; unchanged unions do not write or broadcast.</summary>
+    /// <summary>
+    /// Unions a model's printer group in one guarded logical mutation; unchanged unions do not write or broadcast.
+    /// Returns an existing farm-wide dismissal unchanged when it covers every incoming printer.
+    /// </summary>
     Task<UserTaskDto> CreateOrUpdateProfileImportTaskAsync(CreateProfileImportTaskBatchDto dto, CancellationToken ct = default);
 
     /// <summary>

@@ -20,22 +20,33 @@ PrintFarmer uses a **component-based React architecture** with TypeScript for ty
 ## Page Structure
 
 ### Dashboard (Home)
-Main overview page showing all printers with real-time status.
+`PrinterDashboard.tsx` shows farm statistics and alert strips above six widgets.
+At widths of 1024px and up, the grid is Tasks / Active Jobs / Recent Prints, then
+Farm Cost / Background Services / Maintenance Alerts. It uses two columns from
+768px to 1023px, and one column below 768px.
 
-**Components:**
-- `Dashboard.tsx` - Main container
-- `PrinterGrid` - Grid layout of printers
-- `PrinterCard` - Individual printer display
-- `LocationFilter` - Filter by location dropdown
-- `JobQueue` - Active jobs panel
-- `HealthStatus` - System health indicator
+**Banner dismissal:** maintenance and configuration dismissals are saved per
+signed-in user in this browser's local storage. They survive refresh, but do not
+sync across devices or hide the underlying maintenance/configuration views.
+New maintenance alerts, a new occurrence or severity change, and newer catalog
+revisions reappear. Successfully observing the condition resolved also resets its
+dismissal, including within the same visit. Failed requests do not reset it.
+Anonymous users and older servers without a catalog revision get session-only
+configuration dismissal. Storage failures show a warning and hide only for the
+current session. Dismiss does not complete maintenance or apply configuration.
+The existing maintenance severity selection is unchanged.
 
-**Features:**
-- Real-time printer status via SignalR
-- Filter by location
-- Quick job queue view
-- One-click print controls
-- Auto-refresh on status changes
+**Pending Tasks:** "Import slicer profiles" means the model lacks imported
+database machine/model profiles; it does not mean a worker-library profile upgrade
+was detected. The scanner checks at startup and every five minutes when slicer
+workers are registered. Import-task dismissals retain the existing **farm-wide**
+task scope: the same model/printer group is not regenerated, but a newly uncovered
+printer can create a task. Already-open tasks remain visible until acted on; the
+fix does not delete history or silently dismiss old duplicates.
+
+The printer summary API adds nullable `catalogUpdateRevision`, derived from the
+catalog model's update timestamp, so a newer update for the same printer is not
+confused with a previously dismissed one. No database migration is needed.
 
 ### Printer service status
 

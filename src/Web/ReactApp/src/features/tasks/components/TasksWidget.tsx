@@ -106,7 +106,7 @@ function TaskItem({
     .join(' ');
 
   const buttonClasses = [
-    'flex-1 flex items-start gap-3 text-left rounded-lg transition-colors',
+    'flex-1 min-w-0 flex items-start gap-3 text-left rounded-lg transition-colors',
     isActionable ? 'hover:bg-pf-bg-2 cursor-pointer' : '',
     'disabled:cursor-default disabled:opacity-100',
   ]
@@ -422,6 +422,11 @@ export function TasksWidget() {
           data-testid="tasks-widget-list"
           data-mode={data?.mode ?? 'unknown'}
         >
+          {groups.some(group => group.tasks.some(task => task.taskType === TaskType.ProfileImport)) && (
+            <p className="px-3 pt-3 pb-1 text-xs text-pf-text-secondary">
+              Profile import tasks mean missing imported profiles, not profile updates.
+            </p>
+          )}
           {groups.map((group) => (
             <section
               key={group.key}
