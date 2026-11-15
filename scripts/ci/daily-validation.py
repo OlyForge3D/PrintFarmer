@@ -614,7 +614,9 @@ class Run:
                       "--enable-orca-worker", "yes", "--include-discovery", "--include-moonraker-emulator",
                       "--exclude-monitoring", "--exclude-telemetry", "--output-dir", str(stack)],
                      "generate", 180, cwd=source)
-        shutil.copytree(source / "deploy/nginx", stack / "deploy/nginx")
+        nginx = stack / "deploy/nginx"
+        require(nginx.is_dir() and not nginx.is_symlink(),
+                "Compose generator must produce a real nginx configuration directory (not a symlink)")
         self.command(["bash", str(source / "scripts/generate-certs.sh"), str(stack / "deploy/nginx/certs")],
                      "certificates", cwd=source)
         self.command(["bash", "-lc", 'set -euo pipefail; source "$1/scripts/common-utils.sh"; '
