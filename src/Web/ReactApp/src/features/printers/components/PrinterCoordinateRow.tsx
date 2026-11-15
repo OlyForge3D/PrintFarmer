@@ -6,6 +6,7 @@ import { useMotionAction } from '@/features/printers/hooks/use-motion-action';
 import { usePrinterControlsMode } from '@/features/printers/hooks/use-printer-controls-mode';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { mutationErrorMessage } from '@/common/utils/mutationError';
+import { knownHomedAxes } from '@/features/printers/utils/homedAxes';
 
 type Axis = 'X' | 'Y' | 'Z';
 type Coordinate = number | string;
@@ -24,7 +25,7 @@ interface PrinterCoordinateRowProps {
   disabled: boolean;
 }
 
-export function PrinterCoordinateRow({ values, positions, onChange, onMove, onMoveTo, disabled }: PrinterCoordinateRowProps) {
+export function PrinterCoordinateRow({ values, positions, homedAxes, onChange, onMove, onMoveTo, disabled }: PrinterCoordinateRowProps) {
   const { mode: helpMode } = usePrinterControlsMode();
   const { hasPermission } = useAuth();
   const action = useMotionAction();
@@ -34,7 +35,8 @@ export function PrinterCoordinateRow({ values, positions, onChange, onMove, onMo
   const dirty = useRef<Partial<Record<Axis, boolean>>>({});
   const initial = useRef<Partial<Record<Axis, Coordinate>>>({});
   const blocked = disabled || action.pending || !hasPermission('queue', 'start');
-  const coordinateBlocked = blocked;
+  const homed = knownHomedAxes(homedAxes) ?? '';
+  const coordinateBlocked = (axis: Axis) => blocked || !homed.includes(axis.toLowerCase());
 
   const cancel = (axis: Axis) => {
     dirty.current[axis] = false;
@@ -47,7 +49,7 @@ export function PrinterCoordinateRow({ values, positions, onChange, onMove, onMo
     if (!dirty.current[axis]) return;
     // Consume this edit synchronously: Enter, disabled-input blur and Tab cannot replay it.
     dirty.current[axis] = false;
-    if (coordinateBlocked) { cancel(axis); return; }
+    if (coordinateBlocked(axis)) { cancel(axis); return; }
     const value = values[axis];
     if (!isFiniteCoordinate(value)) {
       setInvalid(axis);
@@ -84,10 +86,10 @@ export function PrinterCoordinateRow({ values, positions, onChange, onMove, onMo
         {axes.map(axis => (
           <div key={`${mode}-${axis}`} className="min-w-0">
             <MovementInput axis={axis} coordinateMode={mode} currentPosition={positions?.[axis]}
-              disabled={coordinateBlocked} value={values[axis]} step={0.1}
+              disabled={coordinateBlocked(axis)} value={values[axis]} step={0.1}
               onFocus={() => { initial.current[axis] = values[axis]; }}
               onChange={event => {
-                if (coordinateBlocked) return;
+                if (coordinateBlocked(axis)) return;
                 dirty.current[axis] = true;
                 setInvalid(null);
                 onChange(axis, event.target.value === '' ? '' : Number(event.target.value));
@@ -106,6 +108,9 @@ export function PrinterCoordinateRow({ values, positions, onChange, onMove, onMo
           </div>
         ))}
       </div>
+      {homed.length < axes.length && <p className="mt-1 text-xs text-pf-text-secondary">
+        Movement requires the printer to report the selected axis as homed.
+      </p>}
       {action.pending && <p role="status" className="mt-1 text-xs text-pf-text-secondary">Sending movement command…</p>}
       {invalid ? <p id={messageId} role="alert" className="mt-1 text-xs text-pf-error">Enter a finite number for {invalid}, or press Escape to cancel.</p>
         : helpMode === 'guided' ? <p id={messageId} className="mt-1 text-xs text-pf-text-secondary">

@@ -3493,7 +3493,7 @@ public class PrintersService(
 
             return await movement.HomeAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not PrinterBackendUnsupportedException)
         {
             _logger.LogWarning(ex, "Failed to send home command to printer {Id}", id);
             return false;
@@ -3532,7 +3532,7 @@ public class PrintersService(
 
             return await movement.HomeXYAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not PrinterBackendUnsupportedException)
         {
             _logger.LogWarning(ex, "Failed to home XY on printer {Id}", id);
             return false;
@@ -3571,7 +3571,7 @@ public class PrintersService(
 
             return false;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not PrinterBackendUnsupportedException)
         {
             _logger.LogWarning(ex, "Failed to home Z on printer {Id}", id);
             return false;
@@ -3661,6 +3661,11 @@ public class PrintersService(
                 return ok ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
             }
 
+            return PrinterControlOutcome.BackendUnsupported;
+        }
+        catch (PrinterBackendUnsupportedException)
+        {
+            _logger.LogInformation("Printer {Id} does not expose a native movement endpoint", id);
             return PrinterControlOutcome.BackendUnsupported;
         }
         catch (PrinterBackendBusyException)

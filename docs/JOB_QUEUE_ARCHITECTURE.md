@@ -254,9 +254,10 @@ ordinary HTTP using the configured credentials. Jog and absolute movement save
 and restore G-code state without a restore move. No position, homing, geometry,
 clearance, or temperature snapshot precedes an interactive command. Klipper
 decides whether motion is executable against its current state and configuration.
-Static native capabilities enable controls; telemetry remains observational,
-not an admission requirement. Relative jogging does not require absolute
-movement support. This is not a claim of collision-free motion or correct
+The API retains native motion semantics, but web jog and coordinate entry
+require explicit homing telemetry for the selected axis. Home acceptance is
+not homing evidence; unknown axes stay disabled. Relative jogging does not
+require absolute movement support. This is not a claim of collision-free motion or correct
 firmware configuration. Automated and calibration workflows retain their
 separate evidence requirements and attempt-bound lifecycle safeguards.
 

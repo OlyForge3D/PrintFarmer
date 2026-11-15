@@ -151,16 +151,31 @@ retry, replay after reconnect, or infer that motion stopped.
 
 Interactive motion sends the native command without a preceding position,
 homing, geometry, or clearance query. Firmware enforces its own motion rules.
-Relative movement reflects native transport support (including OctoPrint and
-PrusaLink); absolute movement is advertised separately and is not inferred from
-verified geometry. Automated and calibration protections remain separate.
+Relative movement reflects native transport support; absolute movement is
+advertised separately and is not inferred from verified geometry. PrusaLink
+variants are checked with a read-only request to the legacy printhead endpoint:
+a `405` identifies the legacy POST-only route, including PoorWSGI responses
+without `Allow`; an explicit `Allow` must include POST. Buddy firmware
+(including CORE One L) does not expose that endpoint, so Home and movement are
+unavailable; legacy Raspberry Pi PrusaLink retains its native controls.
+Discovery is bounded to three seconds. Definitive results are cached for one
+minute per printer, URL, revision, configuration revision and credential
+fingerprint; transient failures remain inconclusive and are not cached.
+Definitive `404`/`405` command rejections return an unsupported-command `502`,
+not an unknown-motion `503`. Lost responses still mean an unknown outcome and
+must never be retried automatically. Automated/calibration protections remain
+separate.
 
 The detailed card and sidebar offer Relative and Absolute coordinate entry.
 Tab/blur or Enter sends only the changed axis (`/move` for a relative distance,
 `/moveto` for an absolute target); omitted axes stay untouched. All coordinate
-fields accept finite numeric inputs without requiring homing/geometry telemetry.
-Offline/disabled printers, missing queue/start permission, unsupported movement,
-and a pending command disable entry. Escape and mode changes discard drafts.
+fields and jog buttons require affirmative homing telemetry for the selected
+axis. Unknown, malformed, or missing homing telemetry disables movement; known
+X/Y homing does not enable Z. Neither position coordinates nor Home acceptance
+prove homing. Home itself remains available when the native endpoint supports
+it, even before axes are homed. Offline/disabled printers, missing queue/start
+permission, unsupported or unresolved movement capabilities, and a pending
+command also disable entry. Escape and mode changes discard drafts.
 Enter followed by blur never repeats a move. Submitted fields clear, so another
 relative move requires a deliberate new edit; commands are never replayed.
 

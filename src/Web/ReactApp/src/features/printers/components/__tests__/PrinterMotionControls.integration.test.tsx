@@ -177,6 +177,9 @@ const capabilities = {
   supportsMovement: true,
   supportsRelativeMovement: true,
   supportsAbsoluteMovement: true,
+  supportsHoming: true,
+  supportsHomingXY: true,
+  supportsHomingZ: true,
   supportsExtrusion: true,
   supportsControlOperations: true,
   supportsTemperatureControl: true,
@@ -379,7 +382,7 @@ describe.each<Surface>(["detail", "sidebar"])(
       for (const input of screen.getAllByRole('spinbutton', { name: /absolute target/ })) expect(input).toBeDisabled();
     });
 
-    it.each(['Absolute', 'Relative'])('submits a deliberate %s edit even when homing telemetry is absent', async mode => {
+    it.each(['Absolute', 'Relative'])('submits a deliberate %s edit when its axis remains homed', async mode => {
       mockExecute.mockResolvedValue({ success: true });
       const { client, rerender } = render(<Controls surface={surface} />);
       fireEvent.click(screen.getByRole('button', { name: mode }));
@@ -393,6 +396,54 @@ describe.each<Surface>(["detail", "sidebar"])(
       fireEvent.keyDown(screen.getByLabelText(name), { key: 'Enter' });
       fireEvent.blur(screen.getByLabelText(name));
       await waitFor(() => expect(mockExecute).toHaveBeenCalledExactlyOnceWith({ kind: mode === 'Absolute' ? 'MoveTo' : 'Jog', x: 25 }));
+    });
+
+    it.each([undefined, '', 'unknown', 'xyzunknown', 'xy', 'x', 'yz', 'xz', 'ZyX'])(
+      'gates each jog direction and coordinate by affirmative homing (%s)',
+      homedAxes => {
+        render(<Controls surface={surface} overrides={{ homedAxes }} />);
+        const homed = typeof homedAxes === 'string' && /^[xyz]*$/i.test(homedAxes)
+          ? homedAxes.toLowerCase() : '';
+        for (const axis of ['X', 'Y', 'Z']) {
+          for (const direction of ['positive', 'negative']) {
+            const button = screen.getByRole('button', { name: `Jog ${axis} ${direction}` });
+            expect(button).toHaveProperty('disabled', !homed.includes(axis.toLowerCase()));
+            if (!homed.includes(axis.toLowerCase())) fireEvent.click(button);
+          }
+          expect(screen.getByLabelText(`${axis} absolute target`))
+            .toHaveProperty('disabled', !homed.includes(axis.toLowerCase()));
+        }
+        expect(screen.getByRole('button', { name: 'Home all axes' })).toBeEnabled();
+        expect(mockExecute).not.toHaveBeenCalled();
+      },
+    );
+
+    it('does not infer homing from accepting Home or receiving positions', async () => {
+      mockExecute.mockResolvedValue({ success: true });
+      render(<Controls surface={surface} overrides={{ homedAxes: undefined }} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Home all axes' }));
+      await waitFor(() => expect(mockExecute).toHaveBeenCalledExactlyOnceWith({ kind: 'HomeAll' }));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Home all axes' })).toBeEnabled());
+      for (const button of screen.getAllByRole('button', { name: /Jog [XYZ]/ })) expect(button).toBeDisabled();
+      for (const field of screen.getAllByRole('spinbutton', { name: /absolute target/ })) expect(field).toBeDisabled();
+    });
+
+    it('disables Home and motion when the printer does not expose a movement endpoint', () => {
+      render(<Controls surface={surface} movement={false} overrides={{ backend: PrinterBackend.PrusaLink }} />);
+      expect(screen.getByText(/Remote Home and jog controls are unavailable/)).toBeVisible();
+      for (const button of screen.getAllByRole('button', { name: /Home all axes|Home X\/Y|Home Z|Jog [XYZ]/ })) {
+        expect(button).toBeDisabled();
+        fireEvent.click(button);
+      }
+      expect(mockExecute).not.toHaveBeenCalled();
+    });
+
+    it('does not enable motion before native capabilities arrive, even with homed positions', () => {
+      render(surface === 'detail'
+        ? <DetailedPrinterCard printer={printer} />
+        : <PrinterDetailsSidebar printerId={printer.id} printer={printer} onClose={vi.fn()} />);
+      for (const button of screen.getAllByRole('button', { name: /Home all axes|Home X\/Y|Home Z|Jog [XYZ]/ })) expect(button).toBeDisabled();
+      expect(mockExecute).not.toHaveBeenCalled();
     });
 
     it.each([undefined, 0, 25])('allows extrusion with native support and hotend reading %s', async hotendTemp => {
