@@ -215,6 +215,9 @@ function getProcessLayerHeight(profile: OrcaProcessProfile): number {
 }
 
 const MODELS_LIST_BASIC_QUERY_KEY = ['modelsListBasic'];
+// Stable fallback for pending profile queries; an inline `= []` is a new array
+// each render and re-triggers the profile selection effects (#3833).
+const EMPTY_PROFILES: never[] = [];
 
 interface ProfileSelection {
   name: string;
@@ -392,7 +395,9 @@ export const NewSliceJobPage: React.FC = () => {
   const [machineSelection, setMachineSelection] = useState<ProfileSelection>({ name: '' });
   const selectedMachineProfileId = machineSelection.name;
   const setSelectedMachineProfileId = useCallback((name: string, customId?: string) => {
-    setMachineSelection({ name, customId });
+    // Bail out when unchanged: a fresh object would re-render and re-run the
+    // selection effects, which loop forever while profile queries are pending (#3833).
+    setMachineSelection((prev) => (prev.name === name && prev.customId === customId ? prev : { name, customId }));
   }, []);
   const [isMachinePickerOpen, setIsMachinePickerOpen] = useState(false);
   const [isCreateProfileFamilyOpen, setIsCreateProfileFamilyOpen] = useState(false);
@@ -400,7 +405,7 @@ export const NewSliceJobPage: React.FC = () => {
   const [filamentSelection, setFilamentSelection] = useState<ProfileSelection>({ name: '' });
   const selectedFilamentProfileId = filamentSelection.name;
   const setSelectedFilamentProfileId = useCallback((name: string, customId?: string) => {
-    setFilamentSelection({ name, customId });
+    setFilamentSelection((prev) => (prev.name === name && prev.customId === customId ? prev : { name, customId }));
   }, []);
 
   // Filament filter config (persisted in localStorage)
@@ -1057,7 +1062,7 @@ export const NewSliceJobPage: React.FC = () => {
 
   // Fetch machine profiles for the selected printer's model
   const {
-    data: machineProfilesData = [],
+    data: machineProfilesData = EMPTY_PROFILES,
     error: machineProfilesError,
     isLoading: isMachineProfilesLoading,
   } = useQuery<OrcaMachineProfile[], MachineProfilesQueryError>({
@@ -1140,11 +1145,11 @@ export const NewSliceJobPage: React.FC = () => {
 
   const {
     filamentProfilesQuery: {
-      data: filamentProfilesData = [],
+      data: filamentProfilesData = EMPTY_PROFILES,
       isLoading: isFilamentProfilesLoading,
     },
     processProfilesQuery: {
-      data: processProfilesData = [],
+      data: processProfilesData = EMPTY_PROFILES,
       isLoading: isProcessProfilesLoading,
     },
   } = useMachineCompatibleProfiles(selectedMachineNames, {
