@@ -343,6 +343,42 @@ public class UserTaskServiceTests
         _broadcasterMock.VerifyNoOtherCalls();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateOrUpdateProfileImportTaskAsync_SplitDismissalsCoverBatch_DoesNotRecreateOrBroadcast(bool dismissedDuringMerge)
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid firstPrinter = Guid.NewGuid();
+        Guid secondPrinter = Guid.NewGuid();
+        UserTask newer = CreateUserTask("Newer dismissal", UserTaskType.ProfileImport);
+        newer.Status = UserTaskStatus.Dismissed;
+        newer.RelatedEntityIdsJson = JsonSerializer.Serialize(new[] { firstPrinter });
+        UserTask older = CreateUserTask("Older dismissal", UserTaskType.ProfileImport);
+        older.Status = UserTaskStatus.Dismissed;
+        older.RelatedEntityIdsJson = JsonSerializer.Serialize(new[] { secondPrinter });
+        _repositoryMock.Setup(r => r.GetDismissedByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", modelId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([newer, older]);
+        if (dismissedDuringMerge)
+        {
+            UserTask stale = CreateUserTask("Stale", UserTaskType.ProfileImport);
+            stale.RelatedEntityIdsJson = JsonSerializer.Serialize(new[] { firstPrinter });
+            _repositoryMock.Setup(r => r.GetByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", modelId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(stale);
+            _repositoryMock.Setup(r => r.TryUpdateFieldsIfOpenAsync(
+                It.IsAny<UserTask>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(false);
+        }
+
+        UserTaskDto result = await _service.CreateOrUpdateProfileImportTaskAsync(
+            new CreateProfileImportTaskBatchDto(modelId, "MK4S", "Prusa", [firstPrinter, secondPrinter]));
+
+        Assert.Equal(older.Id, result.Id);
+        Assert.Equal(UserTaskStatus.Dismissed, result.Status);
+        _repositoryMock.Verify(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()), Times.Never);
+        _broadcasterMock.VerifyNoOtherCalls();
+    }
+
     [Fact]
     public async Task CreateOrUpdateProfileImportTaskAsync_WithNoExistingTask_CreatesNewTask()
     {

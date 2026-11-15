@@ -144,9 +144,10 @@ public class UserTaskService(
             ProfileImportEntityType,
             dto.PrinterModelId,
             ct);
+        HashSet<Guid> dismissedPrinterIds = [];
         foreach (UserTask dismissed in dismissals)
         {
-            HashSet<Guid> dismissedPrinterIds = ParseRelatedEntityIds(dismissed.RelatedEntityIdsJson).ToHashSet();
+            dismissedPrinterIds.UnionWith(ParseRelatedEntityIds(dismissed.RelatedEntityIdsJson));
             if (dto.PrinterIds.All(dismissedPrinterIds.Contains))
             {
                 return dismissed;
