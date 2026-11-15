@@ -154,9 +154,13 @@ homing, geometry, or clearance query. Firmware enforces its own motion rules.
 Relative movement reflects native transport support; absolute movement is
 advertised separately and is not inferred from verified geometry. PrusaLink
 variants are checked with a read-only request to the legacy printhead endpoint:
-only `405` with `Allow: POST` proves native motion support. Buddy firmware
+a `405` identifies the legacy POST-only route, including PoorWSGI responses
+without `Allow`; an explicit `Allow` must include POST. Buddy firmware
 (including CORE One L) does not expose that endpoint, so Home and movement are
 unavailable; legacy Raspberry Pi PrusaLink retains its native controls.
+Discovery is bounded to three seconds. Definitive results are cached for one
+minute per printer, URL, revision, configuration revision and credential
+fingerprint; transient failures remain inconclusive and are not cached.
 Definitive `404`/`405` command rejections return an unsupported-command `502`,
 not an unknown-motion `503`. Lost responses still mean an unknown outcome and
 must never be retried automatically. Automated/calibration protections remain

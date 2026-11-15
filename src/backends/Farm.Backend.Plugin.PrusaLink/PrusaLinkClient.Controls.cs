@@ -5,7 +5,7 @@ namespace Farm.Backend.Plugin.PrusaLink;
 public partial class PrusaLinkClient : ISupportsPrinterControlCapabilities, ISupportsMovementDiscovery
 {
     /// <inheritdoc />
-    public Task<bool> SupportsMovementAsync(
+    public Task<bool?> SupportsMovementAsync(
         string baseUrl,
         Farm.Infrastructure.Domain.PrinterCredential? credential,
         CancellationToken ct = default) =>

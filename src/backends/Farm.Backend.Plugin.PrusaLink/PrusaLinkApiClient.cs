@@ -1877,35 +1877,38 @@ public partial class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
     }
 
     /// <inheritdoc />
-    public async Task<bool> SupportsMovementAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
+    public async Task<bool?> SupportsMovementAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         string url = new Uri(EnsureBaseUri(baseUrl), "api/printer/printhead").ToString();
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, credentials);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3), _timeProvider);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
         try
         {
-            using HttpResponseMessage response = await GetClientForCredentials(credentials).SendAsync(request, ct);
+            using HttpResponseMessage response = await GetClientForCredentials(credentials).SendAsync(
+                request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
 
-            // Legacy PrusaLink recognizes this POST-only route; Buddy firmware returns 404.
-            if (response.StatusCode == HttpStatusCode.MethodNotAllowed &&
-                response.Content.Headers.Allow.Contains("POST", StringComparer.OrdinalIgnoreCase))
+            // PoorWSGI recognizes this POST-only route but omits Allow; Buddy returns 404.
+            if (response.StatusCode == HttpStatusCode.MethodNotAllowed)
             {
-                return true;
+                return response.Content.Headers.Allow.Count == 0 ||
+                    response.Content.Headers.Allow.Contains("POST", StringComparer.OrdinalIgnoreCase);
             }
 
             _logger.LogDebug(
                 "PrusaLink movement endpoint is unavailable at {BaseUrl} (HTTP {StatusCode})",
                 baseUrl, (int)response.StatusCode);
-            return false;
+            return response.StatusCode == HttpStatusCode.NotFound ? false : null;
         }
         catch (HttpRequestException exception)
         {
             _logger.LogWarning(exception, "Could not discover PrusaLink movement support at {BaseUrl}; controls remain disabled", baseUrl);
-            return false;
+            return null;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             _logger.LogWarning("PrusaLink movement discovery timed out at {BaseUrl}; controls remain disabled", baseUrl);
-            return false;
+            return null;
         }
     }
 

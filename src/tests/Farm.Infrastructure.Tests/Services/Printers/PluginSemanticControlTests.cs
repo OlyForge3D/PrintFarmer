@@ -350,13 +350,13 @@ public sealed class PluginSemanticControlTests
     [Theory]
     [InlineData(HttpStatusCode.MethodNotAllowed, "POST", true)]
     [InlineData(HttpStatusCode.MethodNotAllowed, "GET", false)]
-    [InlineData(HttpStatusCode.MethodNotAllowed, null, false)]
+    [InlineData(HttpStatusCode.MethodNotAllowed, null, true)]
     [InlineData(HttpStatusCode.NotFound, null, false)]
-    [InlineData(HttpStatusCode.Unauthorized, null, false)]
-    [InlineData(HttpStatusCode.ServiceUnavailable, null, false)]
-    [InlineData(HttpStatusCode.OK, null, false)]
-    public async Task PrusaLinkMovementDiscovery_EndpointResponse_RequiresExplicitPostSupportWithoutMotion(
-        HttpStatusCode status, string? allow, bool supported)
+    [InlineData(HttpStatusCode.Unauthorized, null, null)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, null, null)]
+    [InlineData(HttpStatusCode.OK, null, null)]
+    public async Task PrusaLinkMovementDiscovery_EndpointResponse_RecognizesLegacyRouteWithoutMotion(
+        HttpStatusCode status, string? allow, bool? supported)
     {
         using var handler = new CaptureHandler(status, allow: allow);
         using var http = new HttpClient(handler);
@@ -371,6 +371,31 @@ public sealed class PluginSemanticControlTests
         Assert.Equal(8080, request.Uri.Port);
         Assert.Equal("test-key", request.ApiKey);
         Assert.Null(request.Body);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PrusaLinkMovementDiscovery_HangingTransport_IsBoundedAndPreservesCallerCancellation(bool callerCancelled)
+    {
+        using var handler = new HangingMovementProbeHandler();
+        using var http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        var client = new PrusaLinkClient(http);
+        using var caller = new CancellationTokenSource();
+
+        Task<bool?> pending = client.SupportsMovementAsync("http://printer.local", null, caller.Token);
+        await handler.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        if (callerCancelled)
+        {
+            caller.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending.WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+        else
+        {
+            Assert.Null(await pending.WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+
+        Assert.True(handler.SendToken.IsCancellationRequested);
     }
 
     [Theory]
@@ -440,6 +465,22 @@ public sealed class PluginSemanticControlTests
     }
 
     private sealed record Request(Uri Uri, HttpMethod Method, string? ApiKey, JsonElement? Body);
+
+    private sealed class HangingMovementProbeHandler : HttpMessageHandler
+    {
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public CancellationToken SendToken { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Assert.Equal(HttpMethod.Get, request.Method);
+            SendToken = cancellationToken;
+            Entered.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.MethodNotAllowed);
+        }
+    }
 
     private sealed class CaptureHandler(
         HttpStatusCode status = HttpStatusCode.OK,

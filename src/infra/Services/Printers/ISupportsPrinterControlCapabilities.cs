@@ -12,8 +12,8 @@ public interface ISupportsPrinterControlCapabilities
 /// <summary>Read-only endpoint discovery for backends whose variants expose different motion APIs.</summary>
 public interface ISupportsMovementDiscovery
 {
-    /// <summary>Checks native movement availability without sending a physical command.</summary>
-    Task<bool> SupportsMovementAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default);
+    /// <summary>Checks native movement availability without motion; null means discovery was inconclusive.</summary>
+    Task<bool?> SupportsMovementAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default);
 }
 
 /// <summary>Fine-grained transport support; verified safety is discovered separately for each printer.</summary>
