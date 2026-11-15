@@ -226,6 +226,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   const [showSpoolPicker, setShowSpoolPicker] = useState(false);
   const [controlActionPending, setControlActionPending] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<{ printerId: string; jobName: string | null } | null>(null);
   const [temperatureActionPending, setTemperatureActionPending] = useState(false);
   const [localMovementActionPending, setMovementActionPending] = useState(false);
   const movementActionPending = localMovementActionPending || motion.blocked;
@@ -389,6 +390,10 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     [printer?.mmuStatus, printerDetails?.toolheads, printer?.currentSpoolId, printer?.modelName, printer?.spoolInfo],
   );
 
+  if (cancelTarget && cancelTarget.printerId !== printerId) {
+    setCancelTarget(null);
+  }
+
   // Guard early after all hooks are called
   if (!printerId) {
     return null;
@@ -440,6 +445,12 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   const canPauseOrResumeNow = canPauseOrResume({ isOnline, isEnabled, isPrinting, isPaused, support });
   const canCancelNow = canCancel({ isOnline, isEnabled, isPrinting, isPaused, support });
+  const currentJobName = printer.fileName ?? printer.jobName ?? null;
+  const canConfirmCancel = cancelTarget?.printerId === printerId
+    && cancelTarget.jobName === currentJobName && canCancelNow;
+  if (cancelTarget && !canConfirmCancel) {
+    setCancelTarget(null);
+  }
   const canEmergencyStopNow = canEmergencyStop({ isOnline, isEnabled, support });
   const canDisableMotorsNow = !motion.blocked && backendCapabilities?.supportsDisableMotors !== false && canDisableMotors({ isOnline, isEnabled, isPrinting, support });
   const canMoveNow = canMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
@@ -589,9 +600,15 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       }
       if (result && !result.success) {
         console.error(`Failed to ${action}:`, result.error);
+        if (action === 'cancel') {
+          toast.error(result.error || result.message || 'Failed to cancel print');
+        }
       }
     } catch (error) {
       console.error(`Error performing ${action}:`, error);
+      if (action === 'cancel') {
+        toast.error(mutationErrorMessage(error, 'Failed to cancel print'));
+      }
     } finally {
       setControlActionPending(false);
     }
@@ -898,7 +915,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 </ControlPadButton>
                 <ControlPadButton
                   disabled={controlActionPending || !canCancelNow}
-                  onClick={() => handleControlAction('cancel')}
+                  onClick={() => setCancelTarget({ printerId: printer.id, jobName: currentJobName })}
                   title="Cancel print"
                   aria-label="Cancel print"
                   padSize="small"
@@ -1384,6 +1401,36 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         onClose={() => setShowFiles(false)}
         printer={printer}
       />
+
+      <Modal
+        isOpen={!!cancelTarget && canConfirmCancel}
+        onClose={() => setCancelTarget(null)}
+        title="Cancel print?"
+        size="sm"
+        closeButtonClassName="min-w-11 min-h-11"
+        footer={(
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="secondary" className="min-w-11 min-h-11" onClick={() => setCancelTarget(null)}>
+              Keep printing
+            </Button>
+            <Button type="button" variant="danger" className="min-w-11 min-h-11" onClick={() => {
+              if (canConfirmCancel && !controlActionPending) {
+                setCancelTarget(null);
+                void handleControlAction('cancel');
+              }
+            }}>
+              Cancel print
+            </Button>
+          </div>
+        )}
+      >
+        <p className="text-sm text-pf-text-primary">
+          Cancel {currentJobName ? `"${currentJobName}"` : 'the current print'} on {printer.name}?
+        </p>
+        <p className="mt-2 text-xs text-pf-text-secondary">
+          This action cannot be undone.
+        </p>
+      </Modal>
 
       <Modal
         isOpen={objectToSkip !== null && support.supportsObjectExclusion && isActivePrintForObjectQuery}
