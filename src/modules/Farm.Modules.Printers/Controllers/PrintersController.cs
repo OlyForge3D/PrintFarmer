@@ -2839,7 +2839,7 @@ public partial class PrintersController(
                 accepted: false,
                 "backend_control_unsupported",
                 CancellationToken.None);
-            _logger.LogInformation("Printer {PrinterId} rejected unsupported operation {Operation}", printerId, operation);
+            _logger.LogInformation("Printer {PrinterId} rejected unsupported operation {Operation}", printerId, LogSanitizer.Sanitize(operation));
             return StatusCode(StatusCodes.Status502BadGateway, new CommandResult(false, exception.Message));
         }
         catch (OperationCanceledException)
