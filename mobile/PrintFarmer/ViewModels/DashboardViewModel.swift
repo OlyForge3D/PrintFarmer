@@ -699,7 +699,8 @@ final class DashboardViewModel {
         case .invalidURL, .invalidResponse, .notFound, .featureDisabled,
              .methodNotAllowed, .conflict, .partsInventoryConflict,
              .preconditionFailed, .preconditionRequired,
-             .clientError, .serverError, .unexpectedStatus, .staleServerResponse,
+             .clientError, .serverError, .serverErrorMessage, .unexpectedStatus,
+             .staleServerResponse,
              .insecureTransportBlocked, .certificateChanged, .certificateNotTrusted:
             return .serverError
         }

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-07T21:28:32Z",
+  "title": "Design System: PrintFarmer iOS",
+  "extensions": {},
+  "components": [],
+  "narrative": {
+    "overview": "Native farm-floor work uses scannable state, clear actions and familiar iOS interaction. Quiet, utilitarian and data-forward are source-based assumptions, not confirmed brand language.",
+    "keyCharacteristics": [
+      "Adaptive semantic colors",
+      "One-handed native interaction",
+      "Status expressed in text as well as color"
+    ],
+    "rules": [],
+    "dos": [
+      "Do use semantic adaptive colors and verify both appearances.",
+      "Do preserve Dynamic Type, VoiceOver, Reduce Motion and 44-point targets.",
+      "Do show honest offline, stale, unavailable and error states."
+    ],
+    "donts": [
+      "Don't use color alone to communicate status.",
+      "Don't replace native controls or gestures merely for visual novelty.",
+      "Don't treat an incumbent example as proof of contrast or device behavior; validate the affected surface."
+    ]
+  }
+}

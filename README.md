@@ -28,6 +28,10 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 
 ## ✨ Key Features
 
+**Farm Identity** - Customize the farm name and choose an IANA timezone from a
+filterable dropdown in Admin Control Center. Desktop/mobile web headers show the name and a DST-aware farm-local
+clock; existing schedules and UTC planning hours are unchanged.
+
 ✅ **Multi-Printer Dashboard** - Manage unlimited 3D printers from a single interface  
 ✅ **Real-time Updates** - SignalR WebSocket for live status (temperatures, progress, state)  
 ✅ **Hierarchical Location System** - Organize printers into custom hierarchies (Warehouse > Floor > Room > Rack)  
@@ -49,9 +53,28 @@ See [camera bed-clear evidence](./docs/AUTO_DISPATCH.md#camera-bed-clear-evidenc
 ✅ **Printer Calibration Context** - Verified Klipper readiness and credential-free upstream OrcaSlicer snapshots
 ✅ **Secure Versioned API** - Negotiated contracts, scoped permissions, and truthful operational capabilities
 ✅ **CSV Import/Export** - Bulk printer configuration management  
+✅ **Printer Service Status** - Mark printers In Service or Out of Service;
+out-of-service printers are excluded from dispatch and fleet availability alerts.
+See [printer service status](./docs/UI.md#printer-service-status).
 ✅ **Multi-Database Support** - SQLite, PostgreSQL, and SQL Server
 ✅ **Advisory Print Monitoring** - [Obico per-print capacity routing and independent PrintGuard alerts](./docs/OBICO_ML_API.md#per-print-obico-routing); neither automatically pauses printers
 ✅ **Production Ready** - Docker deployment, health checks, comprehensive monitoring
+
+Admin configuration has dedicated Failure Detection, Costs & Energy, Planning,
+Operator Features and System pages. Hardware combines NFC readers and bindings;
+Data groups tags, automatic tagging and custom fields. Global maintenance policy
+is in Maintenance's Settings tab. Cost/rate overrides stay with their owning
+records; [settings navigation and save boundaries](./docs/SETTINGS_ARCHITECTURE.md#category-cards--single-pane-mounting)
+describe the canonical destinations.
+
+### Filament deletion
+
+Filaments with active spools cannot be deleted. For archived-only spools,
+the web confirmation shows how many archived spools will be permanently removed
+with the filament and warns about NFC binding removal. Bulk deletion never removes spools;
+it reports which filaments must be reviewed individually. See the
+[filament deletion contract](./docs/API_REFERENCE.md#spoolman-filament-deletion)
+for confirmation, concurrency and partial-failure behavior.
 
 ### Moonraker temperature and sensor controls
 
@@ -241,6 +264,7 @@ See the **[Architecture Guide](./docs/ARCHITECTURE.md)** for system design, data
 **Implementation details:**
 - **[API Reference](./docs/API.md)** - REST endpoints and SignalR events
 - **[Design System](./docs/DESIGN_SYSTEM.md)** - UI component library, design tokens, theming
+- **[Automatic design gates](./docs/CI.md#automatic-ui-design-gates)** - Edit-time detection, native design guidance, and required UI review
 - **[UI Documentation](./docs/UI.md)** - Frontend components and pages
 
 **Operations:**
@@ -443,6 +467,23 @@ For complete Pi hardware recommendations, setup checklist, and troubleshooting, 
 - **Updates**: Regularly updated dependencies
 
 See **[Security Policy](./SECURITY.md)** for vulnerability reporting.
+
+### Request telemetry privacy
+
+API server spans omit query attributes (`http.request.query`, `url.query`) and
+strip query suffixes from current and legacy request URL attributes before
+export. This also applies when OpenTelemetry's ASP.NET Core query-redaction
+opt-out is enabled. Query values, including hub authentication tokens and viewer
+file paths, are intentionally unavailable for trace diagnostics; request handling
+is unchanged. HTTP method, status, and route-template diagnostics remain available.
+
+Tracing is skipped with `DISABLE_TELEMETRY=true` or the `Testing` environment.
+Console export still requires `OpenTelemetry:ConsoleExporter:Enabled=true` or
+`OTEL_CONSOLE_EXPORTER=true`; OTLP export requires `OpenTelemetry:OTLP:Endpoint`.
+Sampling and exporter settings are unchanged. This protects new request URL/query
+attributes, not arbitrary application log messages or previously exported data.
+Operators control historical retention and access; this change does not establish
+that a disclosure occurred or remove existing copies.
 
 ## 🤝 Contributing
 

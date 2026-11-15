@@ -1,6 +1,7 @@
 #if canImport(UIKit)
 import Foundation
 @preconcurrency import VisionKit
+import Vision
 import AVFoundation
 import UIKit
 
@@ -128,8 +129,12 @@ private final class BarcodeScanCoordinator: NSObject, DataScannerViewControllerD
         guard !hasResumed else { return }
         for item in addedItems {
             if case .barcode(let barcode) = item,
-               let payload = barcode.payloadStringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !payload.isEmpty {
+               let raw = barcode.payloadStringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !raw.isEmpty {
+                let payload = ScannedBarcodeNormalizer.payload(
+                    raw,
+                    isUPCE: barcode.observation.symbology == .upce
+                )
                 dataScanner.stopScanning()
                 dataScanner.dismiss(animated: true) {
                     self.resume(returning: .barcode(payload))

@@ -309,7 +309,7 @@
         "path": "src/tests/Farm.Web.Api.Tests/Security/PrinterEndpointRedactionTests.cs",
         "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
         "matchSha256": "2b37ca011dc0baf5ac3ceff7569d873e97e370f6c6cfa28ebfdc8fba20ed280a",
-        "contentSha256": "f78fbe104090c8dad65390659ff1fb508b3db167b307dc16a3f11188c5bb2850",
+        "contentSha256": "449456b4fb95ec2af4f1adba175501fe48164cc7b706dcafc524a3f1c5b11b38",
         "reason": "Synthetic printer credentials test endpoint redaction."
       },
       {

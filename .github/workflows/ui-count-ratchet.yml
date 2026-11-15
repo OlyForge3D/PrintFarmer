@@ -1,0 +1,134 @@
+name: UI full-source count ratchet
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-count-ratchet-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  count-ratchet:
+    name: Trusted UI count ceiling
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - name: Check out trusted default-branch tooling and allowance
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node without installing repository packages
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
+        with:
+          node-version: '24'
+
+      - name: Mark exact-head count evidence pending
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9
+        env:
+          TARGET_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          script: |
+            const head = process.env.TARGET_HEAD_SHA;
+            if (!/^[a-f0-9]{40}$/.test(head || '')) throw new Error('Invalid PR head.');
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha: head, state: 'pending', context: 'ui/full-source-count',
+              description: 'Trusted full-source UI count scan in progress.',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+
+      - name: Fetch immutable PR objects without checking out PR files
+        id: snapshot
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          TARGET_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          const number = process.env.PR_NUMBER;
+          const head = process.env.TARGET_HEAD_SHA;
+          if (!/^[1-9]\d*$/.test(number || '') || !/^[a-f0-9]{40}$/.test(head || '')) {
+            throw new Error('Invalid immutable PR identity.');
+          }
+          const git = args => execFileSync('git', ['--no-replace-objects', ...args], { encoding: 'utf8' }).trim();
+          const base = git(['rev-parse', 'HEAD']);
+          if (!/^[a-f0-9]{40}$/.test(base)) throw new Error('Invalid trusted checkout SHA.');
+          git(['-c', 'core.hooksPath=/dev/null', 'fetch', '--no-tags', 'origin', `refs/pull/${number}/head`]);
+          if (git(['rev-parse', 'FETCH_HEAD']) !== head) {
+            throw new Error('PR head moved while fetching; rerun for the new immutable head.');
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `trusted_base=${base}\n`);
+          NODE
+
+      - name: Enforce total unsuppressed finding ceiling
+        id: scan
+        env:
+          TRUSTED_BASE_SHA: ${{ steps.snapshot.outputs.trusted_base }}
+          TARGET_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          node scripts/design/ui-count-ratchet.mjs \
+            --trusted-base "$TRUSTED_BASE_SHA" --head "$TARGET_HEAD_SHA" \
+            --output "$RUNNER_TEMP/ui-count-ratchet.json"
+
+      - name: Record exact-head count result
+        if: always()
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9
+        env:
+          TARGET_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          TRUSTED_BASE_SHA: ${{ steps.snapshot.outputs.trusted_base }}
+          SCAN_OUTCOME: ${{ steps.scan.outcome }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const head = process.env.TARGET_HEAD_SHA;
+            if (!/^[a-f0-9]{40}$/.test(head || '')) {
+              core.setFailed('Invalid PR head; cannot publish count evidence.');
+              return;
+            }
+            let state = 'failure';
+            let description = 'UI count scan failed; inspect trusted workflow logs.';
+            const reportPath = path.join(process.env.RUNNER_TEMP, 'ui-count-ratchet.json');
+            try {
+              if (fs.existsSync(reportPath)) {
+                const result = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+                if (result.inspectedCommit !== head || result.trustedBase !== process.env.TRUSTED_BASE_SHA ||
+                    !['pass', 'fail'].includes(result.status) ||
+                    !Number.isSafeInteger(result.observed?.total) || !Number.isSafeInteger(result.ceiling)) {
+                  throw new Error('Invalid count result provenance.');
+                }
+                state = process.env.SCAN_OUTCOME === 'success' && result.status === 'pass' ? 'success' : 'failure';
+                description = `UI debt ${result.observed.total}/${result.ceiling}: ` +
+                  `${result.observed.blockers} blockers, ${result.observed.advisories} advisories`;
+                await core.summary.addHeading('Full-source UI count ceiling')
+                  .addRaw(`Head: ${head}\n\nTrusted base: ${result.trustedBase}\n\n${description}\n\n` +
+                    'Same-total swaps allowed. Static debt is not design/WCAG approval.').write();
+              }
+            } catch (error) {
+              state = 'failure';
+              description = 'UI count result invalid; no usable scan evidence.';
+              core.setFailed(error.message);
+            }
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha: head, state, context: 'ui/full-source-count',
+              description, target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+
+      - name: Preserve full scope and finding evidence
+        if: always() && steps.snapshot.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: ui-count-ratchet-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/ui-count-ratchet.json
+          if-no-files-found: warn
+          retention-days: 14

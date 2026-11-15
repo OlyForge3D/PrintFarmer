@@ -352,6 +352,18 @@ case_react_only() {
   assert_eq "matrix" "$(get_output "$out" matrix)" '{"include":[]}' || return 1
 }
 
+case_site_only_runs_frontend_checks() {
+  local out="$1"
+  CHANGED_FILES=$'site/index.html'
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_frontend" "$(get_output "$out" want_frontend)" "true" || return 1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "false" || return 1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "false" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+}
+
 case_docs_only() {
   local out="$1"
   CHANGED_FILES=$'README.md\ndocs/CI.md'
@@ -4051,6 +4063,7 @@ JSON
 
 TESTS=(
   case_react_only
+  case_site_only_runs_frontend_checks
   case_docs_only
   case_api_wire_contract_fixture_change_selects_producer_tests
   case_api_wire_contract_lookalikes_remain_inert

@@ -22,7 +22,9 @@ namespace Farm.Web.Api.Tests.Services;
 /// </remarks>
 public class SettingsMetadataAttributeTests
 {
-    private const int ExpectedDisplayLabelCount = 119;
+    // The 119 previously audited labels plus FarmIdentitySettings.FarmName ("Farm name")
+    // and FarmIdentitySettings.TimeZone ("Farm timezone"), introduced in #3747.
+    private const int ExpectedDisplayLabelCount = 121;
 
     private static readonly string[] CanonicalTerms =
     [

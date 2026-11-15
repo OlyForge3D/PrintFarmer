@@ -141,6 +141,7 @@ function buildBackendSettingsShape(): Map<string, Set<string>> {
     join(REPO_SRC_ROOT, 'api', 'Services'),
     join(REPO_SRC_ROOT, 'slicer'),
     join(REPO_SRC_ROOT, 'backends'),
+    join(REPO_SRC_ROOT, 'modules'),
   ];
 
   for (const root of candidateRoots) {

@@ -72,7 +72,7 @@ export function ConfirmEmailPage() {
               <h1 className="text-2xl font-bold text-pf-text-primary mb-2">
                 Email Confirmed!
               </h1>
-              <p className="text-pf-text-muted mb-6">
+              <p className="text-pf-text-secondary mb-6">
                 {message}
               </p>
               <Button
@@ -95,7 +95,7 @@ export function ConfirmEmailPage() {
               <h1 className="text-2xl font-bold text-pf-text-primary mb-2">
                 Confirmation Failed
               </h1>
-              <p className="text-pf-text-muted mb-6">
+              <p className="text-pf-text-secondary mb-6">
                 {message}
               </p>
               <div className="space-y-3">

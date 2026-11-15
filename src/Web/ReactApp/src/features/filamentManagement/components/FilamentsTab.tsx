@@ -17,6 +17,7 @@ import { Button, Select, FileUpload, HeaderActions, SearchField, SortControl, To
 import { Checkbox } from '@/common/components/ui/Checkbox';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
 import { classifyColor } from '@/common/utils/colorFamilies';
+import { getErrorMessage } from '@/common/utils/apiErrors';
 import { ColorFamilySelect } from '@/features/filamentManagement/components/ColorFamilySelect';
 import { FilamentCard } from '@/features/filamentManagement/components/FilamentCard';
 import { FilamentTableView } from '@/features/filamentManagement/components/FilamentTableView';
@@ -29,7 +30,7 @@ import { Modal } from '@/common/components/modals/Modal';
 import { apiClient } from '@/services/api';
 import { useExportSpoolmanFilamentsCsv, useImportSpoolmanFilamentsCsv, useDeleteFilament, useBulkDeleteFilaments } from '@/common/hooks/useApi';
 import { formatTemp, formatFilamentWeight, formatPrice, formatDiameter } from '@/features/filamentManagement/utils/formatters';
-import type { SpoolmanFilament } from '@/types/api';
+import type { SpoolmanFilament, SpoolmanFilamentDeletePreview } from '@/types/api';
 import type { FilamentTableColumn } from '@/features/filamentManagement/types';
 import { toast } from 'sonner';
 
@@ -109,6 +110,25 @@ export function FilamentsTab() {
   const importCsvMutation = useImportSpoolmanFilamentsCsv();
   const deleteFilamentMutation = useDeleteFilament();
   const bulkDeleteMutation = useBulkDeleteFilaments();
+  const [deletePreview, setDeletePreview] = useState<SpoolmanFilamentDeletePreview | null>(null);
+  const [deletePreviewError, setDeletePreviewError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDeletePreview(null);
+    setDeletePreviewError(null);
+    if (deleteConfirm?.type !== 'single') return;
+    const controller = new AbortController();
+    apiClient.previewFilamentDelete(deleteConfirm.filament.id, controller.signal)
+      .then(preview => {
+        if (!controller.signal.aborted) setDeletePreview(preview);
+      })
+      .catch((err: unknown) => {
+        if (!controller.signal.aborted) {
+          setDeletePreviewError(getErrorMessage(err, "Could not check the filament's spools. Close and try again."));
+        }
+      });
+    return () => controller.abort();
+  }, [deleteConfirm]);
 
   // --- Column configuration ---
   const [showColumnConfig, setShowColumnConfig] = useState(false);
@@ -373,24 +393,29 @@ export function FilamentsTab() {
   const handleConfirmDelete = async () => {
     if (!deleteConfirm) return;
     if (deleteConfirm.type === 'single') {
+      if (!deletePreview || deletePreview.activeSpoolCount > 0) return;
       try {
-        await deleteFilamentMutation.mutateAsync(deleteConfirm.filament.id);
+        await deleteFilamentMutation.mutateAsync({
+          id: deleteConfirm.filament.id,
+          archivedSpoolIds: deletePreview.archivedSpoolIds,
+        });
         toast.success(`Deleted "${deleteConfirm.filament.name || 'filament'}".`);
         reload();
-      } catch {
-        toast.error('Failed to delete filament.');
+      } catch (err) {
+        toast.error(`Failed to delete filament: ${getErrorMessage(err, 'Refresh inventory and try again.')}`, { duration: 10000 });
+        reload();
       }
     } else {
       try {
         const result = await bulkDeleteMutation.mutateAsync([...selectedIds]);
         if (result.errorCount > 0) {
-          toast.error(`Deleted ${result.updatedCount}, failed ${result.errorCount}.`);
+          toast.error(`Deleted ${result.updatedCount}, failed ${result.errorCount}. ${result.errors.join(' ')}`, { duration: 10000 });
         } else {
           toast.success(`Deleted ${result.updatedCount} filament${result.updatedCount !== 1 ? 's' : ''}.`);
         }
         reload();
-      } catch {
-        toast.error('Bulk delete failed.');
+      } catch (err) {
+        toast.error(`Bulk delete failed: ${getErrorMessage(err, 'Refresh inventory and try again.')}`);
       }
     }
     setDeleteConfirm(null);
@@ -833,27 +858,51 @@ export function FilamentsTab() {
       {/* Delete Confirmation Modal */}
       <Modal
         isOpen={deleteConfirm !== null}
-        onClose={() => setDeleteConfirm(null)}
+        onClose={() => { if (!isDeleting) setDeleteConfirm(null); }}
         title={deleteConfirm?.type === 'bulk' ? 'Delete Filaments?' : 'Delete Filament?'}
-        width="max-w-sm"
+        width="max-w-md"
         footer={
-          <div className="flex gap-3">
+          <div className="flex flex-col-reverse sm:flex-row gap-3">
             <Button variant="secondary" onClick={() => setDeleteConfirm(null)} disabled={isDeleting}>
               Cancel
             </Button>
-            <Button variant="danger" onClick={handleConfirmDelete} disabled={isDeleting}>
-              {isDeleting ? 'Deleting...' : 'Delete'}
+            <Button
+              variant="danger"
+              onClick={handleConfirmDelete}
+              disabled={isDeleting || (deleteConfirm?.type === 'single' && (!deletePreview || deletePreview.activeSpoolCount > 0))}
+            >
+              {isDeleting ? 'Deleting...' : deleteConfirm?.type === 'single' && deletePreview?.activeSpoolCount === 0 && deletePreview.archivedSpoolIds.length > 0 ? 'Delete filament and spools' : 'Delete'}
             </Button>
           </div>
         }
       >
         {deleteConfirm?.type === 'single' ? (
-          <p className="text-pf-text-secondary">
-            Are you sure you want to delete <strong>{deleteConfirm.filament.name || 'this filament'}</strong>? This action cannot be undone.
-          </p>
+          <div className="space-y-3 text-pf-text-secondary">
+            <p>Delete <strong className="text-pf-text-primary">{deleteConfirm.filament.name || 'this filament'}</strong>?</p>
+            <div aria-live="polite">
+              {deletePreviewError ? (
+                <p role="alert" className="text-pf-error">{deletePreviewError}</p>
+              ) : !deletePreview ? (
+                <p role="status">Checking active and archived spools...</p>
+              ) : deletePreview.activeSpoolCount > 0 ? (
+                <p role="alert" className="text-pf-error">
+                  Cannot delete: {deletePreview.activeSpoolCount} active spool{deletePreview.activeSpoolCount !== 1 ? 's' : ''} still reference this filament.
+                  {' '}Move or archive those spools first. Nothing will be deleted.
+                </p>
+              ) : deletePreview.archivedSpoolIds.length > 0 ? (
+                <p>
+                  This will also permanently delete <strong className="text-pf-text-primary">{deletePreview.archivedSpoolIds.length} archived spool{deletePreview.archivedSpoolIds.length !== 1 ? 's' : ''}</strong> and their NFC tag bindings.
+                  {' '}The filament&apos;s NFC tag bindings will also be removed. This cannot be undone.
+                </p>
+              ) : (
+                <p>This filament has no spools. This action cannot be undone.</p>
+              )}
+            </div>
+          </div>
         ) : deleteConfirm?.type === 'bulk' ? (
           <p className="text-pf-text-secondary">
             Are you sure you want to delete <strong>{selectedIds.size}</strong> filament{selectedIds.size !== 1 ? 's' : ''}? This action cannot be undone.
+            {' '}Filaments with active or archived spools will be skipped. Delete those individually to review their spools.
           </p>
         ) : null}
       </Modal>

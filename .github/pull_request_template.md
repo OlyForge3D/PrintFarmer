@@ -16,6 +16,15 @@ Closes #351
 
 <!-- Describe how the changes were tested. Include manual steps, test coverage, or CI validation. -->
 
+## UI visual evidence
+
+<!-- For rendered UI changes, capture locally before opening even a draft PR:
+desktop + mobile browser widths, and native simulator screenshots when available.
+Attach images with source SHA, screen/route, viewport/device, appearance, state and limitations.
+If native tooling is unavailable, name the host/toolchain limitation and unverified surfaces.
+For policy/tooling-only changes, explain why rendered evidence is not applicable.
+Follow .github/copilot-instructions.md#ui-visual-evidence; screenshots are not accessibility certification. -->
+
 ## Pre-merge checklist
 
 <!-- Draft PRs may open before review. Complete this checklist before marking ready or merging. -->
@@ -30,3 +39,5 @@ Closes #351
 - [ ] Changes follow project conventions (see CONTRIBUTING.md)
 - [ ] New warnings were not introduced (or are acceptable for this scope)
 - [ ] Relevant documentation updated
+- [ ] Required UI visual evidence attached and reviewed, or explicit policy/tooling-only
+      not-applicable reason recorded; native simulator limitations disclosed

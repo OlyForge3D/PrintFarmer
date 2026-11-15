@@ -237,6 +237,39 @@ Changes are reversible per batch; printer actions are not, so visual validation
 must use isolated mocks and never issue physical commands. Geometry checks do
 not establish accessibility conformance or real-device usability.
 
+### Cross-surface conventions
+
+- Preserve incumbent action, sensor and status glyphs. Change the vocabulary
+  only in an explicitly scoped redesign, not as incidental cleanup.
+- Heater and status glyphs use semantic active-state color and a non-color cue.
+  Web heater readouts reuse `PrinterSensorGlyph` and `isPrinterHeaterHot`:
+  finite reported current temperature above 50 C for a hotend or 35 C for a
+  bed determines the hot glyph, not a requested target. Missing telemetry
+  must remain unknown, not appear active. Preserve current/target values and
+  units; visual work must not change safety thresholds or printer commands.
+- Secondary explanatory text uses the shared hover/focus `Tooltip`, not
+  additional inline labels or native `title` attributes. Icon-only controls
+  still need accessible names. Essential status, errors, values, units and
+  field labels remain visible and must not become hover-only information.
+  Touch and native clients need accessible disclosure rather than hover.
+- Table and card views preserve action meaning, availability, permissions,
+  reported state and outcomes. The same behavioral parity applies between
+  web and native clients, with platform-appropriate navigation, gestures and
+  layout rather than identical pixels.
+
+**Incumbent difference:** native `TemperatureView.swift` colors by a positive
+target (red hotend, blue bed), while web glyph heat state uses reported current
+temperature. Neither this policy nor a design review certifies identical
+predicates or hues. A proposed semantic alignment needs an explicit behavior
+decision and regression evidence; do not silently translate one into the other.
+See the [native adaptation](../../../../../mobile/DESIGN.md#cross-surface-conventions).
+
+Clipped essential readings, inaccessible explanations, differing action
+availability or misleading heat state falsify the design. Operators and
+keyboard, touch or low-vision users bear the cost of mistakes. Presentation is
+reversible; physical actions may not be, so use isolated mock telemetry for
+visual evidence and never activate real heat or motion to obtain screenshots.
+
 ### Toolbar regression evidence
 
 `src/test/design-system/toolbar-glyphs.test.tsx` checks migrated control text,
@@ -839,15 +872,16 @@ Structural specifications for the canonical components. Visual values come from 
 
 ## Admin Surface
 
-Every admin destination — the Admin Control Center (`/admin`) and the 21 pages it links to —
+Every admin destination — the Admin Control Center (`/admin`) and its linked pages —
 obeys one contract. Regression tests in `src/test/features/admin/` enforce the structural half
 of it; this section is the rationale.
 
 ### The shell owns the frame
 
-`AdminPageShell` (`features/admin/components/AdminPageShell.tsx`) renders the page frame:
-title, description, back link to the ACC, and a header-actions slot. A page below `/admin`
-never renders its own `PageTemplate`, its own `<h1>`, or its own back navigation.
+`AdminPageShell` (`features/admin/components/AdminPageShell.tsx`) renders the operational
+page frame. `SettingsShell` renders the same `PageTemplate` contract for focused settings
+categories: title, description, back link to the ACC, and header-actions slot.
+Embedded content never renders a second frame, `<h1>`, or back navigation.
 
 - **One `h1` per destination.** The shell owns it. A page that also rendered one would give
   screen readers two competing document titles for one view.
@@ -864,8 +898,10 @@ never renders its own `PageTemplate`, its own `<h1>`, or its own back navigation
 
 `ADMIN_DESTINATIONS` in `features/admin/registry/adminDestinations.ts` is the single source of
 truth for what the ACC links to. Adding an entry there is what puts a page under this contract.
-It holds 27 entries: the 22 that live at `/admin` or below are admin-owned and bound by
-everything above, and 20 of those are drawn by `SettingsShell`. The other five —
+The ACC's seven system-category cards are derived from the settings categories,
+with each link resolved to its first permitted leaf in this destination registry.
+Category pages expose only their existing sub-tabs, not a cross-category sidebar.
+Standalone links —
 `/maintenance`, `/analytics`, `/auto-dispatch`, `/catalog`, `/locations` — are
 operational pages the ACC merely links to. They keep their own top-level navigation because
 they are day-to-day destinations in their own right, not admin sub-pages, so the "back to
@@ -924,9 +960,9 @@ nav changes the content width independently of the window.
   and field label. Band captions sit *outside* that scale on purpose: 12px uppercase at
   `.06em`, the eyebrow convention, earning their level through case and letterspacing instead
   of size. Making a band caption louder than the settings it introduces gives a page six
-  competing titles, which is what it did before #1031. The settings category name is not
-  rendered *visually* — the highlighted rail item already says it, and the page H1 names the
-  scope above it — but the element stays in the tree as the content section's
+  competing titles, which is what it did before #1031. System settings name the focused
+  category in the page H1; the selected sub-tab identifies its content. The content heading
+  stays in the tree as the section's
   `aria-labelledby` target and its post-navigation focus target, and un-hides on
   `:focus-visible`. Do not delete it.
 

@@ -38,7 +38,7 @@ public class BackendClientFactoryTests
 
         // Act & Assert - PrinterBackend.Unknown requested directly through GetClient() (e.g. by
         // a caller that did not skip it) must still be rejected explicitly.
-        ArgumentException ex = Assert.Throws<ArgumentException>(() => factory.GetClient(PrinterBackend.Unknown));
+        ArgumentException ex = Assert.Throws<UnsupportedBackendClientException>(() => factory.GetClient(PrinterBackend.Unknown));
         Assert.Contains("Unsupported printer backend", ex.Message, StringComparison.Ordinal);
 
         logger.Verify(
@@ -60,7 +60,7 @@ public class BackendClientFactoryTests
         BackendClientFactory factory = CreateFactory(logger);
 
         // Act & Assert
-        ArgumentException ex = Assert.Throws<ArgumentException>(() => factory.GetClient(PrinterBackend.Moonraker));
+        ArgumentException ex = Assert.Throws<UnsupportedBackendClientException>(() => factory.GetClient(PrinterBackend.Moonraker));
         Assert.Contains("Unsupported printer backend", ex.Message, StringComparison.Ordinal);
 
         logger.Verify(

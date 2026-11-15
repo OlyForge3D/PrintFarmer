@@ -53,6 +53,11 @@ on:
       - 'fixtures/wire-contracts/**'
       - '.github/workflows/monolith-smoke.yml'
   workflow_dispatch:
+    inputs:
+      evidence_baseline_sha:
+        description: Optional full pre-change SHA for real-app filament deletion before/after evidence
+        type: string
+        default: ''
 
 concurrency:
   group: monolith-smoke-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -66,6 +71,10 @@ jobs:
     name: Monolith browser/API smoke journeys
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        capture: ${{ fromJSON(inputs.evidence_baseline_sha != '' && '["after","before"]' || '["after"]') }}
     env:
       # The isolated dev SQLite DB this job seeds is created fresh in
       # ${{ runner.temp }} on every run — never a checked-out or shared path.
@@ -79,11 +88,54 @@ jobs:
       WorkerAuth__SharedKey: monolith-smoke-ci-worker-key
       API_BASE_URL: http://localhost:5245
       BASE_URL: http://localhost:3000
+      SPOOLMAN_EVIDENCE_URL: http://127.0.0.1:17912
+      FILAMENT_EVIDENCE_PHASE: ${{ matrix.capture }}
+      EVIDENCE_DRIVER_SHA: ${{ github.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+          ref: ${{ matrix.capture == 'before' && inputs.evidence_baseline_sha || github.sha }}
+
+      - name: Checkout current evidence driver for baseline application
+        if: matrix.capture == 'before'
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .evidence-driver
+          sparse-checkout: src/Web/ReactApp/e2e/monolith-smoke/filament-deletion-smoke.spec.ts
+          sparse-checkout-cone-mode: false
+
+      - name: Record actual application provenance
+        env:
+          BASELINE_SHA: ${{ inputs.evidence_baseline_sha }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$BASELINE_SHA" && ! "$BASELINE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Evidence baseline must be a full lowercase commit SHA." >&2
+            exit 1
+          fi
+          echo "EVIDENCE_APP_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          if [[ "$FILAMENT_EVIDENCE_PHASE" == before ]]; then
+            cp .evidence-driver/src/Web/ReactApp/e2e/monolith-smoke/filament-deletion-smoke.spec.ts \
+              src/Web/ReactApp/e2e/monolith-smoke/filament-deletion-smoke.spec.ts
+          fi
+
+      - name: Start disposable real Spoolman
+        run: |
+          docker run --detach --name filament-evidence-spoolman \
+            --publish 127.0.0.1:17912:8000 \
+            ghcr.io/olyforge3d/spoolman@sha256:1770e5dd86300664b5848601d7a6b03748405728e0d8835a106a128c07abbfbf
+          for i in $(seq 1 60); do
+            if curl --fail --silent --output /dev/null "$SPOOLMAN_EVIDENCE_URL/api/v1/health"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs filament-evidence-spoolman
+          exit 1
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -154,13 +206,18 @@ jobs:
 
       - name: Run monolith smoke journeys
         working-directory: src/Web/ReactApp
-        run: npm run test:e2e:monolith-smoke
+        run: |
+          if [[ "$FILAMENT_EVIDENCE_PHASE" == before ]]; then
+            npm run test:e2e:monolith-smoke -- --grep 'filament deletion'
+          else
+            npm run test:e2e:monolith-smoke
+          fi
 
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: monolith-smoke-playwright-report
+          name: monolith-smoke-playwright-report-${{ matrix.capture }}
           path: src/Web/ReactApp/playwright-report/
           if-no-files-found: ignore
           retention-days: 14
@@ -169,10 +226,14 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: monolith-smoke-api-log
+          name: monolith-smoke-api-log-${{ matrix.capture }}
           path: ${{ runner.temp }}/monolith-smoke-api.log
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Stop disposable Spoolman
+        if: always()
+        run: docker rm --force filament-evidence-spoolman
 
       - name: Stop monolith API
         if: always()

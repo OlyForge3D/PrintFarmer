@@ -24,6 +24,8 @@ final class SpoolPickerViewModel {
     var scanError: String?
     var scannedSpoolData: ScannedSpoolData?
     var showScannedDataSheet = false
+    var pendingNFCTagLink: ScannedNFCTag?
+    var nfcTagLinkData: ScannedSpoolData?
 
     private let logger = Logger(subsystem: "com.printfarmer.ios", category: "SpoolPicker")
     private var spoolService: (any SpoolServiceProtocol)?
@@ -218,6 +220,56 @@ final class SpoolPickerViewModel {
         case .newSpoolData(let data):
             scannedSpoolData = data
             showScannedDataSheet = true
+        case .nfcTag(let tag):
+            guard let spoolService else {
+                scanError = "Spool service not available"
+                return
+            }
+            do {
+                let response = try await spoolService.scanTag(
+                    uid: tag.uid,
+                    format: tag.openPrintTagPayload == nil ? nil : "openprinttag",
+                    payloadB64: tag.openPrintTagPayload?.base64EncodedString()
+                )
+                guard isViewActive else { return }
+                if let spoolID = response.matchedSpoolId {
+                    await fetchAndSelectSpool(id: spoolID)
+                } else if let filament = response.filament {
+                    scannedSpoolData = ScannedSpoolData(
+                        material: filament.material,
+                        colorHex: filament.colorHex,
+                        vendor: filament.vendor,
+                        weight: filament.weight,
+                        diameter: filament.diameter,
+                        temperature: filament.settingsExtruderTemp,
+                        spoolmanId: nil,
+                        filamentId: response.matchedFilamentId ?? filament.id
+                    )
+                    showScannedDataSheet = true
+                } else if response.matchedFilamentId != nil {
+                    scanError = "Spoolman matched this tag to a filament but returned no filament details."
+                } else if let data = tag.openPrintTagPayload.flatMap(NFCTagParser.parseOpenPrintTag) {
+                    pendingNFCTagLink = tag
+                    nfcTagLinkData = data
+                } else {
+                    switch tag.legacyContent {
+                    case .spoolId(let id):
+                        await fetchAndSelectSpool(id: id)
+                    case .newSpoolData(let data):
+                        pendingNFCTagLink = tag
+                        nfcTagLinkData = data
+                    case .printerId:
+                        scanError = "This is a printer tag, not a filament spool."
+                    case nil:
+                        pendingNFCTagLink = tag
+                        nfcTagLinkData = nil
+                    }
+                }
+
+            } catch {
+                logger.warning("NFC tag lookup failed: \(error.localizedDescription)")
+                scanError = error.localizedDescription
+            }
 
         case .cancelled:
             break
@@ -225,6 +277,12 @@ final class SpoolPickerViewModel {
         case .error(let error):
             scanError = error.localizedDescription
         }
+    }
+
+    func completeNFCTagLink(to spool: SpoolmanSpool) {
+        pendingNFCTagLink = nil
+        nfcTagLinkData = nil
+        onAutoSelect?(spool)
     }
 
     // MARK: - Private Helpers

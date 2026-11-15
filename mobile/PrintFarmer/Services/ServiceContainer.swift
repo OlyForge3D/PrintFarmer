@@ -78,7 +78,7 @@ final class ServiceContainer: @unchecked Sendable {
     @ObservationIgnored let printerSummaryCache = PrinterSummaryCache()
     #if canImport(UIKit)
     var qrScannerService: QRSpoolScannerService?
-    var barcodeScannerService: BarcodeScannerService?
+    var barcodeScannerService: (any BarcodeScannerProtocol)?
     var nfcService: NFCService?
     #endif
 
@@ -885,6 +885,7 @@ final class ServiceContainer: @unchecked Sendable {
              .serverUnreachable,
              .invalidResponse,
              .serverError,
+             .serverErrorMessage,
              .transportError,
              .decodingFailed,
              .staleServerResponse:

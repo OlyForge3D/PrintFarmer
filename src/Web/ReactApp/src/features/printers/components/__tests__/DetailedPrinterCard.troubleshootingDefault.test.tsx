@@ -123,6 +123,23 @@ describe.each([
     expect(screen.queryByText('Common Checks')).not.toBeInTheDocument();
   });
 
+  it('hides help for Out of Service printers and closes an open guide when unplugged', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(renderCard(makeOfflinePrinter({ isEnabled: false })));
+    expect(screen.queryByRole('button', { name: 'Open troubleshooting for Printer 1' })).not.toBeInTheDocument();
+
+    rerender(renderCard(makeOfflinePrinter()));
+    await user.click(screen.getByRole('button', { name: 'Open troubleshooting for Printer 1' }));
+    expect(screen.getByRole('dialog', { name: 'Troubleshooting' })).toBeInTheDocument();
+    rerender(renderCard(makeOfflinePrinter({ isEnabled: false })));
+    expect(screen.queryByRole('button', { name: 'Open troubleshooting for Printer 1' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    rerender(renderCard(makeOfflinePrinter()));
+    expect(screen.getByRole('button', { name: 'Open troubleshooting for Printer 1' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('opens a body-portaled sidebar with the printer-specific guide and restores focus on Escape', async () => {
     const user = userEvent.setup();
     const { container } = render(renderCard(makeOfflinePrinter({ ipAddress: '192.168.1.100' })));

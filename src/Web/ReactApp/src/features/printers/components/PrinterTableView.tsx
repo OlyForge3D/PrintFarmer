@@ -14,6 +14,7 @@ import { formatPrinterModelSubtitle } from '@/common/utils/printerModelDisplay';
 import { renderUnknown } from '@/common/utils/renderUnknown';
 import { Button, ProgressBar } from '@/common/components/ui';
 import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
+import { PrinterServiceStatus } from '@/features/printers/components/PrinterServiceStatus';
 import { TableHeaderCell } from '@/common/components/ui/Table';
 import type { SortDirection } from '@/common/hooks/useTableSort';
 import { getBackendName, type PrinterSortMode } from '@/features/printers/utils/printerDisplaySort';
@@ -26,7 +27,7 @@ interface PrinterTableViewProps {
   onOpenDetails?: (printer: Printer) => void;
   onOpenMaintenance: (printer: Printer) => void;
   showEnableColumn?: boolean;
-  onToggleEnabled?: (printer: Printer) => void;
+  onToggleEnabled?: (printer: Printer) => void | Promise<void>;
   onSelectionChange?: (ids: string[]) => void;
   sortMode?: PrinterSortMode;
   sortDirection?: SortDirection;
@@ -54,6 +55,13 @@ export function PrinterTableView({
   const [bulkAction, setBulkAction] = useState<'none' | 'delete' | 'maintenance-on' | 'maintenance-off'>('none');
   const [troubleshootPrinterId, setTroubleshootPrinterId] = useState<string | null>(null);
   const troubleshootRef = useRef<HTMLDivElement>(null);
+  const troubleshootPrinter = printers.find(printer => printer.id === troubleshootPrinterId);
+  const canTroubleshoot = troubleshootPrinter?.isEnabled !== false
+    && displayPrinters.some(printer => printer.id === troubleshootPrinterId && !printer.isOnline);
+
+  if (troubleshootPrinterId && !canTroubleshoot) {
+    setTroubleshootPrinterId(null);
+  }
   const autoDispatchStatusByPrinterId = useMemo(
     () => new Map((allAutoDispatchStatuses ?? []).map((status) => [status.printerId, status])),
     [allAutoDispatchStatuses],
@@ -250,15 +258,6 @@ export function PrinterTableView({
               <th className="text-left px-4 py-3 text-sm font-bold text-pf-text-primary uppercase tracking-wide">
                 Temperatures
               </th>
-              <th className="text-left px-4 py-3 text-sm font-bold text-pf-text-primary uppercase tracking-wide">
-                Last Updated
-              </th>
-              {/** Optionally show Enabled column for admins */}
-              {showEnableColumn && (
-                <th className="text-center px-4 py-3 text-sm font-bold text-pf-text-primary uppercase tracking-wide">
-                  Enabled
-                </th>
-              )}
               {/** Actions header */}
               <th className="text-center px-4 py-3 text-sm font-bold text-pf-text-primary uppercase tracking-wide">
                 Actions
@@ -324,7 +323,7 @@ export function PrinterTableView({
                       <div className={`text-sm font-medium ${getStatusColor(displayPrinter.isOnline ?? false, displayPrinter.state, autoDispatchStatus)}`}>
                         {statusLabel}
                       </div>
-                      {!(displayPrinter.isOnline ?? false) && (
+                      {!(displayPrinter.isOnline ?? false) && printer.isEnabled !== false && (
                         <div className="relative" ref={troubleshootPrinterId === printer.id ? troubleshootRef : undefined}>
                           <Button
                             type="button"
@@ -395,35 +394,10 @@ export function PrinterTableView({
                     </div>
                   </td>
 
-                  {/* Last Updated */}
-                  <td className="px-4 py-4">
-                    <span className="text-sm text-pf-text-tertiary">
-                      {displayPrinter.isOnline ? 'Online' : 'Offline'}
-                    </span>
-                  </td>
-
-                  {showEnableColumn && (
-                    <td className="px-4 py-4 text-center">
-                      {typeof onToggleEnabled === 'function' ? (
-                        <Button
-                          type="button"
-                          onClick={() => onToggleEnabled(printer)}
-                          variant="subtle"
-                          size="sm"
-                          className="p-2! h-auto!"
-                          title={printer.isEnabled ? 'Disable printer' : 'Enable printer'}
-                        >
-                          {printer.isEnabled ? <CheckCircleIcon className="w-4 h-4" /> : <CircleIcon className="w-4 h-4" />}
-                        </Button>
-                      ) : (
-                        <span className="text-sm text-pf-text-tertiary">{printer.isEnabled ? 'Yes' : 'No'}</span>
-                      )}
-                    </td>
-                  )}
-
                   {/* Actions */}
                   <td className="px-4 py-4">
                     <div className="flex items-center justify-center space-x-1">
+                      <PrinterServiceStatus printer={printer} iconOnly onToggleEnabled={showEnableColumn ? onToggleEnabled : undefined} />
                       {onOpenDetails && (
                         <Button
                           type="button"

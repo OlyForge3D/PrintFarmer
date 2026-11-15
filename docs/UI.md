@@ -37,6 +37,66 @@ Main overview page showing all printers with real-time status.
 - One-click print controls
 - Auto-refresh on status changes
 
+### Printer service status
+
+Administrators use the **In Service / Out of Service** control in the action area
+of compact cards, detailed cards and the table, or beside identity in the details sidebar.
+Other users see a read-only status. It is the existing `IsEnabled` setting,
+not a second monitoring flag.
+Cards and table actions show a green filled power plug for In Service and a neutral
+outline plug for Out of Service. The plug is first in the table's **Actions** column;
+there is no separate Service column. Authorized users can toggle the glyph; other users see status only.
+The operational **Status** column is unchanged; the former **Last Updated**
+column has been removed.
+
+Both card styles place **Open in Browser** at the far right of the header and
+the remaining actions in a two-column right-hand grid, without an overflow menu.
+Compact cards place **Open details sidebar** immediately before the browser action.
+Their single-row header matches the detailed header height while retaining 44px
+header controls. Both main action grids use uniform 44px square controls in
+row-major order: service status, camera, auto-dispatch, files, history and edit.
+History remains capability-gated; Tags remains compact-only after the shared actions.
+Auto-dispatch shares the other actions' ghost hover treatment in both states,
+while its enabled state retains the accent-colored, filled bolt.
+Unavailable browser actions retain their explanatory tooltip. Both card styles show
+the printer's configured IP address beneath its manufacturer when available.
+Out of Service preserves the existing disabled-printer behavior: the printer is
+excluded from monitoring and dispatch, and is not commanded to power off.
+Offline Out of Service printers do not show the yellow troubleshooting action;
+unexpectedly offline In Service printers retain it. Maintenance remains a separate setting.
+Sorting does not hide printers. The default order in all three views is active
+(printing or paused), pending, error, ready/other, maintenance, then offline.
+Within each group, names sort A-Z ignoring case, with printer ID breaking ties.
+An offline printer stays in the offline group regardless of service status.
+Pending takes precedence over active, and maintenance over error, matching mobile.
+Explicit saved sort choices remain in effect.
+Emergency stop remains available for an online Out of Service printer when
+its backend supports control operations. Service status is not a physical
+safety interlock, and a sent stop command does not prove the printer has stopped.
+
+A printer with an assigned or active job cannot be moved Out of Service. The
+operator must review and resolve that work first; PrintFarmer does not pause or
+cancel it. Concurrent job assignments and service changes use a shared revision
+barrier so neither can silently bypass this check. Externally observed active
+jobs remain recorded even on an Out of Service printer and require operator
+review; this does not authorize dispatch. If an older expected-offline record is migrated while a job is still
+active, the printer is not disabled and the job appears under **Operational
+issues** with a link to the printer. That issue clears when the job is no longer
+active, is unassigned, or is reassigned to another printer. Older expected-offline records without active work migrate to Out of
+Service; printers without such a record retain their existing status.
+
+The conversion is one-way: down-migration leaves `IsEnabled` unchanged and
+restores an empty expected-offline column, not historical suppression or
+timestamps. Restore a pre-upgrade backup to recover the original intent.
+SQLite conversion is exercised locally; PostgreSQL and SQL Server migrations
+require provider-backed validation before deployment.
+
+The Admin Control Center presents **Operational issues** as compact, grouped
+type/severity disclosures rather than repeated warning cards. Totals and
+severity stay visible; critical errors start expanded. Expand a group for
+per-printer links. The backends health tile reflects only printers In Service;
+missing data and failed refreshes are not an all-clear.
+
 ### Files Page
 `/files` separates owned local assets from files observed on printers.
 

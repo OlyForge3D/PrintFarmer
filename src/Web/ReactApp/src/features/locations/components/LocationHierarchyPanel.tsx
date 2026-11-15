@@ -91,7 +91,7 @@ function LocationTreeRow({
             'flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent',
             isSelected
-              ? 'bg-pf-accent-bg text-pf-accent font-semibold'
+              ? 'bg-pf-accent-bg text-[var(--pf-on-accent)] font-semibold'
               : 'text-pf-text-primary hover:bg-pf-bg-1',
           )}
           onClick={() => onSelect(node.id)}
@@ -194,7 +194,7 @@ export function LocationHierarchyPanel({
             'mb-2 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent',
             selectedId === null
-              ? 'bg-pf-accent-bg text-pf-accent font-semibold'
+              ? 'bg-pf-accent-bg text-[var(--pf-on-accent)] font-semibold'
               : 'text-pf-text-primary hover:bg-pf-bg-1',
           )}
           onClick={() => onSelect(null)}

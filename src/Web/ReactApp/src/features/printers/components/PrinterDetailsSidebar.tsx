@@ -1,4 +1,5 @@
 import { PrinterCoordinateRow } from '@/features/printers/components/PrinterCoordinateRow';
+import { PrinterServiceStatus } from '@/features/printers/components/PrinterServiceStatus';
 import { BedClearEvidencePanel } from '@/features/printers/components/BedClearEvidencePanel';
 import { PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
 import { RuntimeFactorControls } from '@/features/printers/components/RuntimeFactorControls';
@@ -162,11 +163,12 @@ interface PrinterDetailsSidebarProps {
   printer?: Printer;
   backendCapabilities?: PrinterBackendCapabilitiesDto;
   onClose: () => void;
+  onToggleEnabled?: (printer: Printer) => void | Promise<void>;
   /** Layout mode: drawer panel or bounded content panel. */
   layout?: 'panel' | 'content';
 }
 
-export function PrinterDetailsSidebar({ printerId, printer: printerProp, backendCapabilities, onClose, layout = 'panel' }: PrinterDetailsSidebarProps) {
+export function PrinterDetailsSidebar({ printerId, printer: printerProp, backendCapabilities, onClose, onToggleEnabled, layout = 'panel' }: PrinterDetailsSidebarProps) {
   // Call hooks first before any early returns (React Rules of Hooks)
   // Only fetch if printer prop is not provided
   const shouldFetch = !printerProp && !!printerId;
@@ -744,6 +746,9 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             </div>
             <p className="text-xs text-pf-text-secondary">{formatPrinterModelSubtitle(printer.manufacturerName, printer.modelName)}</p>
             <p className="text-xs text-pf-text-secondary mt-1">Live printer controls and status</p>
+            <div className="mt-2">
+              <PrinterServiceStatus printer={printer} onToggleEnabled={onToggleEnabled} />
+            </div>
           </div>
           <Button
             type="button"
@@ -902,7 +907,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 </ControlPadButton>
                 <ControlPadButton
                   variant={isShutdown ? 'secondary' : 'danger'}
-                  disabled={controlActionPending || !canEmergencyStopNow}
+                  disabled={controlActionPending || !canEmergencyStopNow || (isShutdown && !isEnabled)}
                   onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
                   title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
                   aria-label={isShutdown ? 'Firmware Restart' : 'Emergency Stop'}

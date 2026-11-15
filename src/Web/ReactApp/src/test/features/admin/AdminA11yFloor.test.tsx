@@ -60,7 +60,7 @@ vi.mock('@/features/admin/pages/SettingsPage', () => ({
 const mockedApiGet = vi.mocked(client.get);
 
 const ROUTES: ReadonlyArray<readonly [string, string, 'system']> = [
-  ['system settings', '/admin/settings?tab=general', 'system'],
+  ['system settings', '/admin/settings?tab=system', 'system'],
   ['admin settings — users', '/admin/settings?tab=users&sub=accounts', 'system'],
 ];
 
@@ -144,7 +144,12 @@ describe('admin surface accessibility floor (#1016)', () => {
   it.each(ROUTES)('%s exposes the settings nav as a named landmark', (_name, path, scope) => {
     const { container } = renderAt(path, scope);
     const navs = [...container.querySelectorAll('nav')];
-    expect(navs.length).toBeGreaterThan(0);
+    if (path.includes('tab=system')) {
+      expect(navs).toHaveLength(0);
+      expect(screen.getByRole('link', { name: 'Admin Control Center' })).toHaveAttribute('href', '/admin');
+    } else {
+      expect(navs.length).toBeGreaterThan(0);
+    }
 
     // An unnamed <nav> is indistinguishable from any other in a landmark list.
     const unnamed = navs.filter(
@@ -153,18 +158,24 @@ describe('admin surface accessibility floor (#1016)', () => {
     expect(unnamed.map((n) => n.outerHTML.slice(0, 80))).toEqual([]);
   });
 
-  it.each(ROUTES)('%s marks the active nav item for assistive tech', (_name, path, scope) => {
+  it.each(ROUTES)('%s marks the active settings page for assistive tech', (_name, path, scope) => {
     renderAt(path, scope);
-    const nav = screen.getByRole('navigation', { name: /categories/i });
+    if (path.includes('tab=system')) {
+      expect(screen.getByRole('heading', { level: 1, name: 'System' })).toBeInTheDocument();
+      expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+      return;
+    }
+    // Admin routes have no cross-category sidebar; the category's pages are a
+    // tablist inside a named navigation landmark.
+    const nav = screen.getByRole('navigation', { name: /settings pages$/i });
 
     // Highlighting the current page with colour alone does not reach a
-    // screen reader; aria-current does.
+    // screen reader; the selected tab state does.
     const current = within(nav)
-      .queryAllByRole('button')
-      .concat(within(nav).queryAllByRole('link'))
-      .filter((el) => el.getAttribute('aria-current') === 'page');
+      .getAllByRole('tab')
+      .filter((el) => el.getAttribute('aria-selected') === 'true');
 
-    expect(current.length).toBeGreaterThan(0);
+    expect(current).toHaveLength(1);
   });
 
   it('keeps the dashboard heading hierarchy and names its attention-first controls', async () => {

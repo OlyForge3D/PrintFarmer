@@ -19,6 +19,13 @@ public class EfProcessProfileRepository(SlicerDbContext db) : IProcessProfileRep
         await _db.ProcessProfiles.AsNoTracking().Where(p => p.CreatedByUserId == userId || p.IsPublic).OrderBy(p => p.Name).ToListAsync(ct);
 
     /// <inheritdoc/>
+    public async Task<IReadOnlyList<ProcessProfile>> GetOwnedNonSystemAsync(Guid userId, CancellationToken ct = default) =>
+        await _db.ProcessProfiles.AsNoTracking()
+            .Where(p => p.CreatedByUserId == userId && !p.IsSystem)
+            .OrderBy(p => p.Name)
+            .ToListAsync(ct);
+
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<ProcessProfile>> GetPublicAsync(CancellationToken ct = default) =>
         await _db.ProcessProfiles.AsNoTracking().Where(p => p.IsPublic).OrderBy(p => p.Name).ToListAsync(ct);
 

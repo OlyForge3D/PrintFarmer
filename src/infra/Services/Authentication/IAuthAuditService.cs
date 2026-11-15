@@ -23,6 +23,13 @@ public sealed record ApiKeyExchangeScopeAudit(
 /// <summary>
 /// Service for logging authentication and authorization events for security audit trail
 /// </summary>
+/// <remarks>
+/// The EF audit repository propagates database/update failures, timeouts, cancellation and
+/// identified provider wrappers. Credential operations log these expected postcommit audit failures
+/// without undoing committed revocation. Unexpected programming faults propagate; operations
+/// with a caller cancellation token also preserve cancellation rather than reporting success.
+/// Unwrapped invalid-operation and disposed-service failures are programming/configuration faults.
+/// </remarks>
 public interface IAuthAuditService
 {
     /// <summary>

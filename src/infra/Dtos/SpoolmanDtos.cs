@@ -23,6 +23,12 @@ public record SpoolmanConfigDto(string? BaseUrl)
         : (Uri.TryCreate(BaseUrl, UriKind.Absolute, out Uri? u) ? u : null);
 }
 
+/// <summary>Fresh spool references that must be reviewed before deleting a filament.</summary>
+public record SpoolmanFilamentDeletePreview(int ActiveSpoolCount, int[] ArchivedSpoolIds);
+
+/// <summary>Explicit consent to permanently delete precisely these archived spools.</summary>
+public record SpoolmanConfirmFilamentDeleteRequest(int[] ArchivedSpoolIds);
+
 /// <summary>
 /// Result of scanning a network address for a Spoolman instance.
 /// </summary>

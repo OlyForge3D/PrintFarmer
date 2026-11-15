@@ -367,7 +367,7 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
     const imageRow = screen.getByTestId('detailed-printer-image');
     const toolbar = screen.getByRole('toolbar', { name: 'Printer actions' });
     expect(toolbar.parentElement).toBe(imageRow.parentElement);
-    expect(toolbar).toHaveClass('grid-rows-3');
+    expect(toolbar).toHaveClass('grid-cols-2');
     expect(within(toolbar).getByRole('button', { name: 'Edit details' })).toBeInTheDocument();
     expect(within(toolbar).getByRole('button', { name: 'Toggle auto-dispatch for Printer 1' })).toBeInTheDocument();
   });

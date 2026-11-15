@@ -249,6 +249,8 @@ final class PrinterDetailViewModel {
     var nfcScanError: String?
     var nfcScannedData: ScannedSpoolData?
     var showScannedDataSheet = false
+    var pendingNFCTagLink: ScannedNFCTag?
+    var nfcTagLinkData: ScannedSpoolData?
     var showNFCReadyConfirmation = false
     var reviewedReadyStatus: AutoDispatchStatus?
 
@@ -291,6 +293,7 @@ final class PrinterDetailViewModel {
 
     let printerId: UUID
     private var printerService: (any PrinterServiceProtocol)?
+    private var spoolService: (any SpoolServiceProtocol)?
     private(set) var filamentCommandCapabilities: PrinterBackendCapabilities?
     private(set) var filamentCommandCapabilitiesError: String?
     private var filamentCapabilitiesRequestID: UUID?
@@ -334,7 +337,10 @@ final class PrinterDetailViewModel {
         canonicalLoadWaiters.completeAll()
     }
 
-    func configure(printerService: any PrinterServiceProtocol) {
+    func configure(
+        printerService: any PrinterServiceProtocol,
+        spoolService: (any SpoolServiceProtocol)? = nil
+    ) {
         if !Self.identical(self.printerService, printerService) {
             invalidateCanonicalLoad()
             invalidateSnapshotLifecycle()
@@ -351,6 +357,7 @@ final class PrinterDetailViewModel {
         }
 
         self.printerService = printerService
+        self.spoolService = spoolService
     }
 
     func loadFilamentCommandCapabilities() async {
@@ -810,12 +817,71 @@ final class PrinterDetailViewModel {
             case .newSpoolData(let data):
                 nfcScannedData = data
                 showScannedDataSheet = true
+            case .nfcTag(let tag):
+                await resolveNFCTagForLoad(tag)
             case .cancelled:
                 break
             case .error(let error):
                 nfcScanError = error.localizedDescription
             }
         }
+    }
+
+    private func resolveNFCTagForLoad(_ tag: ScannedNFCTag) async {
+        guard let spoolService else {
+            nfcScanError = "Spool service not available"
+            return
+        }
+        do {
+            let response = try await spoolService.scanTag(
+                uid: tag.uid,
+                format: tag.openPrintTagPayload == nil ? nil : "openprinttag",
+                payloadB64: tag.openPrintTagPayload?.base64EncodedString()
+            )
+            guard isViewActive else { return }
+            if let spoolID = response.matchedSpoolId {
+                await loadSpoolById(spoolID)
+            } else if let filament = response.filament {
+                nfcScannedData = ScannedSpoolData(
+                    material: filament.material,
+                    colorHex: filament.colorHex,
+                    vendor: filament.vendor,
+                    weight: filament.weight,
+                    diameter: filament.diameter,
+                    temperature: filament.settingsExtruderTemp,
+                    spoolmanId: nil,
+                    filamentId: response.matchedFilamentId ?? filament.id
+                )
+                showScannedDataSheet = true
+            } else if response.matchedFilamentId != nil {
+                nfcScanError = "Spoolman matched this tag to a filament but returned no filament details."
+            } else if let data = tag.openPrintTagPayload.flatMap(NFCTagParser.parseOpenPrintTag) {
+                pendingNFCTagLink = tag
+                nfcTagLinkData = data
+            } else {
+                switch tag.legacyContent {
+                case .spoolId(let id):
+                    await loadSpoolById(id)
+                case .newSpoolData(let data):
+                    pendingNFCTagLink = tag
+                    nfcTagLinkData = data
+                case .printerId:
+                    nfcScanError = "This is a printer tag, not a filament spool."
+                case nil:
+                    pendingNFCTagLink = tag
+                    nfcTagLinkData = nil
+                }
+            }
+        } catch {
+            guard isViewActive else { return }
+            nfcScanError = error.localizedDescription
+        }
+    }
+
+    func completeNFCTagLink(to spool: SpoolmanSpool) {
+        pendingNFCTagLink = nil
+        nfcTagLinkData = nil
+        Task { await loadSpoolById(spool.id) }
     }
 
     private func loadSpoolById(_ id: Int) async {
