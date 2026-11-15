@@ -285,6 +285,7 @@ test.describe('Slicer profile management', () => {
           existingOwnerModelId.toLowerCase(),
           `Profile "${machineProfileName}" must be linked to a different model`,
         ).not.toBe(modelId.toLowerCase());
+        // The import API currently reports aggregate skips; #3839 tracks per-profile outcomes.
         expect(importedMachineCount, `Profile "${machineProfileName}" linked elsewhere must be skipped`)
           .toBe(0);
       }

@@ -228,7 +228,7 @@ OrcaSlicer worker during daily phase B.
   machine profile missing from the managed library and removes that newly
   created row; when the deployed profiles are preloaded, it instead verifies
   model linking or duplicate handling. Broader resettable creation fixtures
-  are tracked in #3839.
+  and per-profile import skip reasons are tracked in #3839.
 
 Run the same selection used by daily phase B from
 `src/Web/ReactApp/`:
