@@ -1,4 +1,5 @@
 import copy
+import contextlib
 import importlib.util
 import json
 import os
@@ -83,6 +84,75 @@ class SelectionTests(unittest.TestCase):
                 daily.select_candidate([item], self.cutoff)
 
 
+class BootstrapTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.run = self.allocate_run("first")
+
+    def allocate_run(self, name):
+        run = daily.Run.__new__(daily.Run)
+        runtime = self.root / name
+        runtime.mkdir()
+        run.state = dict(workspace=str(runtime), source=str(runtime / "source"),
+                         project=name, manifest=manifest())
+        run.env = {}
+        with patch.object(daily, "ROOT", self.root), \
+                patch.object(daily, "lock", return_value=contextlib.nullcontext()), \
+                patch.object(run, "command", return_value=(0, "{}")), \
+                patch.object(run, "save"):
+            run.allocate_environment()
+        return run
+
+    def test_fresh_secret_persisted_for_compose_and_redacted(self):
+        key = "PFARM__Setup__BootstrapSecret"
+        secret = self.run.env[key]
+        self.assertTrue(re.fullmatch(r"[0-9a-f]{64}", secret) is not None,
+                        "Bootstrap secret must contain 32 random bytes")
+        other = self.allocate_run("second")
+        self.assertTrue(secret != other.env[key], "Runs must not share bootstrap secrets")
+        runtime = Path(self.run.state["workspace"])
+        self.assertTrue(daily.read_json(runtime / "secrets.json")[key] == secret,
+                        "Persisted bootstrap secret differs from the API environment")
+        self.assertTrue(f"{key}='{secret}'\n" in (runtime / "compose.env").read_text(),
+                        "Compose env file must supply the same bootstrap secret")
+        self.assertTrue(daily.redact(secret, self.run.env) == "[REDACTED]",
+                        "Bootstrap secret must be redacted from logs")
+        if sys.platform == "linux":
+            for name in ("secrets.json", "compose.env"):
+                self.assertEqual((runtime / name).stat().st_mode & 0o777, 0o600)
+
+    def test_setup_sends_exact_environment_secret_and_existing_setup_is_not_recreated(self):
+        printers = [{"backend": "Moonraker", "name": name, "isOnline": name != "Moonraker Offline"}
+                    for name in (*daily.INSTANCES, "Moonraker Offline")]
+        discovery = [{"hostname": name, "printerBackend": "moonraker"}
+                     for name in ("Discovered Voron V2.4", "Discovered Prusa MK4S")]
+        for needs_setup in (True, False):
+            with self.subTest(needs_setup=needs_setup):
+                responses = [{"needsSetup": needs_setup}]
+                if needs_setup:
+                    responses.append({"success": True})
+                responses += [{"token": "fixture-token"}, None, *({} for _ in daily.INSTANCES), printers]
+                with patch.object(self.run, "http", side_effect=responses) as http, \
+                        patch.object(self.run, "compose", return_value=(0, json.dumps(discovery))), \
+                        patch.object(self.run, "save"):
+                    self.run.fixtures()
+                setup_calls = [call for call in http.call_args_list
+                               if call.args[0].endswith("/api/setup/initial-admin")]
+                self.assertEqual(len(setup_calls), int(needs_setup))
+                if needs_setup:
+                    payload = setup_calls[0].args[1]
+                    self.assertTrue(payload.get("bootstrapSecret") ==
+                                    self.run.env["PFARM__Setup__BootstrapSecret"],
+                                    "Initial-admin JSON must send the API's bootstrap secret")
+                    self.assertTrue(payload["username"] == self.run.env["E2E_ADMIN_USERNAME"]
+                                    and payload["password"] == self.run.env["E2E_ADMIN_PASSWORD"]
+                                    and payload["email"] == self.run.env["E2E_ADMIN_EMAIL"],
+                                    "Initial-admin credentials must remain unchanged")
+                self.assertTrue(self.run.state["fixtures"]["ready"])
+
+
 class PhaseTests(unittest.TestCase):
     def setUp(self):
         self.state = dict(validationId="unique", commit="a" * 40, manifestHash="manifest", harnessHash="harness")
@@ -165,6 +235,9 @@ class LifecycleTests(unittest.TestCase):
         self.run.save()
         reloaded = daily.Run(self.run.state["validationId"])
         self.assertEqual(reloaded.env["POSTGRES_PASSWORD"], self.run.env["POSTGRES_PASSWORD"])
+        self.assertTrue(reloaded.env["PFARM__Setup__BootstrapSecret"] ==
+                        self.run.env["PFARM__Setup__BootstrapSecret"],
+                        "Independent commands must reload the same bootstrap secret")
         self.assertEqual(reloaded.env["BASE_URL"], self.run.env["BASE_URL"])
         self.assertEqual((self.run.directory / "runtime/secrets.json").stat().st_mode & 0o777, 0o600)
         child = (

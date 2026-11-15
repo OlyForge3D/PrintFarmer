@@ -571,7 +571,8 @@ class Run:
         env.update({key: str(value) for key, value in ports.items()})
         env.update(POSTGRES_USER="printfarmer", POSTGRES_PASSWORD=secrets.token_hex(32),
                    Jwt__Key=secrets.token_hex(48), WORKER_SHARED_API_KEY=secrets.token_hex(32),
-                   DISCOVERY_SHARED_API_KEY=secrets.token_hex(32), DB_PROVIDER="Postgres",
+                   DISCOVERY_SHARED_API_KEY=secrets.token_hex(32),
+                   PFARM__Setup__BootstrapSecret=secrets.token_hex(32), DB_PROVIDER="Postgres",
                    ENABLE_DISTRIBUTED_SLICING="true", ENABLE_ORCA_WORKER="yes",
                    ENABLE_ORCA_WORKER_PREVIOUS="no", ORCA_WORKER_COUNT="1",
                    COMPOSE_PROJECT_NAME=self.state["project"],
@@ -758,6 +759,7 @@ class Run:
         if self.http(f"{api}/api/setup/status")["needsSetup"]:
             self.http(f"{api}/api/setup/initial-admin", {
                 "username": self.env["E2E_ADMIN_USERNAME"], "password": self.env["E2E_ADMIN_PASSWORD"],
+                "bootstrapSecret": self.env["PFARM__Setup__BootstrapSecret"],
                 "email": self.env["E2E_ADMIN_EMAIL"], "firstName": "Daily", "lastName": "Validation"})
         login = self.http(f"{api}/api/auth/login", {
             "usernameOrEmail": self.env["E2E_ADMIN_USERNAME"], "password": self.env["E2E_ADMIN_PASSWORD"]})
