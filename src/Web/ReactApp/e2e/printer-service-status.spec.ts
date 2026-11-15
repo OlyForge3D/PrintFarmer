@@ -49,6 +49,12 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     const dialog = page.getByRole('dialog', { name: 'Cancel print?' });
     await expect(dialog).toContainText('fixture-benchy.gcode');
     await expect(dialog).toContainText(active.name);
+    for (const name of ['Close modal', 'Keep printing', 'Cancel print']) {
+      const bounds = await dialog.getByRole('button', { name, exact: true }).boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.width).toBeGreaterThanOrEqual(44);
+      expect(bounds!.height).toBeGreaterThanOrEqual(44);
+    }
     expect(cancellations).toBe(0);
     await page.screenshot({ path: testInfo.outputPath(`cancel-confirmation-${viewport.width}.png`) });
     await dialog.getByRole('button', { name: 'Keep printing' }).click();

@@ -1407,12 +1407,13 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         onClose={() => setCancelTarget(null)}
         title="Cancel print?"
         size="sm"
+        closeButtonClassName="min-w-11 min-h-11"
         footer={(
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={() => setCancelTarget(null)}>
+            <Button type="button" variant="secondary" className="min-w-11 min-h-11" onClick={() => setCancelTarget(null)}>
               Keep printing
             </Button>
-            <Button type="button" variant="danger" onClick={() => {
+            <Button type="button" variant="danger" className="min-w-11 min-h-11" onClick={() => {
               if (canConfirmCancel && !controlActionPending) {
                 setCancelTarget(null);
                 void handleControlAction('cancel');
