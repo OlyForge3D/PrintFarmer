@@ -57,6 +57,26 @@ test.describe('monolith smoke: tasks', () => {
       assertMatchesWireContractShape(initialList, TASK_LIST_EMPTY_FIXTURE);
     }
 
+    await expect.poll(() => page.evaluate(async () => {
+      const moduleUrl = new URL('/src/services/printer-signalr.ts', location.origin).href;
+      const { printerSignalRService } = await import(moduleUrl);
+      return printerSignalRService.isConnected;
+    }), { timeout: 15_000 }).toBe(true);
+
+    await page.evaluate(async () => {
+      const moduleUrl = new URL('/src/services/printer-signalr.ts', location.origin).href;
+      const { printerSignalRService } = await import(moduleUrl);
+      const connection = Reflect.get(printerSignalRService, 'connection') as {
+        on: (name: string, handler: (payload: unknown) => void) => void;
+        invoke: (method: string) => Promise<void>;
+      };
+      const events: unknown[] = [];
+      Reflect.set(window, '__monolithTaskEvents', events);
+      connection.on('taskcreated', payload => events.push(payload));
+      connection.on('taskupdated', payload => events.push(payload));
+      await connection.invoke('SubscribeToFarmAsync');
+    });
+
     const title = `Monolith smoke task ${Date.now()}`;
     const createResponse = await page.request.post(`${API_BASE_URL}/api/tasks`, {
       headers: authHeaders,
@@ -67,6 +87,15 @@ test.describe('monolith smoke: tasks', () => {
     const created = await createResponse.json();
     assertMatchesWireContractShape(created, TASK_POPULATED_FIXTURE);
     expect(created.title).toBe(title);
+    await expect.poll(() => page.evaluate(() => Reflect.get(window, '__monolithTaskEvents')), {
+      timeout: 15_000,
+    }).toContainEqual(expect.objectContaining({
+      id: created.id,
+      title,
+      status: 'Pending',
+      anchorKind: 'unspecified',
+      sourceKind: 'unspecified',
+    }));
 
     const listResponse = await page.request.get(`${API_BASE_URL}/api/tasks`, { headers: authHeaders });
     expect(listResponse.status(), 'GET /api/tasks must succeed').toBe(200);
@@ -80,5 +109,30 @@ test.describe('monolith smoke: tasks', () => {
     const createdInList = list.find((t: { id: unknown }) => t.id === created.id);
     expect(createdInList, 'expected the task just created to appear in GET /api/tasks by id').toBeTruthy();
     assertMatchesWireContractShape(createdInList, TASK_POPULATED_FIXTURE);
+
+    await page.evaluate(async () => {
+      const moduleUrl = new URL('/src/services/printer-signalr.ts', location.origin).href;
+      const { printerSignalRService } = await import(moduleUrl);
+      await printerSignalRService.disconnect();
+      await printerSignalRService.connect();
+      const connection = Reflect.get(printerSignalRService, 'connection') as {
+        invoke: (method: string) => Promise<void>;
+      };
+      await connection.invoke('SubscribeToFarmAsync');
+    });
+
+    const completeResponse = await page.request.post(`${API_BASE_URL}/api/tasks/${created.id}/complete`, {
+      headers: authHeaders,
+    });
+    expect(completeResponse.status(), 'POST /api/tasks/{id}/complete must succeed').toBe(204);
+    await expect.poll(() => page.evaluate(() => Reflect.get(window, '__monolithTaskEvents')), {
+      timeout: 15_000,
+    }).toContainEqual(expect.objectContaining({
+      id: created.id,
+      title,
+      status: 'Completed',
+      anchorKind: 'unspecified',
+      sourceKind: 'unspecified',
+    }));
   });
 });
