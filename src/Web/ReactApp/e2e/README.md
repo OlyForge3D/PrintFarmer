@@ -224,9 +224,10 @@ OrcaSlicer worker during daily phase B.
 - The deferred advanced workflow coverage is tracked in #3839.
 - The worker filament library is already seeded in the deployed stack, so the
   profile-import spec verifies compatible filament selection and availability,
-  not creation of a new filament profile. The machine profiles are preloaded
-  into the managed library; the spec verifies model linking or duplicate
-  handling, not creation of a new profile row. Resettable creation fixtures
+  not creation of a new filament profile. It prefers a compatible worker
+  machine profile missing from the managed library and removes that newly
+  created row; when the deployed profiles are preloaded, it instead verifies
+  model linking or duplicate handling. Broader resettable creation fixtures
   are tracked in #3839.
 
 Run the same selection used by daily phase B from
