@@ -8219,6 +8219,9 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 .OrderByPriorityDescending()
                 .ToListAsync(ct);
 
+        public Task<List<IdleWindowJobInput>> GetIdleWindowJobInputsAsync(IReadOnlyCollection<Guid> printerIds, CancellationToken ct) =>
+            new EfQueueRepository(db).GetIdleWindowJobInputsAsync(printerIds, ct);
+
         public Task<PrintJob?> GetCurrentJobForPrinterAsync(Guid printerId, CancellationToken ct) =>
             db.PrintJobs.FirstOrDefaultAsync(
                 j => j.AssignedPrinterId == printerId &&

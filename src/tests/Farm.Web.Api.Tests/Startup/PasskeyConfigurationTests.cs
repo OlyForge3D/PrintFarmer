@@ -15,8 +15,8 @@ public sealed class PasskeyConfigurationTests
 
         Fido2Configuration result = ServiceCollectionExtensions.CreateFido2Configuration(configuration);
 
-        result.ServerDomain.Should().Be("localhost");
-        result.ServerName.Should().Be("PrintFarmer");
+        result.RPID.Should().Be("localhost");
+        result.RPName.Should().Be("PrintFarmer");
         result.Origins.Should().Equal("http://localhost:3000");
     }
 
@@ -35,9 +35,10 @@ public sealed class PasskeyConfigurationTests
 
         Fido2Configuration result = ServiceCollectionExtensions.CreateFido2Configuration(configuration);
 
-        result.ServerDomain.Should().Be("pfarm.example.com");
-        result.ServerName.Should().Be("Example PrintFarmer");
+        result.RPID.Should().Be("pfarm.example.com");
+        result.RPName.Should().Be("Example PrintFarmer");
         result.Origins.Should().Equal("https://pfarm.example.com");
+        result.AllowCrossOriginRequests.Should().BeFalse();
     }
 
     [Fact]
@@ -55,8 +56,8 @@ public sealed class PasskeyConfigurationTests
 
         Fido2Configuration result = ServiceCollectionExtensions.CreateFido2Configuration(configuration);
 
-        result.ServerDomain.Should().Be("localhost");
-        result.ServerName.Should().Be("PrintFarmer");
+        result.RPID.Should().Be("localhost");
+        result.RPName.Should().Be("PrintFarmer");
         result.Origins.Should().Equal("http://localhost:3000");
     }
 
@@ -76,7 +77,7 @@ public sealed class PasskeyConfigurationTests
 
         Fido2Configuration result = ServiceCollectionExtensions.CreateFido2Configuration(configuration);
 
-        result.ServerDomain.Should().Be(relyingPartyId);
+        result.RPID.Should().Be(relyingPartyId);
         result.Origins.Should().Equal(origin);
     }
 

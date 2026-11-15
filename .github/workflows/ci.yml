@@ -63,7 +63,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Node setup
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7
         with:
           node-version: '24'
           package-manager-cache: false
@@ -91,7 +91,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7
         with:
           node-version-file: .nvmrc
           package-manager-cache: false
@@ -214,7 +214,7 @@ jobs:
       reason: ${{ steps.selector.outputs.reason }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
           fetch-depth: 0
@@ -302,7 +302,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v7.1.0
         with:
           node-version-file: .nvmrc
 
@@ -480,12 +480,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
 
       - name: Setup Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v7.1.0
         with:
           node-version-file: .nvmrc
 
@@ -523,7 +523,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
 
@@ -565,12 +565,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
 
       - name: Setup Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: 24.x
           cache: "npm"
@@ -605,7 +605,7 @@ jobs:
 
       - name: Upload frontend coverage artifact
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: frontend-coverage
           path: src/Web/ReactApp/coverage
@@ -620,12 +620,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
 
       - name: Setup Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: 24.x
           cache: "npm"
@@ -645,7 +645,7 @@ jobs:
 
       - name: Upload UI coverage candidate screenshots
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ui-coverage-candidate-screenshots
           path: src/Web/ReactApp/test-results/
@@ -668,7 +668,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
 
@@ -705,7 +705,7 @@ jobs:
 
       - name: Upload Farm.Web.Api.Tests build
         if: ${{ needs.select.outputs.want_dotnet_test == 'true' }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Web.Api.Tests
           path: src/tests/Farm.Web.Api.Tests/bin/Debug/net10.0
@@ -714,7 +714,7 @@ jobs:
 
       - name: Upload Farm.Slicer.Module.Tests build
         if: ${{ contains(needs.select.outputs.matrix, 'Farm.Slicer.Module.Tests.csproj') }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Slicer.Module.Tests
           path: src/tests/Farm.Slicer.Module.Tests/bin/Debug/net10.0
@@ -729,7 +729,7 @@ jobs:
               'Farm.OrcaSlicer.Worker.Tests.csproj'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.OrcaSlicer.Worker.Tests
           path: src/tests/Farm.OrcaSlicer.Worker.Tests/bin/Debug/net10.0
@@ -744,7 +744,7 @@ jobs:
               'Farm.Moonraker.Emulator.Tests.csproj'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Moonraker.Emulator.Tests
           path: src/tests/Farm.Moonraker.Emulator.Tests/bin/Debug/net10.0
@@ -759,7 +759,7 @@ jobs:
               'Farm.Slicer.ProfileParsing.Tests.csproj'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Slicer.ProfileParsing.Tests
           path: src/tests/Farm.Slicer.ProfileParsing.Tests/bin/Debug/net10.0
@@ -774,7 +774,7 @@ jobs:
               'Farm.Modules.Abstractions.Tests.csproj'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Modules.Abstractions.Tests
           path: src/tests/Farm.Modules.Abstractions.Tests/bin/Debug/net10.0
@@ -789,7 +789,7 @@ jobs:
               'Farm.Infrastructure.Tests.csproj'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Infrastructure.Tests
           path: src/tests/Farm.Infrastructure.Tests/bin/Debug/net10.0
@@ -804,7 +804,7 @@ jobs:
               'Farm.Backend.Plugins.Tests.csproj'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Backend.Plugins.Tests
           path: src/tests/Farm.Backend.Plugins.Tests/bin/Debug/net10.0
@@ -819,7 +819,7 @@ jobs:
               'Farm.Modules.SmartPlug.Tests.csproj'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Modules.SmartPlug.Tests
           path: src/tests/Farm.Modules.SmartPlug.Tests/bin/Debug/net10.0
@@ -834,7 +834,7 @@ jobs:
               'Farm.Modules.Calibration.Tests.csproj'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Modules.Calibration.Tests
           path: src/tests/Farm.Modules.Calibration.Tests/bin/Debug/net10.0
@@ -849,7 +849,7 @@ jobs:
               'Farm.Modules.Devices.Tests.csproj'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Modules.Devices.Tests
           path: src/tests/Farm.Modules.Devices.Tests/bin/Debug/net10.0
@@ -864,7 +864,7 @@ jobs:
               'Farm.Modules.Maintenance.Tests.csproj'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Modules.Maintenance.Tests
           path: src/tests/Farm.Modules.Maintenance.Tests/bin/Debug/net10.0
@@ -879,7 +879,7 @@ jobs:
               'Farm.Modules.PrintQueue.Tests.csproj'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Modules.PrintQueue.Tests
           path: src/tests/Farm.Modules.PrintQueue.Tests/bin/Debug/net10.0
@@ -894,7 +894,7 @@ jobs:
               'Farm.Modules.Gcode.Tests.csproj'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Modules.Gcode.Tests
           path: src/tests/Farm.Modules.Gcode.Tests/bin/Debug/net10.0
@@ -909,7 +909,7 @@ jobs:
               'Farm.Modules.Identity.Tests.csproj'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Modules.Identity.Tests
           path: src/tests/Farm.Modules.Identity.Tests/bin/Debug/net10.0
@@ -924,7 +924,7 @@ jobs:
               'Farm.Modules.Inventory.Tests.csproj'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Modules.Inventory.Tests
           path: src/tests/Farm.Modules.Inventory.Tests/bin/Debug/net10.0
@@ -939,7 +939,7 @@ jobs:
               'Farm.Modules.Administration.Tests.csproj'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Modules.Administration.Tests
           path: src/tests/Farm.Modules.Administration.Tests/bin/Debug/net10.0
@@ -954,7 +954,7 @@ jobs:
               'Farm.Modules.Observability.Tests.csproj'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Modules.Observability.Tests
           path: src/tests/Farm.Modules.Observability.Tests/bin/Debug/net10.0
@@ -969,7 +969,7 @@ jobs:
               'Farm.Modules.Printers.Tests.csproj'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Modules.Printers.Tests
           path: src/tests/Farm.Modules.Printers.Tests/bin/Debug/net10.0
@@ -984,7 +984,7 @@ jobs:
               'Farm.Web.IntegrationTests.csproj'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Web.IntegrationTests
           path: src/tests/Farm.Web.IntegrationTests/bin/Debug/net10.0
@@ -1000,7 +1000,7 @@ jobs:
               'Farm.Migrations.PostgreSQL'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Migrations.PostgreSQL
           path: src/migrations/Farm.Migrations.PostgreSQL/bin/Debug/net10.0
@@ -1016,7 +1016,7 @@ jobs:
               'Farm.Migrations.SqlServer'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Migrations.SqlServer
           path: src/migrations/Farm.Migrations.SqlServer/bin/Debug/net10.0
@@ -1031,7 +1031,7 @@ jobs:
               'Farm.Slicer.Migrations.PostgreSQL'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Slicer.Migrations.PostgreSQL
           path: src/migrations/Farm.Slicer.Migrations.PostgreSQL/bin/Debug/net10.0
@@ -1046,7 +1046,7 @@ jobs:
               'Farm.Slicer.Migrations.SqlServer'
             )
           }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: Farm.Slicer.Migrations.SqlServer
           path: src/migrations/Farm.Slicer.Migrations.SqlServer/bin/Debug/net10.0
@@ -1066,7 +1066,7 @@ jobs:
       matrix: ${{ fromJson(needs.select.outputs.mig_matrix) }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
 
@@ -1171,7 +1171,7 @@ jobs:
       matrix: ${{ fromJson(needs.select.outputs.matrix) }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
 
@@ -1273,7 +1273,7 @@ jobs:
 
       - name: Upload TRX
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: dotnet-test-results-${{ matrix.name }}
           path: src/TestResults/${{ matrix.name }}.trx
@@ -1323,7 +1323,7 @@ jobs:
       PFARM_TEST_SQLSERVER_CONN: "Server=localhost,1433;Database=pfarm_test;User Id=sa;Password=Pfarm_CI_2024!;TrustServerCertificate=true"
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
 
@@ -1464,6 +1464,38 @@ jobs:
           print("Catalog populated PostgreSQL and SQL Server upgrades: 2 passed, 0 skipped")
           PY
 
+      - name: Verify project-list aggregation on PostgreSQL and SQL Server
+        if: contains(needs.select.outputs.matrix, 'Farm.Infrastructure.Tests.csproj')
+        working-directory: src
+        env:
+          PFARM_TEST_POSTGRES_CONN: ${{ env.PFARM_TEST_POSTGRES_CONN }}
+          PFARM_TEST_SQLSERVER_CONN: ${{ env.PFARM_TEST_SQLSERVER_CONN }}
+        run: |
+          set -euo pipefail
+          mkdir -p TestResults
+          assembly=tests/Farm.Infrastructure.Tests/bin/Debug/net10.0/
+          assembly+=Farm.Infrastructure.Tests.dll
+          test -f "$assembly"
+          dotnet test "$assembly" \
+            --filter "FullyQualifiedName~PrintProjectServiceProviderTests&Category=DbHeavy" \
+            --settings ./vstest.runsettings \
+            --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini \
+            --logger "console;verbosity=detailed" \
+            --logger "trx;LogFileName=project-list-provider-tests.trx" \
+            --results-directory TestResults
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("TestResults/project-list-provider-tests.trx").getroot()
+          ns = "{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}"
+          results = root.findall(f"{ns}Results/{ns}UnitTestResult")
+          if len(results) != 2 or any(r.get("outcome") != "Passed" for r in results):
+              raise SystemExit("Expected two passing project-list provider cases, with no skips")
+          for provider in ("postgres", "sqlserver"):
+              if not any(provider in r.get("testName", "").lower() for r in results):
+                  raise SystemExit(f"Missing project-list provider case: {provider}")
+          print("Project-list PostgreSQL and SQL Server parity/plan cases: 2 passed, 0 skipped")
+          PY
+
       - name: Run maintenance analytics on both production providers
         if: contains(needs.select.outputs.matrix, 'Farm.Infrastructure.Tests.csproj')
         working-directory: src
@@ -1540,7 +1572,7 @@ jobs:
 
       - name: Upload provider TRX
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: dotnet-test-results-provider
           path: |

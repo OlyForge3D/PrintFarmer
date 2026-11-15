@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure.Dtos;
+﻿using CsvHelper;
+
+namespace Farm.Infrastructure.Dtos;
 
 /// <summary>
 /// Request parameters for report generation.
@@ -14,16 +16,20 @@ public record ReportRequest
 /// <summary>
 /// CSV row representing a single print job in the history export.
 /// </summary>
-public record JobHistoryCsvRow
+[CsvRecord]
+public partial record JobHistoryCsvRow
 {
     public string JobName { get; init; } = string.Empty;
 
     public string Status { get; init; } = string.Empty;
 
+    [CsvFormat("G")]
     public DateTime QueuedAt { get; init; }
 
+    [CsvFormat("G")]
     public DateTime? StartedAt { get; init; }
 
+    [CsvFormat("G")]
     public DateTime? CompletedAt { get; init; }
 
     public double? PrintTimeMinutes { get; init; }

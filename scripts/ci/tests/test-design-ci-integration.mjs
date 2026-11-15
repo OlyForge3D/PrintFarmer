@@ -85,7 +85,7 @@ test('required CI tooling job runs the detector, not only an optional workflow',
   assert.ok(detectorSetupNode >= 0 && detectorInstallDependencies > detectorSetupNode,
     'Standalone detector must set up Node and install dependencies');
   assert.equal(detectorSteps[detectorSetupNode].uses,
-    'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020',
+    'actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1',
     'Standalone detector must use the verified immutable setup-node action pin');
   assert.equal(detectorSteps[detectorInstallDependencies].run, 'npm ci --ignore-scripts');
   assert.ok(detectorInstallDependencies < detectorScan,

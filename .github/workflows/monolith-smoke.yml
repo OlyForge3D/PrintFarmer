@@ -93,14 +93,14 @@ jobs:
       EVIDENCE_DRIVER_SHA: ${{ github.sha }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
           ref: ${{ matrix.capture == 'before' && inputs.evidence_baseline_sha || github.sha }}
 
       - name: Checkout current evidence driver for baseline application
         if: matrix.capture == 'before'
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
@@ -138,7 +138,7 @@ jobs:
           exit 1
 
       - name: Setup Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v7.1.0
         with:
           node-version-file: .nvmrc
           cache: "npm"
@@ -215,7 +215,7 @@ jobs:
 
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: monolith-smoke-playwright-report-${{ matrix.capture }}
           path: src/Web/ReactApp/playwright-report/
@@ -224,7 +224,7 @@ jobs:
 
       - name: Upload API log
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: monolith-smoke-api-log-${{ matrix.capture }}
           path: ${{ runner.temp }}/monolith-smoke-api.log

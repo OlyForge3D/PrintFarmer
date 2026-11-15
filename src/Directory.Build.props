@@ -97,7 +97,7 @@
        3.x keeps the managed API used by Microsoft.Data.Sqlite 10.0, verified by the
        SQLite-backed test suite. -->
   <ItemGroup>
-    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
   </ItemGroup>
 
 </Project>

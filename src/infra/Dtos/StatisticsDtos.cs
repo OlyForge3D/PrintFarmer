@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure.Dtos;
+﻿using CsvHelper;
+
+namespace Farm.Infrastructure.Dtos;
 
 /// <summary>
 /// High-level KPI summary values for dashboard display.
@@ -39,7 +41,8 @@ public record DailyJobCountDto
 /// <summary>
 /// Daily cost totals for cost-over-time chart.
 /// </summary>
-public record DailyCostDto
+[CsvRecord]
+public partial record DailyCostDto
 {
     public string Date { get; init; } = string.Empty;
 
@@ -59,7 +62,8 @@ public record FilamentByMaterialDto
 /// <summary>
 /// Per-printer utilization statistics.
 /// </summary>
-public record PrinterUtilizationDto
+[CsvRecord]
+public partial record PrinterUtilizationDto
 {
     public Guid PrinterId { get; init; }
 
