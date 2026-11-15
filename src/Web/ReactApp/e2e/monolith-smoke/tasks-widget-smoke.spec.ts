@@ -57,11 +57,12 @@ test.describe('monolith smoke: tasks', () => {
       assertMatchesWireContractShape(initialList, TASK_LIST_EMPTY_FIXTURE);
     }
 
-    await expect.poll(() => page.evaluate(async () => {
+    const connected = () => page.evaluate(async () => {
       const moduleUrl = new URL('/src/services/printer-signalr.ts', location.origin).href;
       const { printerSignalRService } = await import(moduleUrl);
       return printerSignalRService.isConnected;
-    }), { timeout: 15_000 }).toBe(true);
+    });
+    await expect.poll(connected, { timeout: 15_000 }).toBe(true);
 
     await page.evaluate(async () => {
       const moduleUrl = new URL('/src/services/printer-signalr.ts', location.origin).href;
@@ -115,6 +116,11 @@ test.describe('monolith smoke: tasks', () => {
       const { printerSignalRService } = await import(moduleUrl);
       await printerSignalRService.disconnect();
       await printerSignalRService.connect();
+    });
+    await expect.poll(connected, { timeout: 15_000 }).toBe(true);
+    await page.evaluate(async () => {
+      const moduleUrl = new URL('/src/services/printer-signalr.ts', location.origin).href;
+      const { printerSignalRService } = await import(moduleUrl);
       const connection = Reflect.get(printerSignalRService, 'connection') as {
         invoke: (method: string) => Promise<void>;
       };
