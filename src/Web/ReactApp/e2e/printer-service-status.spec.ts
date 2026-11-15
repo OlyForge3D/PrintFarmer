@@ -29,6 +29,44 @@ const printerSeeds = {
   '/api/settings/OperatorFeatures': { enabled: false },
 };
 
+for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
+  test(`cancel print requires confirmation at ${viewport.width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize(viewport);
+    const active = { ...printers[0], state: 'Printing', jobName: 'fixture-benchy.gcode' };
+    const requests = await mountRoutedToolbarPage(page, `/printers/${active.id}?view=collapsed`, {
+      ...printerSeeds,
+      '/api/printers': [active],
+      '/api/printers/summary': [active],
+      [`/api/printers/${active.id}`]: active,
+      [`/api/printers/${active.id}/details`]: active,
+    });
+    let cancellations = 0;
+    await page.route(`**/api/printers/${active.id}/cancel`, async route => {
+      cancellations++;
+      await route.fulfill({ json: { success: true } });
+    });
+    await page.getByRole('button', { name: 'Cancel print', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Cancel print?' });
+    await expect(dialog).toContainText('fixture-benchy.gcode');
+    await expect(dialog).toContainText(active.name);
+    for (const name of ['Close modal', 'Keep printing', 'Cancel print']) {
+      const bounds = await dialog.getByRole('button', { name, exact: true }).boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.width).toBeGreaterThanOrEqual(44);
+      expect(bounds!.height).toBeGreaterThanOrEqual(44);
+    }
+    expect(cancellations).toBe(0);
+    await page.screenshot({ path: testInfo.outputPath(`cancel-confirmation-${viewport.width}.png`) });
+    await dialog.getByRole('button', { name: 'Keep printing' }).click();
+    expect(cancellations).toBe(0);
+    await page.getByRole('button', { name: 'Cancel print', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Cancel print', exact: true }).click();
+    await expect.poll(() => cancellations).toBe(1);
+    expect(requests.external).toEqual([]);
+    expect(requests.errors).toEqual([]);
+  });
+}
+
 const overview = {
   checkedAt: since, overallStatus: 'Degraded',
   subsystems: [
