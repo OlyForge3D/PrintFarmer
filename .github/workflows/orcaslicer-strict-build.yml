@@ -247,7 +247,7 @@ jobs:
 
       - name: Upload publication evidence
         if: steps.check.outputs.skip != 'true' && steps.gate.outputs.publish == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: pinned-orca-publication-${{ env.ORCASLICER_VERSION }}
           path: pinned-worker-evidence/pinned-orca-publication.json
@@ -379,7 +379,7 @@ jobs:
 
       - name: Upload smoke evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: pinned-orca-smoke
           path: pinned-worker-evidence/pinned-orca-smoke.json
