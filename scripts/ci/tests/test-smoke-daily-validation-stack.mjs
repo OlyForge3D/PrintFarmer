@@ -7,6 +7,15 @@ const scriptPath =
   process.env.SMOKE_DAILY_VALIDATION_STACK_PATH ?? 'scripts/ci/smoke-daily-validation-stack.sh';
 const script = readFileSync(scriptPath, 'utf8');
 
+test('daily validation API inherits the bootstrap secret from the generated base Compose service', () => {
+  const base = readFileSync('scripts/docker/compose-templates/docker-compose.yml', 'utf8');
+  const api = base.slice(base.indexOf('\n  api:'), base.indexOf('\n  frontend:'));
+  assert.match(api, /- PFARM__Setup__BootstrapSecret=\$\{PFARM__Setup__BootstrapSecret:-\}/);
+  const overlay = readFileSync('scripts/docker/compose-templates/docker-compose.daily-validation.yml', 'utf8');
+  const dailyApi = overlay.slice(overlay.indexOf('\n  api:'), overlay.indexOf('\n  frontend:'));
+  assert.doesNotMatch(dailyApi, /PFARM__Setup__BootstrapSecret|environment:\s*!(?:reset|override)/);
+});
+
 function extractBashFunction(name) {
   const start = script.indexOf(`${name}() {`);
   assert.notEqual(start, -1, `expected ${name} function to exist`);
