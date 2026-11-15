@@ -11,6 +11,8 @@ namespace Farm.Web.Api.Startup;
 /// </summary>
 public static class TelemetryStartup
 {
+    private static readonly string[] ServerRequestUrlTags = ["url.full", "http.url", "http.target"];
+
     /// <summary>
     /// Adds PrintFarmer OpenTelemetry configuration (tracing + metrics).
     /// Skipped for tests and when <c>DISABLE_TELEMETRY=true</c> in configuration.
@@ -159,7 +161,7 @@ public static class TelemetryStartup
         // query-redaction opt-out is enabled. Reapply at response completion before exporters.
         _ = activity.SetTag("url.query", null);
         _ = activity.SetTag("http.request.query", null);
-        foreach (string tag in new[] { "url.full", "http.url", "http.target" })
+        foreach (string tag in ServerRequestUrlTags)
         {
             if (activity.GetTagItem(tag) is string value)
             {
