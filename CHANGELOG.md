@@ -46,6 +46,12 @@
 
 ### Fixes
 
+- Gate web jog and coordinate entry on affirmative per-axis homing telemetry.
+  Discover PrusaLink motion support per printer without sending motion, disable
+  unsupported CORE One L/Buddy Home and jog controls, and distinguish explicit
+  endpoint rejection from unknown outcomes without duplicating safety warnings
+  (#3566). Preserve API-key-only authentication for supported legacy movement.
+
 - iOS: remove the Heat **Go** button. Nozzle, Bed, Chamber, Heater Box and
   other settable heaters now share one row: name, current reading, a tappable
   target and ±. Steppers apply that heater after a short pause; typed targets

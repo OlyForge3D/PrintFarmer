@@ -47,6 +47,7 @@ import {
   DEFAULT_EXTRUDE_SPEED_MMS,
 } from '@/features/printers/constants/temperaturePresets';
 import { getHomeButtonStyle } from '@/features/printers/utils/homeButtonStyle';
+import { knownHomedAxes } from '@/features/printers/utils/homedAxes';
 import { getStatusHeaderClassName, getStatusIndicatorColor, isPrinterStateShutdown } from '@/features/printers/utils/statusColors';
 // This component's scrollable content follows PRINTER_DETAIL_SECTION_ORDER
 // (see printerDetailSectionOrder.ts): Statistics, Version, Control, Objects,
@@ -471,8 +472,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   // Check if axes are homed based on homedAxes string from Moonraker
   // homedAxes is a string like "xyz", "xy", "z", or "" if not homed
-  const homedAxesRaw = displayPrinter?.homedAxes;
-  const isHomedStateKnown = typeof homedAxesRaw === 'string';
+  const homedAxesRaw = knownHomedAxes(displayPrinter?.homedAxes);
+  const isHomedStateKnown = homedAxesRaw !== undefined;
   const homedAxes = (homedAxesRaw ?? '').toLowerCase();
 
   // Guarded debug logging - only log if enabled in window.PrintFarmerDebug
@@ -1016,7 +1017,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             <div className="grid grid-cols-3 grid-rows-3 gap-1 w-fit">
               {/* Top row */}
               <MotionControlButton
-                disabled={movementActionPending || !canMoveNow || backendCapabilities?.supportsHoming === false}
+                disabled={movementActionPending || !canMoveNow || backendCapabilities?.supportsHoming !== true}
                 onClick={() => handleHome('all')}
                 title="Home all axes"
                 padSize="small"
@@ -1026,7 +1027,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 <HomeIcon className="h-4 w-4" />
               </MotionControlButton>
               <MotionControlButton
-                disabled={movementActionPending || !canMoveNow}
+                disabled={movementActionPending || !canMoveNow || !isYHomed}
                 onClick={() => handleMove('Y', step)}
                 aria-label="Jog Y positive"
                 padSize="small"
@@ -1044,7 +1045,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
               {/* Middle row */}
               <MotionControlButton
-                disabled={movementActionPending || !canMoveNow}
+                disabled={movementActionPending || !canMoveNow || !isXHomed}
                 onClick={() => handleMove('X', -step)}
                 aria-label="Jog X negative"
                 padSize="small"
@@ -1052,7 +1053,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 <ArrowLeftIcon className="h-4 w-4" />
               </MotionControlButton>
               <MotionControlButton
-                disabled={movementActionPending || !canMoveNow || backendCapabilities?.supportsHomingXY === false}
+                disabled={movementActionPending || !canMoveNow || backendCapabilities?.supportsHomingXY !== true}
                 onClick={() => handleHome('xy')}
                 title="Home X/Y"
                 padSize="small"
@@ -1062,7 +1063,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 <HomeIcon className="h-4 w-4" />
               </MotionControlButton>
               <MotionControlButton
-                disabled={movementActionPending || !canMoveNow}
+                disabled={movementActionPending || !canMoveNow || !isXHomed}
                 onClick={() => handleMove('X', step)}
                 aria-label="Jog X positive"
                 padSize="small"
@@ -1073,7 +1074,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               {/* Bottom row */}
               <div></div>
               <MotionControlButton
-                disabled={movementActionPending || !canMoveNow}
+                disabled={movementActionPending || !canMoveNow || !isYHomed}
                 onClick={() => handleMove('Y', -step)}
                 aria-label="Jog Y negative"
                 padSize="small"
@@ -1086,7 +1087,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             {/* Z Pad */}
             <div className="grid grid-cols-1 grid-rows-3 gap-1 w-fit">
               <MotionControlButton
-                disabled={movementActionPending || !canMoveNow}
+                disabled={movementActionPending || !canMoveNow || !isZHomed}
                 onClick={() => handleMove('Z', step)}
                 aria-label="Jog Z positive"
                 padSize="small"
@@ -1094,7 +1095,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 Z+
               </MotionControlButton>
               <MotionControlButton
-                disabled={movementActionPending || !canMoveNow || backendCapabilities?.supportsHomingZ === false}
+                disabled={movementActionPending || !canMoveNow || backendCapabilities?.supportsHomingZ !== true}
                 onClick={() => handleHome('z')}
                 title="Home Z"
                 padSize="small"
@@ -1104,7 +1105,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 <HomeIcon className="h-4 w-4" />
               </MotionControlButton>
               <MotionControlButton
-                disabled={movementActionPending || !canMoveNow}
+                disabled={movementActionPending || !canMoveNow || !isZHomed}
                 onClick={() => handleMove('Z', -step)}
                 aria-label="Jog Z negative"
                 padSize="small"
@@ -1190,7 +1191,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             onMove={handleMove}
             onMoveTo={backendCapabilities?.supportsAbsoluteMovement === true ? handleMoveTo : undefined}
           />
-          <PrinterMotionHelp />
+          <PrinterMotionHelp movementUnavailable={backendCapabilities?.supportsRelativeMovement === false} />
         </CollapsibleSection>
 
         {/* Temperatures Section */}

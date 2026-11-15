@@ -1873,6 +1873,39 @@ public partial class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
         }
     }
 
+    /// <inheritdoc />
+    public async Task<bool> SupportsMovementAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
+    {
+        string url = new Uri(EnsureBaseUri(baseUrl), "api/printer/printhead").ToString();
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, credentials);
+        try
+        {
+            using HttpResponseMessage response = await GetClientForCredentials(credentials).SendAsync(request, ct);
+
+            // Legacy PrusaLink recognizes this POST-only route; Buddy firmware returns 404.
+            if (response.StatusCode == HttpStatusCode.MethodNotAllowed &&
+                response.Content.Headers.Allow.Contains("POST", StringComparer.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            _logger.LogDebug(
+                "PrusaLink movement endpoint is unavailable at {BaseUrl} (HTTP {StatusCode})",
+                baseUrl, (int)response.StatusCode);
+            return false;
+        }
+        catch (HttpRequestException exception)
+        {
+            _logger.LogWarning(exception, "Could not discover PrusaLink movement support at {BaseUrl}; controls remain disabled", baseUrl);
+            return false;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("PrusaLink movement discovery timed out at {BaseUrl}; controls remain disabled", baseUrl);
+            return false;
+        }
+    }
+
     public async Task<bool> JogPrintHeadLegacyAsync(string baseUrl, double? x, double? y, double? z, double? feedRate, PrinterCredential? credentials, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(credentials);
@@ -1901,6 +1934,7 @@ public partial class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
             request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
             using HttpResponseMessage response = await client.SendAsync(request, ct);
+            RejectUnsupportedMovement(response);
             if (response.StatusCode == HttpStatusCode.Conflict)
             {
                 throw new Farm.Infrastructure.Services.Printers.PrinterBackendBusyException(
@@ -1908,6 +1942,10 @@ public partial class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
             }
 
             return response.IsSuccessStatusCode;
+        }
+        catch (PrinterBackendUnsupportedException)
+        {
+            throw;
         }
         catch (Farm.Infrastructure.Services.Printers.PrinterBackendBusyException)
         {
@@ -1962,12 +2000,26 @@ public partial class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
             request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
             using HttpResponseMessage response = await client.SendAsync(request, ct);
+            RejectUnsupportedMovement(response);
             return response.IsSuccessStatusCode;
+        }
+        catch (PrinterBackendUnsupportedException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             _logger?.LogError("[PrusaLink] HomePrintHeadLegacy failed for {BaseUrl}: {Message}", baseUrl, ex.Message);
             return false;
+        }
+    }
+
+    private static void RejectUnsupportedMovement(HttpResponseMessage response)
+    {
+        if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)
+        {
+            throw new PrinterBackendUnsupportedException(
+                "This PrusaLink firmware does not expose remote Home or jog controls. Use the printer's physical controls.");
         }
     }
 }

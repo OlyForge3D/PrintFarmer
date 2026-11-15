@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { canMove, canSetStep, canUseManualMove, getPrinterSupport } from '../printerSupport';
 
 describe('printerSupport movement gating (#1909)', () => {
-  const support = getPrinterSupport();
+  const support = getPrinterSupport(undefined, { supportsMovement: true });
+
+  it('does not enable movement while native capabilities are unknown', () => {
+    expect(getPrinterSupport().supportsMovement).toBe(false);
+  });
 
   describe('canMove', () => {
     it('allows movement when the printer is online, idle, and Klippy is not shutdown', () => {

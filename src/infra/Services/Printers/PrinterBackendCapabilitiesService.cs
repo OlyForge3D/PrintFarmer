@@ -103,7 +103,9 @@ public class PrinterBackendCapabilitiesService(
 
         PrinterControlCapabilities controls =
             (controlClient as ISupportsPrinterControlCapabilities)?.ControlCapabilities ?? new();
-        bool movement = controlClient is ISupportsMovement;
+        bool movement = controlClient is ISupportsMovement &&
+            (controlClient is not ISupportsMovementDiscovery discovery ||
+                await discovery.SupportsMovementAsync(printer.BackendUrl, printer.Credential, ct));
         bool temperature = controlClient is ISupportsTemperatureControl;
         bool homing = movement && controls.SupportsHoming;
         PrinterStatusCacheSnapshot? statusSnapshot =
@@ -122,6 +124,9 @@ public class PrinterBackendCapabilitiesService(
         PrinterVerifiedSafetyDto verifiedSafety = discoverSafety
             ? await GetVerifiedSafetyAsync(printer, backend, ct)
             : PrinterVerifiedSafetyDto.Unknown(source: "interactive.native-controls");
+        bool supportsMovement = controlClient is ISupportsMovementDiscovery
+            ? movement
+            : (capabilities & BackendCapabilities.Movement) == BackendCapabilities.Movement;
         return new PrinterBackendCapabilitiesDto(
             PrinterId: printer.Id,
             PrinterName: printer.Name,
@@ -133,7 +138,7 @@ public class PrinterBackendCapabilitiesService(
             SupportsStartPrint: (capabilities & BackendCapabilities.StartPrint) == BackendCapabilities.StartPrint,
             SupportsControlOperations: (capabilities & BackendCapabilities.ControlOperations) == BackendCapabilities.ControlOperations,
             SupportsFileMetadata: (capabilities & BackendCapabilities.FileMetadata) == BackendCapabilities.FileMetadata,
-            SupportsMovement: (capabilities & BackendCapabilities.Movement) == BackendCapabilities.Movement,
+            SupportsMovement: supportsMovement,
             SupportsTemperatureControl: (capabilities & BackendCapabilities.TemperatureControl) == BackendCapabilities.TemperatureControl,
             SupportsPrinterInformation: (capabilities & BackendCapabilities.PrinterInformation) == BackendCapabilities.PrinterInformation,
             SupportsHistory: supportsHistory,

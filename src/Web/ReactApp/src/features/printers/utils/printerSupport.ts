@@ -33,8 +33,8 @@ export interface PrinterSupport {
 /**
  * Normalize optional backend capabilities to a stable set of boolean flags.
  *
- * Defaulting to `true` preserves existing UX while capabilities are loading
- * (i.e., we prefer not to prematurely disable controls).
+ * Movement waits for native capability evidence; unrelated controls retain
+ * their existing loading defaults.
  */
 export function getPrinterSupport(
   backendCapabilities?: PrinterBackendCapabilitiesDto,
@@ -42,7 +42,7 @@ export function getPrinterSupport(
 ): PrinterSupport {
   return {
     supportsControlOperations: backendCapabilities?.supportsControlOperations ?? defaults?.supportsControlOperations ?? true,
-    supportsMovement: backendCapabilities?.supportsRelativeMovement ?? backendCapabilities?.supportsMovement ?? defaults?.supportsMovement ?? true,
+    supportsMovement: backendCapabilities?.supportsRelativeMovement ?? backendCapabilities?.supportsMovement ?? defaults?.supportsMovement ?? false,
     supportsTemperatureControl: backendCapabilities?.supportsTemperatureControl ?? defaults?.supportsTemperatureControl ?? true,
     supportsHistory: backendCapabilities?.supportsHistory ?? defaults?.supportsHistory ?? true,
     supportsFileList: backendCapabilities?.supportsFileList ?? defaults?.supportsFileList ?? true,

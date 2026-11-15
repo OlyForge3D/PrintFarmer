@@ -854,10 +854,11 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             homedAxes={homedAxesRaw}
             hotendTemp={printer.hotendTemp}
             movementActionPending={movementActionPending}
+            movementUnavailable={backendCapabilities?.supportsRelativeMovement === false}
             canMove={canMoveNow}
-            canHomeAll={canMoveNow && backendCapabilities?.supportsHoming !== false}
-            canHomeXY={canMoveNow && backendCapabilities?.supportsHomingXY !== false}
-            canHomeZ={canMoveNow && backendCapabilities?.supportsHomingZ !== false}
+            canHomeAll={canMoveNow && backendCapabilities?.supportsHoming === true}
+            canHomeXY={canMoveNow && backendCapabilities?.supportsHomingXY === true}
+            canHomeZ={canMoveNow && backendCapabilities?.supportsHomingZ === true}
             canDisableMotors={canDisableMotorsNow}
             canSetStep={canSetStepNow}
             canManualMove={canManualMoveNow}

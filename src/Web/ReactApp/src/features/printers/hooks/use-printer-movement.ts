@@ -1,7 +1,7 @@
 import { useIsMutating, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
-import { mutationErrorMessage } from '@/common/utils/mutationError';
+import { mutationErrorMessage, mutationErrorStatus } from '@/common/utils/mutationError';
 import type { CommandResult, MoveRequest, Printer } from '@/types/api';
 
 export interface PrinterMovement extends MoveRequest {
@@ -38,7 +38,12 @@ export function usePrinterMovement(printer?: Pick<Printer, 'id'>) {
           case 'MoveTo': return await apiClient.movePrinterTo(printerId, move);
         }
       } catch (error) {
-        throw new Error(`${mutationErrorMessage(error, 'Movement request failed')}. Check the printer before sending another command; it may have already moved.`, { cause: error });
+        const message = mutationErrorMessage(error, 'Movement request failed');
+        const unsupported = mutationErrorStatus(error) === 502 && /does not (support|expose)/i.test(message);
+        const guidance = unsupported || /check the printer/i.test(message)
+          ? message
+          : `${message.replace(/[.\s]+$/, '')}. Check the printer before sending another command; it may have already moved.`;
+        throw new Error(guidance, { cause: error });
       } finally {
         active.delete(printerId);
       }

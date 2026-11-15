@@ -322,6 +322,79 @@ public sealed class PluginSemanticControlTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
+    public async Task PrusaLinkMovement_SupportedAuthentication_ForwardsHomeAndJog(bool apiKeyOnly)
+    {
+        using var handler = new CaptureHandler();
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkClient(http);
+        var credential = apiKeyOnly
+            ? new PrinterCredential { ApiKey = "test-key" }
+            : new PrinterCredential { Username = "test-user", Password = "test-password" };
+
+        Assert.True(await client.HomeAsync("http://printer.local", credential));
+        Assert.True(await client.HomeXYAsync("http://printer.local", credential));
+        Assert.True(await client.HomeZAsync("http://printer.local", credential));
+        Assert.True(await client.MoveAsync("http://printer.local", x: 1, credential: credential));
+
+        Assert.Equal(4, handler.Requests.Count);
+        Assert.All(handler.Requests, request =>
+        {
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("/api/printer/printhead", request.Uri.AbsolutePath);
+            Assert.Equal(apiKeyOnly ? "test-key" : null, request.ApiKey);
+        });
+        Assert.Equal("jog", handler.Requests[^1].Body!.Value.GetProperty("command").GetString());
+        Assert.Equal(1, handler.Requests[^1].Body!.Value.GetProperty("x").GetDouble());
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.MethodNotAllowed, "POST", true)]
+    [InlineData(HttpStatusCode.MethodNotAllowed, "GET", false)]
+    [InlineData(HttpStatusCode.MethodNotAllowed, null, false)]
+    [InlineData(HttpStatusCode.NotFound, null, false)]
+    [InlineData(HttpStatusCode.Unauthorized, null, false)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, null, false)]
+    [InlineData(HttpStatusCode.OK, null, false)]
+    public async Task PrusaLinkMovementDiscovery_EndpointResponse_RequiresExplicitPostSupportWithoutMotion(
+        HttpStatusCode status, string? allow, bool supported)
+    {
+        using var handler = new CaptureHandler(status, allow: allow);
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkClient(http);
+        var credential = new PrinterCredential { ApiKey = "test-key" };
+
+        Assert.Equal(supported, await client.SupportsMovementAsync("http://printer.local:8080/prusa/", credential));
+
+        Request request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Get, request.Method);
+        Assert.Equal("/prusa/api/printer/printhead", request.Uri.AbsolutePath);
+        Assert.Equal(8080, request.Uri.Port);
+        Assert.Equal("test-key", request.ApiKey);
+        Assert.Null(request.Body);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound)]
+    [InlineData(HttpStatusCode.MethodNotAllowed)]
+    public async Task PrusaLinkMovement_ExplicitUnsupportedResponse_DoesNotBecomeUnknownOrRetry(HttpStatusCode status)
+    {
+        using var handler = new CaptureHandler(status);
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkClient(http);
+        var credential = new PrinterCredential { Username = "test-user", Password = "test-password" };
+
+        await Assert.ThrowsAsync<PrinterBackendUnsupportedException>(() => client.HomeAsync("http://printer.local", credential));
+        await Assert.ThrowsAsync<PrinterBackendUnsupportedException>(() => client.HomeXYAsync("http://printer.local", credential));
+        await Assert.ThrowsAsync<PrinterBackendUnsupportedException>(() => client.HomeZAsync("http://printer.local", credential));
+        await Assert.ThrowsAsync<PrinterBackendUnsupportedException>(() => client.MoveAsync("http://printer.local", x: 1, credential: credential));
+
+        Assert.Equal(4, handler.Requests.Count);
+        Assert.All(handler.Requests, request => Assert.Equal(HttpMethod.Post, request.Method));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
     public async Task SemanticControls_CallerCancelled_DoNotSend(bool moonraker)
     {
         using var handler = new CaptureHandler();
@@ -370,7 +443,8 @@ public sealed class PluginSemanticControlTests
 
     private sealed class CaptureHandler(
         HttpStatusCode status = HttpStatusCode.OK,
-        string response = "{}") : HttpMessageHandler
+        string response = "{}",
+        string? allow = null) : HttpMessageHandler
     {
         public List<Request> Requests { get; } = [];
 
@@ -386,7 +460,13 @@ public sealed class PluginSemanticControlTests
             Requests.Add(new Request(
                 request.RequestUri!, request.Method,
                 request.Headers.TryGetValues("X-Api-Key", out IEnumerable<string>? keys) ? keys.Single() : null, body));
-            return new HttpResponseMessage(status) { Content = new StringContent(response) };
+            var result = new HttpResponseMessage(status) { Content = new StringContent(response) };
+            if (allow is not null)
+            {
+                result.Content.Headers.Allow.Add(allow);
+            }
+
+            return result;
         }
     }
 }

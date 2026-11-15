@@ -64,6 +64,9 @@ public interface IPrusaLinkApiClient
 
     // ========== PRIMARY METHODS (PrinterCredential?) ==========
 
+    /// <summary>Checks for the legacy printhead endpoint using only a read request.</summary>
+    Task<bool> SupportsMovementAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default);
+
     /// <summary>Gets API version information.</summary>
     Task<VersionInfo> GetVersionAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default);
 

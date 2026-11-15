@@ -91,11 +91,16 @@ Absolute GO requires explicit, finite X, Y, and Z targets in millimeters.
 Empty, untouched fields are not errors, and current-position labels do not fill
 in omitted targets.
 
-Interactive controls follow each backend's native commands without PrintFarmer
+Interactive API controls follow each backend's native commands without PrintFarmer
 geometry, homing, temperature-readiness, or telemetry-freshness preflight.
 Klipper or the selected firmware decides whether a command is executable.
 Relative jogging does not require absolute-position support. Missing readback
-remains unknown but does not disable an otherwise supported control. Filament
+remains unknown. Web jog and coordinate controls require affirmative homing
+telemetry for the selected axis; Home acceptance and position readings are not
+homing evidence. PrusaLink movement is checked per printer without sending
+motion: Buddy firmware (including CORE One L) has no remote Home/jog endpoint,
+so those controls stay disabled with an explanation. Legacy Raspberry Pi
+PrusaLink retains native movement support. Filament
 commands do not automatically heat or wait; configure native macros when that
 behavior is wanted. Permissions, valid inputs, request coordination and explicit
 errors remain. Automated and calibration workflows keep their separate checks.
