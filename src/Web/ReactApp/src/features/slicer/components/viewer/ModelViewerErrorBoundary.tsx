@@ -29,17 +29,38 @@ export function ModelLoadFailedAlert() {
   );
 }
 
+export function ViewerInitializationFailedAlert({ error }: { error: Error }) {
+  const webGlUnavailable = /\bwebgl\b/i.test(error.message);
+
+  return (
+    <div
+      className="flex h-full w-full items-center justify-center bg-pf-bg-0 p-4"
+      role="alert"
+    >
+      <div className="max-w-sm rounded-lg border border-pf-border bg-pf-bg-1 p-6 text-center shadow-lg">
+        <h3 className="text-sm font-semibold text-pf-text-primary">3D viewer unavailable</h3>
+        <p className="mt-2 text-sm text-pf-text-secondary">
+          {webGlUnavailable
+            ? 'The 3D viewer could not initialize because WebGL is unavailable. Enable WebGL in your browser or use a browser or device that supports it.'
+            : 'The 3D viewer could not initialize.'}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 interface ModelViewerErrorBoundaryProps {
   children: ReactNode;
   className?: string;
   resetKey?: string;
-  fallback?: ReactNode;
+  fallback?: ReactNode | ((error: Error) => ReactNode);
   /** Called when a child throws (e.g. a 3D model failed to load). */
   onError?: (error: Error) => void;
 }
 
 interface ModelViewerErrorBoundaryState {
   hasError: boolean;
+  error: Error | null;
   retryNonce: number;
 }
 
@@ -48,13 +69,15 @@ export class ModelViewerErrorBoundary extends Component<ModelViewerErrorBoundary
     super(props);
     this.state = {
       hasError: false,
+      error: null,
       retryNonce: 0,
     };
   }
 
-  static getDerivedStateFromError(): Partial<ModelViewerErrorBoundaryState> {
+  static getDerivedStateFromError(error: Error): Partial<ModelViewerErrorBoundaryState> {
     return {
       hasError: true,
+      error,
     };
   }
 
@@ -65,21 +88,25 @@ export class ModelViewerErrorBoundary extends Component<ModelViewerErrorBoundary
 
   componentDidUpdate(prevProps: ModelViewerErrorBoundaryProps) {
     if (this.props.resetKey !== prevProps.resetKey && this.state.hasError) {
-      this.setState({ hasError: false });
+      this.setState({ hasError: false, error: null });
     }
   }
 
   private handleRetry = () => {
     this.setState((prevState) => ({
       hasError: false,
+      error: null,
       retryNonce: prevState.retryNonce + 1,
     }));
   };
 
   render() {
     if (this.state.hasError) {
-      if (this.props.fallback) {
-        return <React.Fragment key={this.state.retryNonce}>{this.props.fallback}</React.Fragment>;
+      const fallback = typeof this.props.fallback === 'function'
+        ? this.state.error && this.props.fallback(this.state.error)
+        : this.props.fallback;
+      if (fallback) {
+        return <React.Fragment key={this.state.retryNonce}>{fallback}</React.Fragment>;
       }
 
       return (

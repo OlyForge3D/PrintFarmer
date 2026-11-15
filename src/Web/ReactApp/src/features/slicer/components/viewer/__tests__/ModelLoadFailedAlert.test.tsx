@@ -1,6 +1,18 @@
 import { render, screen } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
-import { ModelLoadFailedAlert } from '../ModelViewerErrorBoundary';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import {
+  ModelLoadFailedAlert,
+  ModelViewerErrorBoundary,
+  ViewerInitializationFailedAlert,
+} from '../ModelViewerErrorBoundary';
+
+function ThrowingViewer({ error }: { error: Error }): null {
+  throw error;
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 /**
  * Regression coverage for issue #1974: at a 390px mobile viewport, the
@@ -41,5 +53,40 @@ describe('ModelLoadFailedAlert (issue #1974)', () => {
     // otherwise-auto width and does not prevent the collapse.
     expect(alert).toHaveClass('w-64');
     expect(alert).toHaveClass('max-w-[80vw]');
+  });
+});
+
+describe('ViewerInitializationFailedAlert (issue #3828)', () => {
+  it('explains that WebGL initialization failed without blaming a model', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    render(
+      <ModelViewerErrorBoundary
+        fallback={(error) => <ViewerInitializationFailedAlert error={error} />}
+      >
+        <ThrowingViewer error={new Error('Error creating WebGL context.')} />
+      </ModelViewerErrorBoundary>,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'The 3D viewer could not initialize because WebGL is unavailable.',
+    );
+    expect(screen.queryByText('Failed to load 3D model')).not.toBeInTheDocument();
+  });
+
+  it('does not claim WebGL is unavailable for unrelated viewer errors', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    render(
+      <ModelViewerErrorBoundary
+        fallback={(error) => <ViewerInitializationFailedAlert error={error} />}
+      >
+        <ThrowingViewer error={new Error('Unexpected viewer error.')} />
+      </ModelViewerErrorBoundary>,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent('The 3D viewer could not initialize.');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('WebGL is unavailable');
+    expect(screen.queryByText('Failed to load 3D model')).not.toBeInTheDocument();
   });
 });
