@@ -392,7 +392,9 @@ export const NewSliceJobPage: React.FC = () => {
   const [machineSelection, setMachineSelection] = useState<ProfileSelection>({ name: '' });
   const selectedMachineProfileId = machineSelection.name;
   const setSelectedMachineProfileId = useCallback((name: string, customId?: string) => {
-    setMachineSelection({ name, customId });
+    // Bail out when unchanged: a fresh object would re-render and re-run the
+    // selection effects, which loop forever while profile queries are pending (#3833).
+    setMachineSelection((prev) => (prev.name === name && prev.customId === customId ? prev : { name, customId }));
   }, []);
   const [isMachinePickerOpen, setIsMachinePickerOpen] = useState(false);
   const [isCreateProfileFamilyOpen, setIsCreateProfileFamilyOpen] = useState(false);
@@ -400,7 +402,7 @@ export const NewSliceJobPage: React.FC = () => {
   const [filamentSelection, setFilamentSelection] = useState<ProfileSelection>({ name: '' });
   const selectedFilamentProfileId = filamentSelection.name;
   const setSelectedFilamentProfileId = useCallback((name: string, customId?: string) => {
-    setFilamentSelection({ name, customId });
+    setFilamentSelection((prev) => (prev.name === name && prev.customId === customId ? prev : { name, customId }));
   }, []);
 
   // Filament filter config (persisted in localStorage)

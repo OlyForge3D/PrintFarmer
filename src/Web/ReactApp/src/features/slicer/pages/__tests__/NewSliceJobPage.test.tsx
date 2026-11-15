@@ -824,6 +824,31 @@ describe('NewSliceJobPage', () => {
     });
   });
 
+  describe('Printer switch render loop (issue #3833)', () => {
+    // Root cause: switching printers resets the machine profile to '' and the
+    // new printer's details/profile queries are pending, so their `= []`
+    // defaults are fresh arrays every render. The machine-change effect then
+    // re-ran on every render and called setSelectedFilamentProfileId(''), which
+    // always stored a NEW selection object, forcing another render — an
+    // unbounded loop that froze the tab ("This page isn't responding").
+    it('settles instead of re-rendering forever while the new printer is loading', async () => {
+      renderWithProviders(<NewSliceJobPage />);
+      await waitFor(() => expect(screen.getByText('Bambu X1')).toBeInTheDocument());
+      fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+      await waitFor(() => expect(apiClient.getPrinterDetails).toHaveBeenCalledWith('printer-1'));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+
+      vi.mocked(apiClient.getPrinterDetails).mockImplementation(() => new Promise(() => {}));
+      slicerWorkspaceSpy.mockClear();
+      fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-2' } });
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
+
+      expect(screen.getByTestId('printer-select')).toHaveValue('printer-2');
+      // Before the fix this was thousands of renders and still climbing.
+      expect(slicerWorkspaceSpy.mock.calls.length).toBeLessThan(20);
+    });
+  });
+
   describe('Offline printer target guard (issue #2342)', () => {
     // Root cause: the printer-restore fallback effect only checked whether
     // the persisted/selected printer id still existed in the printers list —
