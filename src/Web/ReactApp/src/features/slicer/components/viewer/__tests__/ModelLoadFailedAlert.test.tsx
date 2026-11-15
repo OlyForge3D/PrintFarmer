@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   ModelLoadFailedAlert,
@@ -57,36 +57,57 @@ describe('ModelLoadFailedAlert (issue #1974)', () => {
 });
 
 describe('ViewerInitializationFailedAlert (issue #3828)', () => {
-  it('explains that WebGL initialization failed without blaming a model', () => {
+  it('explains WebGL context creation failure without blaming a model', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     render(
       <ModelViewerErrorBoundary
-        fallback={(error) => <ViewerInitializationFailedAlert error={error} />}
+        fallback={(error, retry) => (
+          <ViewerInitializationFailedAlert error={error} onRetry={retry} />
+        )}
       >
         <ThrowingViewer error={new Error('Error creating WebGL context.')} />
       </ModelViewerErrorBoundary>,
     );
 
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'The 3D viewer could not initialize because WebGL is unavailable.',
+      'The 3D viewer could not start because a WebGL context could not be created.',
     );
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
     expect(screen.queryByText('Failed to load 3D model')).not.toBeInTheDocument();
   });
 
-  it('does not claim WebGL is unavailable for unrelated viewer errors', () => {
+  it('preserves retry for unrelated viewer errors and recovers when the viewer can render again', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const error = new Error('WebGL shader compilation failed.');
+    let shouldFail = true;
+
+    function RecoverableViewer() {
+      if (shouldFail) {
+        throw error;
+      }
+
+      return <p>Viewer recovered</p>;
+    }
 
     render(
       <ModelViewerErrorBoundary
-        fallback={(error) => <ViewerInitializationFailedAlert error={error} />}
+        fallback={(caughtError, retry) => (
+          <ViewerInitializationFailedAlert error={caughtError} onRetry={retry} />
+        )}
       >
-        <ThrowingViewer error={new Error('Unexpected viewer error.')} />
+        <RecoverableViewer />
       </ModelViewerErrorBoundary>,
     );
 
-    expect(screen.getByRole('alert')).toHaveTextContent('The 3D viewer could not initialize.');
-    expect(screen.getByRole('alert')).not.toHaveTextContent('WebGL is unavailable');
+    expect(screen.getByRole('alert')).toHaveTextContent('The 3D viewer encountered an error.');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('WebGL context could not be created');
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
     expect(screen.queryByText('Failed to load 3D model')).not.toBeInTheDocument();
+
+    shouldFail = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(screen.getByText('Viewer recovered')).toBeInTheDocument();
   });
 });

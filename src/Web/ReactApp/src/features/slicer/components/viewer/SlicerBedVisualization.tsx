@@ -2508,7 +2508,9 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
       <ModelViewerErrorBoundary
         className="h-full"
         resetKey={resetKey}
-        fallback={(error) => <ViewerInitializationFailedAlert error={error} />}
+        fallback={(error, retry) => (
+          <ViewerInitializationFailedAlert error={error} onRetry={retry} />
+        )}
       >
         <Canvas
           frameloop="demand"

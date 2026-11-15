@@ -29,8 +29,20 @@ export function ModelLoadFailedAlert() {
   );
 }
 
-export function ViewerInitializationFailedAlert({ error }: { error: Error }) {
-  const webGlUnavailable = /\bwebgl\b/i.test(error.message);
+function isWebGLContextCreationError(error: Error): boolean {
+  return /\b(?:create|creating|creation)\b.*\bwebgl\b.*\bcontext\b|\bwebgl\b.*\bcontext\b.*\b(?:create|creating|creation)\b/i.test(
+    error.message,
+  );
+}
+
+export function ViewerInitializationFailedAlert({
+  error,
+  onRetry,
+}: {
+  error: Error;
+  onRetry: () => void;
+}) {
+  const webGLContextCreationFailed = isWebGLContextCreationError(error);
 
   return (
     <div
@@ -38,12 +50,21 @@ export function ViewerInitializationFailedAlert({ error }: { error: Error }) {
       role="alert"
     >
       <div className="max-w-sm rounded-lg border border-pf-border bg-pf-bg-1 p-6 text-center shadow-lg">
-        <h3 className="text-sm font-semibold text-pf-text-primary">3D viewer unavailable</h3>
+        <h3 className="text-sm font-semibold text-pf-text-primary">
+          {webGLContextCreationFailed ? '3D viewer unavailable' : '3D viewer error'}
+        </h3>
         <p className="mt-2 text-sm text-pf-text-secondary">
-          {webGlUnavailable
-            ? 'The 3D viewer could not initialize because WebGL is unavailable. Enable WebGL in your browser or use a browser or device that supports it.'
-            : 'The 3D viewer could not initialize.'}
+          {webGLContextCreationFailed
+            ? 'The 3D viewer could not start because a WebGL context could not be created. Check whether WebGL is enabled and supported in this browser or device.'
+            : 'The 3D viewer encountered an error.'}
         </p>
+        {!webGLContextCreationFailed && (
+          <div className="mt-4 flex justify-center">
+            <Button variant="primary" size="sm" onClick={onRetry}>
+              Retry
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -53,7 +74,7 @@ interface ModelViewerErrorBoundaryProps {
   children: ReactNode;
   className?: string;
   resetKey?: string;
-  fallback?: ReactNode | ((error: Error) => ReactNode);
+  fallback?: ReactNode | ((error: Error, retry: () => void) => ReactNode);
   /** Called when a child throws (e.g. a 3D model failed to load). */
   onError?: (error: Error) => void;
 }
@@ -103,7 +124,7 @@ export class ModelViewerErrorBoundary extends Component<ModelViewerErrorBoundary
   render() {
     if (this.state.hasError) {
       const fallback = typeof this.props.fallback === 'function'
-        ? this.state.error && this.props.fallback(this.state.error)
+        ? this.state.error && this.props.fallback(this.state.error, this.handleRetry)
         : this.props.fallback;
       if (fallback) {
         return <React.Fragment key={this.state.retryNonce}>{fallback}</React.Fragment>;
