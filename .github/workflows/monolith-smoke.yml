@@ -215,7 +215,7 @@ jobs:
 
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: monolith-smoke-playwright-report-${{ matrix.capture }}
           path: src/Web/ReactApp/playwright-report/
@@ -224,7 +224,7 @@ jobs:
 
       - name: Upload API log
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: monolith-smoke-api-log-${{ matrix.capture }}
           path: ${{ runner.temp }}/monolith-smoke-api.log
