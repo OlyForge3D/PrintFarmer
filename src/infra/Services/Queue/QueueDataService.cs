@@ -74,6 +74,10 @@ public class QueueDataService(
         return await _unitOfWork.Queue.GetPrintJobsForPrinterAsync(printerId, ct);
     }
 
+    /// <inheritdoc/>
+    public Task<List<IdleWindowJobInput>> GetIdleWindowJobInputsAsync(IReadOnlyCollection<Guid> printerIds, CancellationToken ct)
+        => _unitOfWork.Queue.GetIdleWindowJobInputsAsync(printerIds, ct);
+
     /// <summary>
     /// Gets all print jobs in the queue with all related entities loaded.
     /// </summary>
