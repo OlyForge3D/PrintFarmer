@@ -39,7 +39,10 @@ async function getSeededPrinters(page: import('@playwright/test').Page): Promise
   return await response.json() as PrinterSummary[];
 }
 
-async function uploadModelFromFilesPage(page: import('@playwright/test').Page): Promise<ModelUploadResponse> {
+async function uploadModelFromFilesPage(
+  page: import('@playwright/test').Page,
+  registerUploadedModel: (modelId: string) => void,
+): Promise<ModelUploadResponse> {
   const modelKey = randomUUID();
   await page.goto('/files');
   await page.getByRole('button', { name: 'Upload Model', exact: true }).click();
@@ -61,8 +64,10 @@ async function uploadModelFromFilesPage(page: import('@playwright/test').Page): 
   expect(response.ok(), `Model upload returned HTTP ${response.status()}`).toBeTruthy();
 
   const model = await response.json() as ModelUploadResponse;
+  if (typeof model.id === 'string') {
+    registerUploadedModel(model.id);
+  }
   expect(model.id).toMatch(/^[a-f\d-]{36}$/i);
-  await expect(dialog.getByText('✓ Done', { exact: true })).toBeVisible({ timeout: 30_000 });
   return model;
 }
 
@@ -71,6 +76,7 @@ async function removeUploadedModel(
   modelId: string,
 ): Promise<void> {
   const token = await getStoredAuthToken(page);
+  // Use nginx so /api/3d-models is routed to slicer-host, not the main API stub.
   const response = await page.request.delete(`${BASE_URL}/api/3d-models/${modelId}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -101,8 +107,8 @@ test.describe('Slicer workflows — deployed stack', () => {
     const sidebar = page.getByTestId('slicer-settings-sidebar');
     await expect(sidebar).toBeVisible({ timeout: 60_000 });
     const defaultPrinterButton = sidebar.getByRole('button').filter({ hasText: 'Change' }).first();
-    const defaultPrinterText = await defaultPrinterButton.textContent() ?? '';
-    const initial = printers.find((printer) => defaultPrinterText.includes(printer.name));
+    const defaultPrinterName = await defaultPrinterButton.locator('img').getAttribute('alt');
+    const initial = printers.find((printer) => printer.name === defaultPrinterName);
     expect(initial, 'The slicer UI must select one of the deterministic seeded printers by default').toBeDefined();
     const target = printers.find((printer) => printer.id !== initial!.id && printer.isOnline !== false);
     expect(target, 'A second online deterministic slicer printer must be seeded').toBeDefined();
@@ -138,8 +144,15 @@ test.describe('Slicer workflows — deployed stack', () => {
     const printer = printers.find((item) => item.name === 'Moonraker Ready');
     expect(printer, 'The deterministic slicer printer must be seeded').toBeDefined();
 
-    const model = await uploadModelFromFilesPage(page);
+    let uploadedModelId: string | undefined;
+    let testBodyFailed = false;
+    let testBodyError: unknown;
     try {
+      const model = await uploadModelFromFilesPage(page, (modelId) => {
+        uploadedModelId = modelId;
+      });
+      await expect(page.getByRole('dialog', { name: 'Upload 3D Models' }).getByText('✓ Done', { exact: true }))
+        .toBeVisible({ timeout: 30_000 });
       const sidebar = await setSlicerPrinter(page, printer!.id, `/slicer?modelId=${model.id}`);
 
       const machineProfileButton = sidebar.getByRole('button', { name: /^Machine profile:/ });
@@ -200,8 +213,31 @@ test.describe('Slicer workflows — deployed stack', () => {
       const jobRow = jobs.getByRole('row').filter({ hasText: submittedJobId.slice(0, 8) });
       await expect(jobRow, 'The completed slice must be visible in worker job management').toBeVisible({ timeout: 30_000 });
       await expect(jobRow).toContainText('Completed');
-    } finally {
-      await removeUploadedModel(page, model.id);
+    } catch (error) {
+      testBodyFailed = true;
+      testBodyError = error;
+    }
+
+    let cleanupError: unknown;
+    if (uploadedModelId) {
+      try {
+        await removeUploadedModel(page, uploadedModelId);
+      } catch (error) {
+        cleanupError = error;
+      }
+    }
+
+    if (testBodyFailed) {
+      if (cleanupError) {
+        await test.info().attach('model-cleanup-error.txt', {
+          body: String(cleanupError),
+          contentType: 'text/plain',
+        });
+      }
+      throw testBodyError;
+    }
+    if (cleanupError) {
+      throw cleanupError;
     }
   });
 });

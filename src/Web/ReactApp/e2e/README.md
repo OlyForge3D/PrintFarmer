@@ -198,7 +198,7 @@ OrcaSlicer worker during daily phase B.
 | `/slicer` — `NewSliceJobPage` and job selectors | Printer selection | `slicer-workflows.spec.ts` identifies the printer selected by the UI as its default, switches to a different seeded printer, and verifies the sidebar and machine-profile control respond within 15 seconds. |
 | `/files` → `/slicer` — model upload and `SlicerWorkspace` | Model upload, loading, and machine/filament/process selection | `slicer-workflows.spec.ts` uploads a unique generated STL, loads it into the slicer, and selects compatible profiles exposed by the deployed worker; it removes the model afterward. |
 | `/slicer` — `SliceProgressOverlay`, `GcodePreviewModal` | Real slicing and results | `slicer-workflows.spec.ts` submits a slice, waits for worker completion, opens G-code Preview, and confirms the completed job in Jobs. It never sends a print to a printer. |
-| `/profiles/import?modelId=…` → `/admin/settings?scope=system&tab=slicing&sub=profiles` — `SlicerProfilesPage` | Profile import and library tabs | `slicer-profiles.spec.ts` imports compatible machine and filament profiles from the worker and visits Machines, Processes, Filaments, and My Profiles. |
+| `/profiles/import?modelId=…` → `/admin/settings?scope=system&tab=slicing&sub=profiles` — `SlicerProfilesPage` | Profile import and library tabs | `slicer-profiles.spec.ts` imports an unlinked compatible machine profile, selects a compatible filament, verifies the machine is linked to the model, and visits Machines, Processes, Filaments, and My Profiles. |
 | `/admin/workers` → `/admin/workers?workerTab=jobs` — `WorkerManagementPage` | Worker and job management | `slicer-workers.spec.ts` checks the worker list, status filter, and new-job affordance, then the workflow spec confirms its completed job in the Jobs view. Worker state is not changed. |
 
 ### Explicit exclusions
@@ -222,6 +222,10 @@ OrcaSlicer worker during daily phase B.
 - The WebGL fallback remains covered by the separate #3828 work and is not
   duplicated here.
 - The deferred advanced workflow coverage is tracked in #3839.
+- The worker filament library is already seeded in the deployed stack, so the
+  profile-import spec verifies compatible filament selection and availability,
+  not creation of a new filament profile. Additional import fixtures are
+  tracked in #3839.
 
 Run the same selection used by daily phase B from
 `src/Web/ReactApp/`:
@@ -234,6 +238,12 @@ The printer switch assertion is intentionally not skipped or marked
 expected-failure: it is the regression check for issue #3833. The seeded
 Moonraker printer records are used only as slicer targets; these tests do not
 dispatch prints or operate physical printer hardware.
+
+The profile-import test removes newly created profile rows, but importing can
+also link an existing machine profile to the selected printer model. Real
+slices leave completed jobs and artifacts. These effects persist until daily
+phase B tears down its disposable validation stack; do not run this selection
+against a shared or production database.
 
 ## Running E2E Tests with the Moonraker Emulator
 
