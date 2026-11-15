@@ -18,6 +18,15 @@ interface ManagedProfilesResponse {
   filamentProfiles: ManagedProfile[];
 }
 
+interface HierarchyModel {
+  modelId: string;
+  machineProfiles: ManagedProfile[];
+}
+
+interface HierarchicalProfilesResponse {
+  byHierarchy: Record<string, { models: Record<string, HierarchyModel> }>;
+}
+
 async function getProfileImportModelId(page: import('@playwright/test').Page): Promise<string> {
   const token = await getStoredAuthToken(page);
   expect(token, 'The authenticated emulator fixture must provide an API token').toBeTruthy();
@@ -44,6 +53,28 @@ async function getManagedProfiles(page: import('@playwright/test').Page): Promis
   });
   expect(response.ok(), `GET /api/slicer/profiles/extended returned HTTP ${response.status()}`).toBeTruthy();
   return await response.json() as ManagedProfilesResponse;
+}
+
+async function getMachineProfileOwnerModelId(
+  page: import('@playwright/test').Page,
+  machineProfileId: string,
+): Promise<string | null> {
+  const token = await getStoredAuthToken(page);
+  expect(token, 'The authenticated emulator fixture must provide an API token').toBeTruthy();
+
+  const response = await page.request.get(`${BASE_URL}/api/slicer/profiles/hierarchy`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(response.ok(), `GET /api/slicer/profiles/hierarchy returned HTTP ${response.status()}`).toBeTruthy();
+  const hierarchy = await response.json() as HierarchicalProfilesResponse;
+  const profileModel = Object.values(hierarchy.byHierarchy)
+    .flatMap((manufacturer) => Object.values(manufacturer.models))
+    .find((model) => model.machineProfiles.some((profile) => profile.id === machineProfileId));
+  if (!profileModel) {
+    throw new Error(`Managed machine profile "${machineProfileId}" is missing from the profile hierarchy`);
+  }
+
+  return profileModel.modelId === machineProfileId ? null : profileModel.modelId;
 }
 
 async function selectMachineProfile(
@@ -192,6 +223,18 @@ test.describe('Slicer profile management', () => {
           importedNames.machineProfileNames,
           profilesBeforeImport.machineProfiles.map((profile) => profile.name),
         );
+      const managedMachineProfiles = profilesBeforeImport.machineProfiles.filter(
+        (profile) => profile.name === machineProfileName,
+      );
+      expect(managedMachineProfiles.length, `Managed profile "${machineProfileName}" inventory must match its state`)
+        .toBe(managedProfileExists ? 1 : 0);
+      const existingOwnerModelId = managedMachineProfiles[0]
+        ? await getMachineProfileOwnerModelId(page, managedMachineProfiles[0].id)
+        : null;
+      if (machineAlreadyImported) {
+        expect(existingOwnerModelId?.toLowerCase(), `Profile "${machineProfileName}" must be linked to this model`)
+          .toBe(modelId.toLowerCase());
+      }
       await page.getByRole('button', { name: 'Next', exact: true }).click();
 
       const filamentChoices = page.getByRole('checkbox');
@@ -234,9 +277,16 @@ test.describe('Slicer profile management', () => {
       } else if (!managedProfileExists) {
         expect(importedMachineCount, `New profile "${machineProfileName}" must be imported`)
           .toBe(1);
+      } else if (existingOwnerModelId === null) {
+        expect(importedMachineCount, `Unscoped profile "${machineProfileName}" must be linked to this model`)
+          .toBe(1);
       } else {
-        expect(importedMachineCount, `Existing profile "${machineProfileName}" must be linked or skipped`)
-          .toBeLessThanOrEqual(1);
+        expect(
+          existingOwnerModelId.toLowerCase(),
+          `Profile "${machineProfileName}" must be linked to a different model`,
+        ).not.toBe(modelId.toLowerCase());
+        expect(importedMachineCount, `Profile "${machineProfileName}" linked elsewhere must be skipped`)
+          .toBe(0);
       }
 
       const token = await getStoredAuthToken(page);
