@@ -388,6 +388,30 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
             property => property.Metadata.Name, property => property.CurrentValue));
     }
 
+    [Fact]
+    public async Task HomeAsync_UnsupportedEndpoint_CompletesRejectedWithoutUnknownOutcomeOrReplay()
+    {
+        const string message = "This PrusaLink firmware does not expose remote Home or jog controls. Use the printer's physical controls.";
+        printers.Setup(service => service.SendHomeAsync(printerId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PrinterBackendUnsupportedException(message));
+        await using AppDbContext db = CreateContext();
+
+        ActionResult<CommandResult> result = await CreateController(db).HomeAsync(printerId, default);
+
+        ObjectResult response = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(502, response.StatusCode);
+        CommandResult command = Assert.IsType<CommandResult>(response.Value);
+        Assert.False(command.Success);
+        Assert.Equal(message, command.Message);
+        Assert.False(await db.QueueDispatchOutbox.AnyAsync(row => row.EventType == PrinterPhysicalActuationService.EventTypeUnknown));
+        Assert.False(await db.QueueDispatchOutbox.AnyAsync(row => row.EventType == PrinterPhysicalActuationService.EventTypeCompleted));
+        Assert.Single(await db.QueueDispatchOutbox.Where(row => row.EventType == PrinterPhysicalActuationService.EventTypeFailed).ToListAsync());
+        PrinterDispatchState state = await db.PrinterDispatchStates.SingleAsync();
+        Assert.Null(state.PhysicalControlCommandId);
+        Assert.False(state.PhysicalControlRequiresReconciliation);
+        printers.Verify(service => service.SendHomeAsync(printerId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     [Theory]
     [InlineData("success")]
     [InlineData("false")]

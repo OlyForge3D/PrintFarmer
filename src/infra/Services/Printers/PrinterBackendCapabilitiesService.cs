@@ -1,10 +1,13 @@
-﻿using System.Text.Json;
+﻿using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace Farm.Infrastructure.Services.Printers;
 
@@ -17,13 +20,15 @@ public class PrinterBackendCapabilitiesService(
     IBackendCapabilityFactory capabilityFactory,
     IBackendClientFactory? backendClientFactory = null,
     IPrinterVerifiedSafetyCache? verifiedSafetyCache = null,
-    IPrinterStatusCacheReader? statusCacheReader = null) : IPrinterBackendCapabilitiesService
+    IPrinterStatusCacheReader? statusCacheReader = null,
+    IMemoryCache? movementCache = null) : IPrinterBackendCapabilitiesService
 {
     private readonly IPrintersRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
     private readonly IBackendCapabilityFactory _capabilityFactory = capabilityFactory ?? throw new ArgumentNullException(nameof(capabilityFactory));
     private readonly IBackendClientFactory? _backendClientFactory = backendClientFactory;
     private readonly IPrinterVerifiedSafetyCache? _verifiedSafetyCache = verifiedSafetyCache;
     private readonly IPrinterStatusCacheReader? _statusCacheReader = statusCacheReader;
+    private readonly IMemoryCache? _movementCache = movementCache;
 
     public async Task<PrinterBackendCapabilitiesDto?> GetByPrinterIdAsync(Guid printerId, CancellationToken ct)
     {
@@ -103,7 +108,9 @@ public class PrinterBackendCapabilitiesService(
 
         PrinterControlCapabilities controls =
             (controlClient as ISupportsPrinterControlCapabilities)?.ControlCapabilities ?? new();
-        bool movement = controlClient is ISupportsMovement;
+        bool movement = controlClient is ISupportsMovement &&
+            (controlClient is not ISupportsMovementDiscovery discovery ||
+                await GetMovementSupportAsync(printer, discovery, ct));
         bool temperature = controlClient is ISupportsTemperatureControl;
         bool homing = movement && controls.SupportsHoming;
         PrinterStatusCacheSnapshot? statusSnapshot =
@@ -122,6 +129,9 @@ public class PrinterBackendCapabilitiesService(
         PrinterVerifiedSafetyDto verifiedSafety = discoverSafety
             ? await GetVerifiedSafetyAsync(printer, backend, ct)
             : PrinterVerifiedSafetyDto.Unknown(source: "interactive.native-controls");
+        bool supportsMovement = controlClient is ISupportsMovementDiscovery
+            ? movement
+            : (capabilities & BackendCapabilities.Movement) == BackendCapabilities.Movement;
         return new PrinterBackendCapabilitiesDto(
             PrinterId: printer.Id,
             PrinterName: printer.Name,
@@ -133,7 +143,7 @@ public class PrinterBackendCapabilitiesService(
             SupportsStartPrint: (capabilities & BackendCapabilities.StartPrint) == BackendCapabilities.StartPrint,
             SupportsControlOperations: (capabilities & BackendCapabilities.ControlOperations) == BackendCapabilities.ControlOperations,
             SupportsFileMetadata: (capabilities & BackendCapabilities.FileMetadata) == BackendCapabilities.FileMetadata,
-            SupportsMovement: (capabilities & BackendCapabilities.Movement) == BackendCapabilities.Movement,
+            SupportsMovement: supportsMovement,
             SupportsTemperatureControl: (capabilities & BackendCapabilities.TemperatureControl) == BackendCapabilities.TemperatureControl,
             SupportsPrinterInformation: (capabilities & BackendCapabilities.PrinterInformation) == BackendCapabilities.PrinterInformation,
             SupportsHistory: supportsHistory,
@@ -176,6 +186,34 @@ public class PrinterBackendCapabilitiesService(
             SupportedAxes = movement ? controls.SupportedAxes.ToArray() : [],
             VerifiedSafety = verifiedSafety,
         };
+    }
+
+    private async Task<bool> GetMovementSupportAsync(
+        Printer printer,
+        ISupportsMovementDiscovery discovery,
+        CancellationToken ct)
+    {
+        string credentialFingerprint = Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(printer.Credential))));
+        var key = (
+            typeof(ISupportsMovementDiscovery),
+            printer.Id,
+            printer.BackendUrl,
+            printer.Revision,
+            printer.ConfigurationRevision,
+            credentialFingerprint);
+        if (_movementCache?.TryGetValue(key, out bool cached) == true)
+        {
+            return cached;
+        }
+
+        bool? supported = await discovery.SupportsMovementAsync(printer.BackendUrl, printer.Credential, ct);
+        if (supported.HasValue)
+        {
+            _movementCache?.Set(key, supported.Value, TimeSpan.FromMinutes(1));
+        }
+
+        return supported == true;
     }
 
     private async Task<PrinterVerifiedSafetyDto> GetVerifiedSafetyAsync(

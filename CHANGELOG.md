@@ -83,6 +83,12 @@
 
 ### Fixes
 
+- Gate web jog and coordinate entry on affirmative per-axis homing telemetry.
+  Discover PrusaLink motion support per printer without sending motion, disable
+  unsupported CORE One L/Buddy Home and jog controls, and distinguish explicit
+  endpoint rejection from unknown outcomes without duplicating safety warnings
+  (#3566). Preserve API-key-only authentication for supported legacy movement.
+
 - Reject passkey login for inactive accounts without issuing access or refresh
   tokens. Main-API bearer authentication now checks current account status so
   previously issued tokens stop working after deactivation (#3652). Recognized

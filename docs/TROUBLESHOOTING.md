@@ -68,6 +68,27 @@ API endpoint; removing preflight cannot repair routing. On affected older builds
 settings alone do not fix frontend-port routing; deploy the endpoint-selection
 fix first.
 
+### Prusa CORE One L Home or Jog Unavailable
+
+Prusa Buddy firmware's PrusaLink API does not expose the OctoPrint-style
+`POST /api/printer/printhead` endpoint. Older PrintFarmer builds advertised it
+anyway, then reported its `404` rejection as an unknown motion outcome.
+Current builds check endpoint support without sending motion, disable
+unsupported Home/jog controls, and identify explicit endpoint rejection
+separately from transport uncertainty. Use the printer's physical controls;
+changing credentials cannot add an unsupported endpoint.
+
+Legacy Raspberry Pi PrusaLink has a different API and can expose these controls.
+Jog and coordinate entry still require the selected axis to be explicitly
+reported as homed. Missing homing telemetry is not proof of homing, even when
+position coordinates are available or a Home request was accepted.
+
+If a request actually times out or loses its response, inspect the printer
+before another command. The command might have moved it; do not retry blindly.
+
+See Prusa's [Buddy API routing](https://github.com/prusa3d/Prusa-Firmware-Buddy/blob/master/lib/WUI/link_content/prusa_link_api_octo.cpp)
+and [legacy PrusaLink controls](https://github.com/prusa3d/Prusa-Link/blob/master/prusa/link/web/controls.py).
+
 ### SignalR Connection Drops
 
 **Symptoms:** Real-time updates stop, connection indicator shows disconnected

@@ -18,11 +18,21 @@ vi.mock('@/services/api', () => ({
   apiClient: { setPrinterSensor: state.setPrinterSensor, setTemperatures: state.setTemperatures },
 }));
 
-describe('Moonraker authoritative heater snapshots', () => {
+describe('Moonraker authoritative status snapshots', () => {
   beforeEach(() => {
     state.statuses = new Map();
     vi.clearAllMocks();
     state.setTemperatures.mockResolvedValue({ success: true });
+  });
+
+  it.each([undefined, '', 'xy'])('does not restore cached XYZ homing when a current snapshot reports %s', homedAxes => {
+    const printer: Printer = { id: 'p1', name: 'Printer', backend: PrinterBackend.Moonraker,
+      isOnline: true, homedAxes: 'xyz' };
+    state.statuses.set(printer.id, { id: printer.id, isOnline: true, sensors: [], homedAxes });
+    const { result } = renderHook(() => ({
+      single: usePrinterDisplay(printer), bulk: usePrinterDisplays([printer])[0],
+    }));
+    for (const display of Object.values(result.current)) expect(display.homedAxes).toBe(homedAxes);
   });
 
   it('clears stale API identity and readings on both display hooks without blocking native heater commands', async () => {

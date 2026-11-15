@@ -61,7 +61,7 @@ public class PrinterBackendCapabilitiesServiceTests
     [Theory]
     [InlineData(PrinterBackend.Moonraker, true, true, true, true, true, true)]
     [InlineData(PrinterBackend.OctoPrint, true, true, true, false, true, false)]
-    [InlineData(PrinterBackend.PrusaLink, true, true, true, false, true, false)]
+    [InlineData(PrinterBackend.PrusaLink, false, false, true, false, true, false)]
     [InlineData(PrinterBackend.FlashForge, false, false, true, false, true, false)]
     [InlineData(PrinterBackend.SDCP, false, false, false, false, true, false)]
     [InlineData(PrinterBackend.Unknown, false, false, false, false, false, false)]
@@ -75,7 +75,8 @@ public class PrinterBackendCapabilitiesServiceTests
         bool sensorTelemetry,
         bool sensorControl)
     {
-        using var http = new HttpClient();
+        using var handler = new PrusaMovementProbeHandler(HttpStatusCode.NotFound);
+        using var http = new HttpClient(handler);
         IBackendClient client = backend switch
         {
             PrinterBackend.Moonraker => new MoonrakerClient(
@@ -144,6 +145,117 @@ public class PrinterBackendCapabilitiesServiceTests
             Assert.True(dto.SupportsFilamentControl);
             Assert.True(dto.SupportsControlOperations);
         }
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound, false)]
+    [InlineData(HttpStatusCode.MethodNotAllowed, true)]
+    public async Task GetControlCapabilitiesAsync_PrusaVariant_UsesReadOnlyEndpointEvidence(
+        HttpStatusCode status, bool supported)
+    {
+        using var handler = new PrusaMovementProbeHandler(status);
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkClient(http);
+        var clients = new Mock<IBackendClientFactory>();
+        clients.Setup(factory => factory.GetClient(PrinterBackend.PrusaLink)).Returns(client);
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "col1",
+            Backend = (int)PrinterBackend.PrusaLink,
+            ServerUrl = "http://printer.local",
+            BackendPort = 80,
+        };
+        var repository = new Mock<IPrintersRepository>();
+        repository.Setup(repo => repo.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>())).ReturnsAsync(printer);
+        var factory = new BackendCapabilityFactory(clients.Object, NullLogger<BackendCapabilityFactory>.Instance);
+        var service = new PrinterBackendCapabilitiesService(repository.Object, factory, clients.Object);
+
+        PrinterBackendCapabilitiesDto result = Assert.IsType<PrinterBackendCapabilitiesDto>(
+            await service.GetControlCapabilitiesAsync(printer.Id, default));
+
+        Assert.Equal(supported, result.SupportsMovement);
+        Assert.Equal(supported, result.SupportsRelativeMovement);
+        Assert.Equal(supported, result.SupportsHoming);
+        Assert.Equal(supported, result.SupportsHomingXY);
+        Assert.Equal(supported, result.SupportsHomingZ);
+        Assert.False(result.SupportsAbsoluteMovement);
+        Assert.Equal(supported ? new[] { "x", "y", "z" } : [], result.SupportedAxes);
+        Assert.True(result.SupportsHotendTemperature);
+        Assert.Equal(HttpMethod.Get, Assert.Single(handler.Methods));
+        Assert.Equal("/api/printer/printhead", Assert.Single(handler.Uris).AbsolutePath);
+    }
+
+    [Fact]
+    public async Task GetControlCapabilitiesAsync_MovementEvidence_IsSharedAcrossScopesAndKeyedByPrinterIdentity()
+    {
+        using var handler = new PrusaMovementProbeHandler(HttpStatusCode.MethodNotAllowed);
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkClient(http);
+        var clients = new Mock<IBackendClientFactory>();
+        clients.Setup(factory => factory.GetClient(PrinterBackend.PrusaLink)).Returns(client);
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Backend = (int)PrinterBackend.PrusaLink,
+            ServerUrl = "http://printer.local",
+            Credential = new PrinterCredential { ApiKey = "fixture-key" },
+        };
+        var repository = new Mock<IPrintersRepository>();
+        repository.Setup(repo => repo.FindByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(printer);
+        var factory = new BackendCapabilityFactory(clients.Object, NullLogger<BackendCapabilityFactory>.Instance);
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+
+        async Task ReadCapabilitiesAsync() =>
+            Assert.True((await new PrinterBackendCapabilitiesService(
+                repository.Object, factory, clients.Object, movementCache: cache)
+                .GetControlCapabilitiesAsync(printer.Id, default))!.SupportsHoming);
+
+        await ReadCapabilitiesAsync();
+        await ReadCapabilitiesAsync();
+        Assert.Single(handler.Methods);
+
+        printer.ServerUrl = "http://other-printer.local";
+        await ReadCapabilitiesAsync();
+        printer.Revision++;
+        await ReadCapabilitiesAsync();
+        printer.ConfigurationRevision++;
+        await ReadCapabilitiesAsync();
+        printer.Credential = new PrinterCredential { ApiKey = "replacement-fixture-key" };
+        await ReadCapabilitiesAsync();
+        printer.Id = Guid.NewGuid();
+        await ReadCapabilitiesAsync();
+        Assert.Equal(6, handler.Methods.Count);
+        Assert.All(handler.Methods, method => Assert.Equal(HttpMethod.Get, method));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GetControlCapabilitiesAsync_InconclusiveMovementEvidence_IsNotCached(bool transportFailure)
+    {
+        using var handler = new PrusaMovementProbeHandler(HttpStatusCode.ServiceUnavailable) { FailNext = transportFailure };
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkClient(http);
+        var clients = new Mock<IBackendClientFactory>();
+        clients.Setup(factory => factory.GetClient(PrinterBackend.PrusaLink)).Returns(client);
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Backend = (int)PrinterBackend.PrusaLink,
+            ServerUrl = "http://printer.local",
+        };
+        var repository = new Mock<IPrintersRepository>();
+        repository.Setup(repo => repo.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>())).ReturnsAsync(printer);
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var factory = new BackendCapabilityFactory(clients.Object, NullLogger<BackendCapabilityFactory>.Instance);
+        var service = new PrinterBackendCapabilitiesService(repository.Object, factory, clients.Object, movementCache: cache);
+
+        Assert.False((await service.GetControlCapabilitiesAsync(printer.Id, default))!.SupportsHoming);
+        handler.Status = HttpStatusCode.MethodNotAllowed;
+        Assert.True((await service.GetControlCapabilitiesAsync(printer.Id, default))!.SupportsHoming);
+        Assert.True((await service.GetControlCapabilitiesAsync(printer.Id, default))!.SupportsHoming);
+        Assert.Equal(2, handler.Methods.Count);
     }
 
     [Fact]
@@ -799,5 +911,30 @@ public class PrinterBackendCapabilitiesServiceTests
         Assert.False(dto.SupportsFilamentUnload);
         Assert.False(dto.SupportsFilamentChange);
         Assert.Empty(dto.SupportedAxes);
+    }
+
+    private sealed class PrusaMovementProbeHandler(HttpStatusCode status) : HttpMessageHandler
+    {
+        public HttpStatusCode Status { get; set; } = status;
+
+        public bool FailNext { get; set; }
+
+        public List<HttpMethod> Methods { get; } = [];
+
+        public List<Uri> Uris { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Methods.Add(request.Method);
+            Uris.Add(request.RequestUri!);
+            if (FailNext)
+            {
+                FailNext = false;
+                throw new HttpRequestException("Simulated discovery connection loss.");
+            }
+
+            var response = new HttpResponseMessage(Status) { Content = new StringContent("") };
+            return Task.FromResult(response);
+        }
     }
 }

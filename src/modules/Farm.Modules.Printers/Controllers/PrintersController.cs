@@ -49,6 +49,7 @@ using MmuControlRequest = Farm.Infrastructure.Services.Printers.MmuControlReques
 using MoonrakerEndpointResolution = Farm.Infrastructure.Services.Printers.MoonrakerEndpointResolution;
 using MoonrakerOnboardingResolver = Farm.Infrastructure.Services.Printers.MoonrakerOnboardingResolver;
 using PerToolAttributionCapability = Farm.Infrastructure.Services.Printers.PerToolAttributionCapability;
+using PrinterBackendUnsupportedException = Farm.Infrastructure.Services.Printers.PrinterBackendUnsupportedException;
 using PrinterControlException = Farm.Infrastructure.Services.Printers.PrinterControlException;
 using PrinterControlOutcome = Farm.Infrastructure.Services.Printers.PrinterControlOutcome;
 using PrinterDirectControl = Farm.Infrastructure.Services.Printers.PrinterDirectControl;
@@ -2597,12 +2598,14 @@ public partial class PrintersController(
     /// <response code="200">Returns the command execution result.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
     /// <response code="409">If the printer is currently busy (e.g., printing).</response>
+    /// <response code="502">If the backend explicitly rejects unsupported homing.</response>
     /// <response code="500">If there was an error executing the homing command.</response>
     [HttpPost("{id:guid}/home")]
     [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(409)]
+    [ProducesResponseType(502)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> HomeAsync(Guid id, CancellationToken ct)
     {
@@ -2623,12 +2626,14 @@ public partial class PrintersController(
     /// <response code="200">Returns the command execution result.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
     /// <response code="409">If the printer is currently busy (e.g., printing).</response>
+    /// <response code="502">If the backend explicitly rejects unsupported homing.</response>
     /// <response code="500">If there was an error executing the homing command.</response>
     [HttpPost("{id:guid}/homexy")]
     [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(409)]
+    [ProducesResponseType(502)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> HomeXYAsync(Guid id, CancellationToken ct)
     {
@@ -2649,12 +2654,14 @@ public partial class PrintersController(
     /// <response code="200">Returns the command execution result.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
     /// <response code="409">If the printer is currently busy (e.g., printing).</response>
+    /// <response code="502">If the backend explicitly rejects unsupported homing.</response>
     /// <response code="500">If there was an error executing the homing command.</response>
     [HttpPost("{id:guid}/homez")]
     [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(409)]
+    [ProducesResponseType(502)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> HomeZAsync(Guid id, CancellationToken ct)
     {
@@ -2824,6 +2831,16 @@ public partial class PrintersController(
             return StatusCode(
                 StatusCodes.Status503ServiceUnavailable,
                 new CommandResult(false, message));
+        }
+        catch (PrinterBackendUnsupportedException exception)
+        {
+            await _physicalActuationService!.CompleteDirectAsync(
+                begin.Lease,
+                accepted: false,
+                "backend_control_unsupported",
+                CancellationToken.None);
+            _logger.LogInformation("Printer {PrinterId} rejected unsupported operation {Operation}", printerId, LogSanitizer.Sanitize(operation));
+            return StatusCode(StatusCodes.Status502BadGateway, new CommandResult(false, exception.Message));
         }
         catch (OperationCanceledException)
         {

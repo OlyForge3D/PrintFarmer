@@ -15,11 +15,11 @@ function props(): ComponentProps<typeof MovementControlSection> {
   };
 }
 describe('detailed-card movement entry points', () => {
-  it('allows coordinate entry without full homing and has no GO', () => {
+  it('allows only homed coordinates and has no GO', () => {
     render(<MovementControlSection {...props()} homedAxes="xy" onMoveTo={vi.fn()} />);
     expect(screen.queryByText('GO')).not.toBeInTheDocument();
     expect(screen.getByLabelText('X absolute target')).toBeEnabled();
-    expect(screen.getByLabelText('Z absolute target')).toBeEnabled();
+    expect(screen.getByLabelText('Z absolute target')).toBeDisabled();
   });
   it('defaults to relative-only entry if no absolute API handler exists', () => {
     render(<MovementControlSection {...props()} />);
