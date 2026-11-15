@@ -214,7 +214,7 @@ jobs:
       reason: ${{ steps.selector.outputs.reason }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
           fetch-depth: 0
@@ -480,7 +480,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
 
@@ -523,7 +523,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
 
@@ -565,7 +565,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
 
@@ -620,7 +620,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
 
@@ -668,7 +668,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
 
@@ -1066,7 +1066,7 @@ jobs:
       matrix: ${{ fromJson(needs.select.outputs.mig_matrix) }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
 
@@ -1171,7 +1171,7 @@ jobs:
       matrix: ${{ fromJson(needs.select.outputs.matrix) }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
 
@@ -1323,7 +1323,7 @@ jobs:
       PFARM_TEST_SQLSERVER_CONN: "Server=localhost,1433;Database=pfarm_test;User Id=sa;Password=Pfarm_CI_2024!;TrustServerCertificate=true"
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
 

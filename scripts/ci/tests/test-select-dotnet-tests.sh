@@ -2726,7 +2726,7 @@ _check_drift_full_job_snapshot() {
       matrix: ${{ fromJson(needs.select.outputs.mig_matrix) }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
 
