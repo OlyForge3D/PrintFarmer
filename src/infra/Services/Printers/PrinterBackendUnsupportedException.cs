@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Printers;
+﻿namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>A backend definitively rejected a command because its endpoint is not supported.</summary>
 public sealed class PrinterBackendUnsupportedException : NotSupportedException
