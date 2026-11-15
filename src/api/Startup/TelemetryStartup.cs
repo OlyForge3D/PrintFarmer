@@ -56,14 +56,12 @@ public static class TelemetryStartup
                     {
                         _ = activity.SetTag("http.request.method", httpRequest.Method);
                         _ = activity.SetTag("http.request.path", httpRequest.Path);
-                        if (httpRequest.QueryString.HasValue)
-                        {
-                            _ = activity.SetTag("http.request.query", httpRequest.QueryString.Value);
-                        }
+                        RedactServerRequestQuery(activity);
                     };
                     options.EnrichWithHttpResponse = (activity, httpResponse) =>
                     {
                         _ = activity.SetTag("http.response.status_code", httpResponse.StatusCode);
+                        RedactServerRequestQuery(activity);
                     };
                 })
                 .AddHttpClientInstrumentation(options =>
@@ -153,6 +151,25 @@ public static class TelemetryStartup
         } // end skip-telemetry guard
 
         return services;
+    }
+
+    private static void RedactServerRequestQuery(System.Diagnostics.Activity activity)
+    {
+        // Enrichment runs after instrumentation adds URL tags, including when its
+        // query-redaction opt-out is enabled. Reapply at response completion before exporters.
+        _ = activity.SetTag("url.query", null);
+        _ = activity.SetTag("http.request.query", null);
+        foreach (string tag in new[] { "url.full", "http.url", "http.target" })
+        {
+            if (activity.GetTagItem(tag) is string value)
+            {
+                int queryStart = value.IndexOf('?');
+                if (queryStart >= 0)
+                {
+                    _ = activity.SetTag(tag, value[..queryStart]);
+                }
+            }
+        }
     }
 
     // -------------------------------------------------------------------------

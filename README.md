@@ -468,6 +468,23 @@ For complete Pi hardware recommendations, setup checklist, and troubleshooting, 
 
 See **[Security Policy](./SECURITY.md)** for vulnerability reporting.
 
+### Request telemetry privacy
+
+API server spans omit query attributes (`http.request.query`, `url.query`) and
+strip query suffixes from current and legacy request URL attributes before
+export. This also applies when OpenTelemetry's ASP.NET Core query-redaction
+opt-out is enabled. Query values, including hub authentication tokens and viewer
+file paths, are intentionally unavailable for trace diagnostics; request handling
+is unchanged. HTTP method, status, and route-template diagnostics remain available.
+
+Tracing is skipped with `DISABLE_TELEMETRY=true` or the `Testing` environment.
+Console export still requires `OpenTelemetry:ConsoleExporter:Enabled=true` or
+`OTEL_CONSOLE_EXPORTER=true`; OTLP export requires `OpenTelemetry:OTLP:Endpoint`.
+Sampling and exporter settings are unchanged. This protects new request URL/query
+attributes, not arbitrary application log messages or previously exported data.
+Operators control historical retention and access; this change does not establish
+that a disclosure occurred or remove existing copies.
+
 ## 🤝 Contributing
 
 We welcome contributions! See **[Contributing Guide](./CONTRIBUTING.md)** for:
