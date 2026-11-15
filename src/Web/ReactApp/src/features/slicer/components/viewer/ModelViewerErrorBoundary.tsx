@@ -29,17 +29,64 @@ export function ModelLoadFailedAlert() {
   );
 }
 
+function isWebGLContextCreationError(error: Error): boolean {
+  return /\b(?:create|creating|creation)\b.*\bwebgl\b.*\bcontext\b|\bwebgl\b.*\bcontext\b.*\b(?:create|creating|creation)\b/i.test(
+    error.message,
+  );
+}
+
+export function ViewerInitializationFailedAlert({
+  error,
+  onRetry,
+}: {
+  error: Error;
+  onRetry: () => void;
+}) {
+  const webGLContextCreationFailed = isWebGLContextCreationError(error);
+
+  return (
+    <div
+      className="flex h-full w-full items-center justify-center bg-pf-bg-0 p-4"
+      role="alert"
+    >
+      <div className="max-w-sm rounded-lg border border-pf-border bg-pf-bg-1 p-6 text-center shadow-lg">
+        <h3 className="text-sm font-semibold text-pf-text-primary">
+          {webGLContextCreationFailed ? '3D viewer unavailable' : '3D viewer error'}
+        </h3>
+        <p className="mt-2 text-sm text-pf-text-secondary">
+          {webGLContextCreationFailed
+            ? 'The 3D viewer could not start because a WebGL context could not be created. Check whether WebGL is enabled and supported in this browser or device.'
+            : 'The 3D viewer encountered an error.'}
+        </p>
+        {!webGLContextCreationFailed && (
+          <div className="mt-4 flex justify-center">
+            <Button
+              variant="primary"
+              size="sm"
+              className="min-h-11 min-w-11 sm:min-h-0 sm:min-w-0"
+              onClick={onRetry}
+            >
+              Retry
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 interface ModelViewerErrorBoundaryProps {
   children: ReactNode;
   className?: string;
   resetKey?: string;
-  fallback?: ReactNode;
+  fallback?: ReactNode | ((error: Error, retry: () => void) => ReactNode);
   /** Called when a child throws (e.g. a 3D model failed to load). */
   onError?: (error: Error) => void;
 }
 
 interface ModelViewerErrorBoundaryState {
   hasError: boolean;
+  error: Error | null;
   retryNonce: number;
 }
 
@@ -48,13 +95,15 @@ export class ModelViewerErrorBoundary extends Component<ModelViewerErrorBoundary
     super(props);
     this.state = {
       hasError: false,
+      error: null,
       retryNonce: 0,
     };
   }
 
-  static getDerivedStateFromError(): Partial<ModelViewerErrorBoundaryState> {
+  static getDerivedStateFromError(error: Error): Partial<ModelViewerErrorBoundaryState> {
     return {
       hasError: true,
+      error,
     };
   }
 
@@ -65,21 +114,25 @@ export class ModelViewerErrorBoundary extends Component<ModelViewerErrorBoundary
 
   componentDidUpdate(prevProps: ModelViewerErrorBoundaryProps) {
     if (this.props.resetKey !== prevProps.resetKey && this.state.hasError) {
-      this.setState({ hasError: false });
+      this.setState({ hasError: false, error: null });
     }
   }
 
   private handleRetry = () => {
     this.setState((prevState) => ({
       hasError: false,
+      error: null,
       retryNonce: prevState.retryNonce + 1,
     }));
   };
 
   render() {
     if (this.state.hasError) {
-      if (this.props.fallback) {
-        return <React.Fragment key={this.state.retryNonce}>{this.props.fallback}</React.Fragment>;
+      const fallback = typeof this.props.fallback === 'function'
+        ? this.state.error && this.props.fallback(this.state.error, this.handleRetry)
+        : this.props.fallback;
+      if (fallback) {
+        return <React.Fragment key={this.state.retryNonce}>{fallback}</React.Fragment>;
       }
 
       return (
