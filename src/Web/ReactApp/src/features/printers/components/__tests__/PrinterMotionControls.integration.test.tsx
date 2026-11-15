@@ -428,9 +428,11 @@ describe.each<Surface>(["detail", "sidebar"])(
       for (const field of screen.getAllByRole('spinbutton', { name: /absolute target/ })) expect(field).toBeDisabled();
     });
 
-    it('disables Home and motion when the printer does not expose a movement endpoint', () => {
+    it('keeps Home and motion disabled when support is unsupported or unconfirmed without diagnosing the cause', () => {
       render(<Controls surface={surface} movement={false} overrides={{ backend: PrinterBackend.PrusaLink }} />);
-      expect(screen.getByText(/Remote Home and jog controls are unavailable/)).toBeVisible();
+      expect(screen.getByText(/API motion support has not been confirmed/)).toBeVisible();
+      expect(screen.getByText(/reload this page to check again/)).toBeVisible();
+      expect(screen.queryByText(/unavailable on this printer's API/)).not.toBeInTheDocument();
       for (const button of screen.getAllByRole('button', { name: /Home all axes|Home X\/Y|Home Z|Jog [XYZ]/ })) {
         expect(button).toBeDisabled();
         fireEvent.click(button);

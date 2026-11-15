@@ -5,7 +5,7 @@ export function PrinterMotionHelp({ movementUnavailable = false }: { movementUna
   const { mode } = usePrinterControlsMode();
   if (movementUnavailable) return (
     <p role="status" className="mt-2 text-xs text-pf-text-secondary">
-      Remote Home and jog controls are unavailable on this printer&apos;s API. Use the printer&apos;s physical controls.
+      Remote Home and jog controls are disabled because API motion support has not been confirmed. Check the printer connection and credentials, reload this page to check again, or use the printer&apos;s physical controls.
     </p>
   );
   if (mode !== 'guided') return null;
