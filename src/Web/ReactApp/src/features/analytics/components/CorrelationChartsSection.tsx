@@ -32,11 +32,11 @@ export const CorrelationChartsSection = React.memo(function CorrelationChartsSec
   return (
     <Tabs defaultTab="material" className="min-w-0">
       <Tabs.List className="max-w-full overflow-x-auto overscroll-x-contain">
-        <Tabs.Tab id="material">Material Success</Tabs.Tab>
-        <Tabs.Tab id="printer-material">Printer × Material</Tabs.Tab>
-        <Tabs.Tab id="temperature">Temperature</Tabs.Tab>
-        <Tabs.Tab id="duration">Duration Trends</Tabs.Tab>
-        <Tabs.Tab id="failures">Failure Reasons</Tabs.Tab>
+        <Tabs.Tab id="material" className="min-h-11">Material Success</Tabs.Tab>
+        <Tabs.Tab id="printer-material" className="min-h-11">Printer × Material</Tabs.Tab>
+        <Tabs.Tab id="temperature" className="min-h-11">Temperature</Tabs.Tab>
+        <Tabs.Tab id="duration" className="min-h-11">Duration Trends</Tabs.Tab>
+        <Tabs.Tab id="failures" className="min-h-11">Failure Reasons</Tabs.Tab>
       </Tabs.List>
       <Tabs.Panels>
         <Tabs.Panel id="material">
