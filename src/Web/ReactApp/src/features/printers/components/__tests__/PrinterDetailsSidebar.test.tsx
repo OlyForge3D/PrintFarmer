@@ -51,6 +51,8 @@ const mockMovePrinterTo = vi.fn();
 const mockGetPrinterVersionInfo = vi.fn();
 const mockSetTemperatures = vi.fn();
 const mockTurnOffHeaters = vi.fn();
+const mockCancelPrint = vi.fn();
+const mockPausePrint = vi.fn();
 let mockPrinterDetails: Partial<PrinterDetails> | undefined;
 vi.mock("@/features/printers/hooks/use-printer-movement", () => ({
   usePrinterMovement: (printer: Printer) => ({
@@ -159,6 +161,8 @@ vi.mock("@/common/hooks/useApi", () => ({
 
 vi.mock("@/services/api", () => ({
   apiClient: {
+    cancelPrint: (printerId: string) => mockCancelPrint(printerId),
+    pausePrint: (printerId: string) => mockPausePrint(printerId),
     turnOffHeaters: (printerId: string) => mockTurnOffHeaters(printerId),
     setTemperatures: (printerId: string, targets: object) => mockSetTemperatures(printerId, targets),
     getPrinterVersionInfo: (printerId: string, options?: { forceRefresh?: boolean }) =>
@@ -255,6 +259,8 @@ describe("PrinterDetailsSidebar", () => {
     mockPrinterDetails = undefined;
     mockSetTemperatures.mockReset().mockResolvedValue({ success: true });
     mockTurnOffHeaters.mockReset().mockResolvedValue({ success: true });
+    mockCancelPrint.mockReset().mockResolvedValue({ success: true });
+    mockPausePrint.mockReset().mockResolvedValue({ success: true });
     mockInvalidateQueries.mockClear();
     mockRefetch.mockClear();
     mockPrintJobObjectsRefetch.mockClear();
@@ -279,6 +285,44 @@ describe("PrinterDetailsSidebar", () => {
     ]) {
       command.mockReset().mockResolvedValue({ success: true });
     }
+  });
+
+  it("only cancels after explicit confirmation and leaves pause unchanged", async () => {
+    render(<PrinterDetailsSidebar printerId={printer.id} printer={{ ...printer, state: "Printing", jobName: "benchy.gcode" }}
+      backendCapabilities={capabilities()} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Pause print" }));
+    await waitFor(() => expect(mockPausePrint).toHaveBeenCalledExactlyOnceWith(printer.id));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel print" }));
+    expect(mockCancelPrint).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog", { name: "Cancel print?" });
+    expect(dialog).toHaveTextContent('benchy.gcode');
+    expect(dialog).toHaveTextContent(printer.name);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Keep printing" }));
+    expect(mockCancelPrint).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel print" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Cancel print?" })).getByRole("button", { name: "Cancel print" }));
+    await waitFor(() => expect(mockCancelPrint).toHaveBeenCalledExactlyOnceWith(printer.id));
+  });
+
+  it("dismisses a stale confirmation when the printer, print or state changes", () => {
+    const current = { ...printer, state: "Printing", jobName: "benchy.gcode" };
+    const renderPrinter = (value: Printer) => <PrinterDetailsSidebar printerId={value.id} printer={value}
+      backendCapabilities={capabilities()} onClose={vi.fn()} />;
+    const { rerender } = render(renderPrinter(current));
+    for (const changed of [
+      { ...current, id: "printer-2" },
+      { ...current, jobName: "different.gcode" },
+      { ...current, state: "Idle" },
+    ]) {
+      rerender(renderPrinter(current));
+      fireEvent.click(screen.getByRole("button", { name: "Cancel print" }));
+      expect(screen.getByRole("dialog", { name: "Cancel print?" })).toBeInTheDocument();
+      rerender(renderPrinter(changed));
+      expect(screen.queryByRole("dialog", { name: "Cancel print?" })).not.toBeInTheDocument();
+      rerender(renderPrinter(current));
+      expect(screen.queryByRole("dialog", { name: "Cancel print?" })).not.toBeInTheDocument();
+    }
+    expect(mockCancelPrint).not.toHaveBeenCalled();
   });
 
   it.each(['Printing', 'Paused'])('keeps manual edits but disables presets and uses explicit heater shutdown while %s', async state => {
