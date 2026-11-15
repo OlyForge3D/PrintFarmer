@@ -139,18 +139,21 @@ public class UserTaskService(
 
     private async Task<UserTask?> GetCoveringDismissalAsync(CreateProfileImportTaskBatchDto dto, CancellationToken ct)
     {
-        UserTask? dismissed = await _taskRepository.GetLatestDismissedByEntityAsync(
+        IReadOnlyList<UserTask> dismissals = await _taskRepository.GetDismissedByEntityAsync(
             UserTaskType.ProfileImport,
             ProfileImportEntityType,
             dto.PrinterModelId,
             ct);
-        if (dismissed is null)
+        foreach (UserTask dismissed in dismissals)
         {
-            return null;
+            HashSet<Guid> dismissedPrinterIds = ParseRelatedEntityIds(dismissed.RelatedEntityIdsJson).ToHashSet();
+            if (dto.PrinterIds.All(dismissedPrinterIds.Contains))
+            {
+                return dismissed;
+            }
         }
 
-        HashSet<Guid> dismissedPrinterIds = ParseRelatedEntityIds(dismissed.RelatedEntityIdsJson).ToHashSet();
-        return dto.PrinterIds.All(dismissedPrinterIds.Contains) ? dismissed : null;
+        return null;
     }
 
     private async Task<UserTaskDto?> TryMergeProfileImportTaskAsync(

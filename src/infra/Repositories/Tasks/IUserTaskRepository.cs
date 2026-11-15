@@ -37,9 +37,9 @@ public interface IUserTaskRepository
     Task<UserTask?> GetByEntityAsync(UserTaskType taskType, string entityType, Guid entityId, CancellationToken ct = default);
 
     /// <summary>
-    /// Gets the latest farm-wide dismissal for an entity so generators can respect its covered printers.
+    /// Gets farm-wide dismissals for an entity, newest first, so generators can respect previously covered printers.
     /// </summary>
-    Task<UserTask?> GetLatestDismissedByEntityAsync(UserTaskType taskType, string entityType, Guid entityId, CancellationToken ct = default);
+    Task<IReadOnlyList<UserTask>> GetDismissedByEntityAsync(UserTaskType taskType, string entityType, Guid entityId, CancellationToken ct = default);
 
     /// <summary>
     /// Gets the open (Pending or InProgress) task matching a canonical shift-plan

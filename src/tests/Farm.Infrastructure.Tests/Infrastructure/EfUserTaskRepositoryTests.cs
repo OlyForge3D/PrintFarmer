@@ -231,7 +231,7 @@ public class EfUserTaskRepositoryTests : IDisposable
     #endregion
 
     [Fact]
-    public async Task GetLatestDismissedByEntityAsync_MixedHistory_ReturnsLatestMatchingDismissal()
+    public async Task GetDismissedByEntityAsync_MixedHistory_ReturnsAllMatchingDismissalsNewestFirst()
     {
         Guid modelId = Guid.NewGuid();
         UserTask older = CreateUserTask("Older", UserTaskType.ProfileImport, UserTaskStatus.Dismissed);
@@ -250,12 +250,11 @@ public class EfUserTaskRepositoryTests : IDisposable
 
         _ = await _context.SaveChangesAsync();
 
-        UserTask? result = await _repository.GetLatestDismissedByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", modelId);
-        UserTask? none = await _repository.GetLatestDismissedByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", Guid.NewGuid());
+        IReadOnlyList<UserTask> result = await _repository.GetDismissedByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", modelId);
+        IReadOnlyList<UserTask> none = await _repository.GetDismissedByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", Guid.NewGuid());
 
-        result.Should().NotBeNull();
-        result!.Id.Should().Be(newer.Id);
-        none.Should().BeNull();
+        result.Select(task => task.Id).Should().Equal(newer.Id, older.Id);
+        none.Should().BeEmpty();
     }
 
     #region GetPendingCountAsync Tests

@@ -169,6 +169,9 @@ describe('TasksWidget', () => {
     });
     renderWidget();
     expect(await screen.findByText('Profile import tasks mean missing imported profiles, not profile updates.')).toBeInTheDocument();
+    expect(screen.getByText('Dismissing an import task hides it farm-wide for this model/printer group, not just for you.')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Dismiss Import slicer profiles for Prusa MK4S' }))
+      .toHaveAccessibleDescription('Dismissing an import task hides it farm-wide for this model/printer group, not just for you.');
   });
 
   it('deep-links each source kind to the correct existing route', async () => {

@@ -70,7 +70,7 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
     }
 
     /// <inheritdoc />
-    public async Task<UserTask?> GetLatestDismissedByEntityAsync(UserTaskType taskType, string entityType, Guid entityId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<UserTask>> GetDismissedByEntityAsync(UserTaskType taskType, string entityType, Guid entityId, CancellationToken ct = default)
     {
         return await _db.UserTasks.AsNoTracking()
             .Where(t =>
@@ -80,7 +80,7 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
                 t.Status == UserTaskStatus.Dismissed)
             .OrderByDescending(t => t.DismissedAt)
             .ThenByDescending(t => t.CreatedAt)
-            .FirstOrDefaultAsync(ct);
+            .ToListAsync(ct);
     }
 
     /// <inheritdoc />

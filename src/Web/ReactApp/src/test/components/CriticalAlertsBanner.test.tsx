@@ -172,6 +172,18 @@ describe('CriticalAlertsBanner dismissals', () => {
     expect(screen.queryByText(/configuration update available/)).not.toBeInTheDocument();
   });
 
+  it('preserves a catalog dismissal through the summary endpoint empty-success startup fallback', () => {
+    const first = mountBanner();
+    fireEvent.click(screen.getByRole('button', { name: /Dismiss 1 printer/ }));
+    const printers = state.printers;
+    state.printers = [];
+    first.rerender(<CriticalAlertsBanner />);
+    first.unmount();
+    state.printers = printers;
+    mountBanner();
+    expect(screen.queryByText(/configuration update available/)).not.toBeInTheDocument();
+  });
+
   it('isolates operators even when switching without a remount', () => {
     const view = mountBanner();
     dismissBoth();

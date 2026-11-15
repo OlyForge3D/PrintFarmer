@@ -281,6 +281,10 @@ public sealed class ProfileTaskScanBatchTests(ITestOutputHelper output)
                 It.IsAny<UserTask>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
             .Returns(async (UserTask task, IReadOnlyCollection<string> properties, DateTime? expected, CancellationToken ct) =>
                 await real.TryUpdateFieldsIfOpenAsync(task, properties, expected, ct));
+        repository.Setup(r => r.GetDismissedByEntityAsync(
+                It.IsAny<UserTaskType>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns(async (UserTaskType type, string entityType, Guid entityId, CancellationToken ct) =>
+                await real.GetDismissedByEntityAsync(type, entityType, entityId, ct));
         repository.Setup(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()))
             .Returns(async (UserTask task, CancellationToken ct) => await real.AddAsync(task, ct));
         UserTaskService service = new(repository.Object, NullLogger<UserTaskService>.Instance);

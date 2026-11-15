@@ -155,7 +155,8 @@ export function CriticalAlertsBanner() {
       if (!alertsLoading && !alertsError && criticalAlerts.length === 0) {
         localStorage.removeItem(`${storagePrefix}maintenance-overdue`);
       }
-      if (summaries && !summariesError && !summariesFetching && printersWithUpdates.length === 0) {
+      // The summary endpoint also returns [] during transient startup/database failures.
+      if (summaries && summaries.length > 0 && !summariesError && !summariesFetching && printersWithUpdates.length === 0) {
         localStorage.removeItem(`${storagePrefix}catalog-updates`);
       }
     } catch (error) {

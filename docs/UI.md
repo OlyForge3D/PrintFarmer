@@ -31,6 +31,9 @@ sync across devices or hide the underlying maintenance/configuration views.
 New maintenance alerts, a new occurrence or severity change, and newer catalog
 revisions reappear. Successfully observing the condition resolved also resets its
 dismissal, including within the same visit. Failed requests do not reset it.
+An empty successful printer-summary response can be a startup fallback rather
+than proof of resolution, so it preserves configuration dismissals until a
+nonempty summary confirms resolution or a new revision arrives.
 Anonymous users and older servers without a catalog revision get session-only
 configuration dismissal. Storage failures show a warning and hide only for the
 current session. Dismiss does not complete maintenance or apply configuration.
@@ -41,7 +44,10 @@ database machine/model profiles; it does not mean a worker-library profile upgra
 was detected. The scanner checks at startup and every five minutes when slicer
 workers are registered. Import-task dismissals retain the existing **farm-wide**
 task scope: the same model/printer group is not regenerated, but a newly uncovered
-printer can create a task. Already-open tasks remain visible until acted on; the
+printer can create a task. The widget discloses this scope beside the import-task
+explanation and in the dismiss control's accessible description. Import titles
+wrap above their actions so the model identity remains readable in narrow cards.
+Already-open tasks remain visible until acted on; the
 fix does not delete history or silently dismiss old duplicates.
 
 The printer summary API adds nullable `catalogUpdateRevision`, derived from the

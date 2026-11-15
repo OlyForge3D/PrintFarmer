@@ -61,6 +61,18 @@ for (const viewport of [
     }
     const taskRows = page.getByTestId('tasks-widget-row');
     for (const row of await taskRows.all()) {
+      const title = row.getByRole('heading', { level: 4 });
+      await title.scrollIntoViewIfNeeded();
+      await expect(title).toBeInViewport();
+      const titleSize = await title.evaluate(element => ({
+        width: element.clientWidth, contentWidth: element.scrollWidth,
+        height: element.clientHeight, contentHeight: element.scrollHeight,
+      }));
+      expect(titleSize.contentWidth, await title.textContent() ?? 'task title').toBeLessThanOrEqual(titleSize.width);
+      expect(titleSize.contentHeight).toBeLessThanOrEqual(titleSize.height);
+      await expect(row.getByTestId('tasks-widget-dismiss')).toHaveAccessibleDescription(
+        'Dismissing an import task hides it farm-wide for this model/printer group, not just for you.',
+      );
       const bounds = await row.evaluate(element => {
         const rowBounds = element.getBoundingClientRect();
         return [...element.querySelectorAll('button')].map(button => ({
@@ -74,6 +86,14 @@ for (const viewport of [
         expect(button.right).toBeLessThanOrEqual(button.rowWidth + 1);
       }
     }
+    await grid.evaluate(element => {
+      for (const descendant of element.querySelectorAll<HTMLElement>('*')) {
+        descendant.scrollTop = 0;
+      }
+      for (let ancestor: Element | null = element; ancestor; ancestor = ancestor.parentElement) {
+        ancestor.scrollTop = 0;
+      }
+    });
     await page.screenshot({
       path: testInfo.outputPath(`after-${viewport.width}.png`),
       fullPage: true,
