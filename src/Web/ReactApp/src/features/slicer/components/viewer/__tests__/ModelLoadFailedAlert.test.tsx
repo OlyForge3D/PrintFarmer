@@ -102,7 +102,9 @@ describe('ViewerInitializationFailedAlert (issue #3828)', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('The 3D viewer encountered an error.');
     expect(screen.getByRole('alert')).not.toHaveTextContent('WebGL context could not be created');
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
+    const retryButton = screen.getByRole('button', { name: 'Retry' });
+    expect(retryButton).toBeEnabled();
+    expect(retryButton).toHaveClass('min-h-11', 'min-w-11', 'sm:min-h-0', 'sm:min-w-0');
     expect(screen.queryByText('Failed to load 3D model')).not.toBeInTheDocument();
 
     shouldFail = false;

@@ -60,7 +60,12 @@ export function ViewerInitializationFailedAlert({
         </p>
         {!webGLContextCreationFailed && (
           <div className="mt-4 flex justify-center">
-            <Button variant="primary" size="sm" onClick={onRetry}>
+            <Button
+              variant="primary"
+              size="sm"
+              className="min-h-11 min-w-11 sm:min-h-0 sm:min-w-0"
+              onClick={onRetry}
+            >
               Retry
             </Button>
           </div>
