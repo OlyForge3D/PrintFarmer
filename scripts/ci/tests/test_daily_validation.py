@@ -1,4 +1,5 @@
 import copy
+import contextlib
 import importlib.util
 import json
 import os
@@ -83,6 +84,147 @@ class SelectionTests(unittest.TestCase):
                 daily.select_candidate([item], self.cutoff)
 
 
+class BootstrapTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.run = self.allocate_run("first")
+
+    def allocate_run(self, name):
+        run = daily.Run.__new__(daily.Run)
+        runtime = self.root / name
+        runtime.mkdir()
+        run.state = dict(workspace=str(runtime), source=str(runtime / "source"),
+                         project=name, manifest=manifest())
+        run.env = {}
+        with patch.object(daily, "ROOT", self.root), \
+                patch.object(daily, "lock", return_value=contextlib.nullcontext()), \
+                patch.object(run, "command", return_value=(0, "{}")), \
+                patch.object(run, "save"):
+            run.allocate_environment()
+        return run
+
+    def test_fresh_secret_persisted_for_compose_and_redacted(self):
+        key = "PFARM__Setup__BootstrapSecret"
+        secret = self.run.env[key]
+        self.assertTrue(re.fullmatch(r"[0-9a-f]{64}", secret) is not None,
+                        "Bootstrap secret must contain 32 random bytes")
+        other = self.allocate_run("second")
+        self.assertTrue(secret != other.env[key], "Runs must not share bootstrap secrets")
+        runtime = Path(self.run.state["workspace"])
+        self.assertTrue(daily.read_json(runtime / "secrets.json")[key] == secret,
+                        "Persisted bootstrap secret differs from the API environment")
+        self.assertTrue(f"{key}='{secret}'\n" in (runtime / "compose.env").read_text(),
+                        "Compose env file must supply the same bootstrap secret")
+        self.assertTrue(daily.redact(secret, self.run.env) == "[REDACTED]",
+                        "Bootstrap secret must be redacted from logs")
+        if sys.platform == "linux":
+            for name in ("secrets.json", "compose.env"):
+                self.assertEqual((runtime / name).stat().st_mode & 0o777, 0o600)
+
+    def test_setup_sends_exact_environment_secret_and_existing_setup_is_not_recreated(self):
+        printers = [{"backend": "Moonraker", "name": name, "isOnline": name != "Moonraker Offline"}
+                    for name in (*daily.INSTANCES, "Moonraker Offline")]
+        discovery = [{"hostname": name, "printerBackend": "moonraker"}
+                     for name in ("Discovered Voron V2.4", "Discovered Prusa MK4S")]
+        for needs_setup in (True, False):
+            with self.subTest(needs_setup=needs_setup):
+                responses = [{"needsSetup": needs_setup}]
+                if needs_setup:
+                    responses.append({"success": True})
+                responses += [{"token": "fixture-token"}, None, *({} for _ in daily.INSTANCES), printers]
+                with patch.object(self.run, "http", side_effect=responses) as http, \
+                        patch.object(self.run, "compose", return_value=(0, json.dumps(discovery))), \
+                        patch.object(self.run, "save"):
+                    self.run.fixtures()
+                setup_calls = [call for call in http.call_args_list
+                               if call.args[0].endswith("/api/setup/initial-admin")]
+                self.assertEqual(len(setup_calls), int(needs_setup))
+                if needs_setup:
+                    payload = setup_calls[0].args[1]
+                    self.assertTrue(payload.get("bootstrapSecret") ==
+                                    self.run.env["PFARM__Setup__BootstrapSecret"],
+                                    "Initial-admin JSON must send the API's bootstrap secret")
+                    self.assertTrue(payload["username"] == self.run.env["E2E_ADMIN_USERNAME"]
+                                    and payload["password"] == self.run.env["E2E_ADMIN_PASSWORD"]
+                                    and payload["email"] == self.run.env["E2E_ADMIN_EMAIL"],
+                                    "Initial-admin credentials must remain unchanged")
+                self.assertTrue(self.run.state["fixtures"]["ready"])
+
+
+class GenerationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.runtime = Path(self.temp.name)
+        self.source = self.runtime / "source"
+        templates = self.source / "scripts/docker/compose-templates"
+        templates.mkdir(parents=True)
+        for name in ("daily-registry", "daily-validation"):
+            (templates / f"docker-compose.{name}.yml").write_text("{}")
+        frontend = self.source / "src/Web/ReactApp"
+        frontend.mkdir(parents=True)
+        (frontend / "package-lock.json").write_text("{}")
+        self.run = daily.Run.__new__(daily.Run)
+        self.run.directory = self.runtime
+        self.run.state = dict(workspace=str(self.runtime), source=str(self.source),
+                              frontend=str(frontend), project="test", validationId="test",
+                              envFile=str(self.runtime / "compose.env"))
+        (self.runtime / "compose.env").touch()
+        self.nginx = self.runtime / "stack/deploy/nginx"
+
+    def test_existing_generator_output_preserved_and_certificates_generated(self):
+        source_nginx = self.source / "deploy/nginx"
+        source_nginx.mkdir(parents=True)
+        (source_nginx / "nginx.conf").write_text("source version")
+        config = {"services": {service: {} for service in daily.TOPOLOGY}}
+
+        def command(args, name, *unused, **kwargs):
+            if name == "generate":
+                self.nginx.mkdir(parents=True)
+                (self.nginx / "nginx.conf").write_text("generator version")
+                (self.runtime / "stack/docker-compose.yml").write_text("{}")
+
+        def compose(*args):
+            (self.runtime / "config-private.log").touch()
+            return 0, json.dumps(config)
+
+        with patch.object(self.run, "command", side_effect=command) as commands, \
+                patch.object(self.run, "compose", side_effect=compose), \
+                patch.object(self.run, "save"), patch.object(daily, "validate_config"):
+            self.run.generate()
+        self.assertEqual((self.nginx / "nginx.conf").read_text(), "generator version")
+        certificate_call = next(call for call in commands.call_args_list if call.args[1] == "certificates")
+        self.assertEqual(certificate_call.args[0],
+                         ["bash", str(self.source / "scripts/generate-certs.sh"), str(self.nginx / "certs")])
+        self.assertIn("fileHashes", self.run.state)
+
+    def assert_invalid_nginx_output(self, create_output):
+        def command(*args, **kwargs):
+            self.nginx.parent.mkdir(parents=True)
+            create_output()
+
+        with patch.object(self.run, "command", side_effect=command) as commands, \
+                patch.object(self.run, "save"), patch.object(self.run, "compose") as compose:
+            with self.assertRaisesRegex(daily.Blocked, "Compose generator must produce a real nginx"):
+                self.run.generate()
+        self.assertEqual([call.args[1] for call in commands.call_args_list], ["generate"])
+        compose.assert_not_called()
+
+    def test_missing_generator_output_fails_before_certificates(self):
+        self.assert_invalid_nginx_output(lambda: None)
+
+    def test_file_generator_output_fails_before_certificates(self):
+        self.assert_invalid_nginx_output(lambda: self.nginx.write_text("not a directory"))
+
+    @unittest.skipUnless(sys.platform == "linux", "Native Linux symlink support")
+    def test_symlink_generator_output_fails_before_certificates(self):
+        target = self.runtime / "other-nginx"
+        target.mkdir()
+        self.assert_invalid_nginx_output(lambda: self.nginx.symlink_to(target, target_is_directory=True))
+
+
 class PhaseTests(unittest.TestCase):
     def setUp(self):
         self.state = dict(validationId="unique", commit="a" * 40, manifestHash="manifest", harnessHash="harness")
@@ -165,6 +307,9 @@ class LifecycleTests(unittest.TestCase):
         self.run.save()
         reloaded = daily.Run(self.run.state["validationId"])
         self.assertEqual(reloaded.env["POSTGRES_PASSWORD"], self.run.env["POSTGRES_PASSWORD"])
+        self.assertTrue(reloaded.env["PFARM__Setup__BootstrapSecret"] ==
+                        self.run.env["PFARM__Setup__BootstrapSecret"],
+                        "Independent commands must reload the same bootstrap secret")
         self.assertEqual(reloaded.env["BASE_URL"], self.run.env["BASE_URL"])
         self.assertEqual((self.run.directory / "runtime/secrets.json").stat().st_mode & 0o777, 0o600)
         child = (

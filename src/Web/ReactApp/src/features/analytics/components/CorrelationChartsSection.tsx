@@ -29,58 +29,57 @@ const EMPTY_DURATION_TRENDS: DurationTrend[] = [];
 const EMPTY_FAILURE_REASONS: FailureReason[] = [];
 
 export const CorrelationChartsSection = React.memo(function CorrelationChartsSection({ days }: Props) {
-  const materialRates = useMaterialSuccessRates(days);
-  const printerMaterial = usePrinterMaterialPerformance(days);
-  const tempQuality = useTemperatureQualityCorrelation(days);
-  const durationTrends = useDurationTrends(days);
-  const failureReasons = useFailureReasons(days);
-
   return (
-    <Tabs defaultTab="material">
-      <Tabs.List>
-        <Tabs.Tab id="material">Material Success</Tabs.Tab>
-        <Tabs.Tab id="printer-material">Printer × Material</Tabs.Tab>
-        <Tabs.Tab id="temperature">Temperature</Tabs.Tab>
-        <Tabs.Tab id="duration">Duration Trends</Tabs.Tab>
-        <Tabs.Tab id="failures">Failure Reasons</Tabs.Tab>
+    <Tabs defaultTab="material" className="min-w-0">
+      <Tabs.List className="max-w-full overflow-x-auto overscroll-x-contain">
+        <Tabs.Tab id="material" className="min-h-11">Material Success</Tabs.Tab>
+        <Tabs.Tab id="printer-material" className="min-h-11">Printer × Material</Tabs.Tab>
+        <Tabs.Tab id="temperature" className="min-h-11">Temperature</Tabs.Tab>
+        <Tabs.Tab id="duration" className="min-h-11">Duration Trends</Tabs.Tab>
+        <Tabs.Tab id="failures" className="min-h-11">Failure Reasons</Tabs.Tab>
       </Tabs.List>
       <Tabs.Panels>
         <Tabs.Panel id="material">
-          <MaterialSuccessRateChart
-            data={materialRates.data ?? EMPTY_MATERIAL_SUCCESS_RATES}
-            isLoading={materialRates.isLoading}
-            error={materialRates.error}
-          />
+          <MaterialPanel days={days} />
         </Tabs.Panel>
         <Tabs.Panel id="printer-material">
-          <PrinterMaterialHeatmap
-            data={printerMaterial.data ?? EMPTY_PRINTER_MATERIAL_PERFORMANCE}
-            isLoading={printerMaterial.isLoading}
-            error={printerMaterial.error}
-          />
+          <PrinterMaterialPanel days={days} />
         </Tabs.Panel>
         <Tabs.Panel id="temperature">
-          <TemperatureScatterPlot
-            data={tempQuality.data ?? EMPTY_TEMPERATURE_QUALITY_CORRELATION}
-            isLoading={tempQuality.isLoading}
-            error={tempQuality.error}
-          />
+          <TemperaturePanel days={days} />
         </Tabs.Panel>
         <Tabs.Panel id="duration">
-          <DurationTrendChart
-            data={durationTrends.data ?? EMPTY_DURATION_TRENDS}
-            isLoading={durationTrends.isLoading}
-            error={durationTrends.error}
-          />
+          <DurationPanel days={days} />
         </Tabs.Panel>
         <Tabs.Panel id="failures">
-          <FailureReasonsChart
-            data={failureReasons.data ?? EMPTY_FAILURE_REASONS}
-            isLoading={failureReasons.isLoading}
-            error={failureReasons.error}
-          />
+          <FailuresPanel days={days} />
         </Tabs.Panel>
       </Tabs.Panels>
     </Tabs>
   );
 });
+
+function MaterialPanel({ days }: Props) {
+  const query = useMaterialSuccessRates(days);
+  return <MaterialSuccessRateChart data={query.data ?? EMPTY_MATERIAL_SUCCESS_RATES} isLoading={query.isLoading} error={query.error} />;
+}
+
+function PrinterMaterialPanel({ days }: Props) {
+  const query = usePrinterMaterialPerformance(days);
+  return <PrinterMaterialHeatmap data={query.data ?? EMPTY_PRINTER_MATERIAL_PERFORMANCE} isLoading={query.isLoading} error={query.error} />;
+}
+
+function TemperaturePanel({ days }: Props) {
+  const query = useTemperatureQualityCorrelation(days);
+  return <TemperatureScatterPlot data={query.data ?? EMPTY_TEMPERATURE_QUALITY_CORRELATION} isLoading={query.isLoading} error={query.error} />;
+}
+
+function DurationPanel({ days }: Props) {
+  const query = useDurationTrends(days);
+  return <DurationTrendChart data={query.data ?? EMPTY_DURATION_TRENDS} isLoading={query.isLoading} error={query.error} />;
+}
+
+function FailuresPanel({ days }: Props) {
+  const query = useFailureReasons(days);
+  return <FailureReasonsChart data={query.data ?? EMPTY_FAILURE_REASONS} isLoading={query.isLoading} error={query.error} />;
+}
