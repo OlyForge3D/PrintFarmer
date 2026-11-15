@@ -46,32 +46,67 @@ async function getManagedProfiles(page: import('@playwright/test').Page): Promis
   return await response.json() as ManagedProfilesResponse;
 }
 
-async function selectFirstProfile(
+async function selectMachineProfile(
   choices: Locator,
+  importedProfileNames: string[],
+): Promise<{ name: string; alreadyImported: boolean }> {
+  const profiles: Array<{ choice: Locator; name: string; alreadyImported: boolean }> = [];
+  for (let index = 0; index < await choices.count(); index++) {
+    const choice = choices.nth(index);
+    const name = await choice.evaluate((element: HTMLInputElement) =>
+      element.labels?.[0]?.innerText.split(/\r?\n/)[0].trim() ?? ''
+    );
+    if (!name) {
+      continue;
+    }
+
+    const alreadyImported = importedProfileNames.includes(name);
+    if (alreadyImported) {
+      await expect(choice, `The already-imported machine profile "${name}" must be selected by the wizard`)
+        .toBeChecked();
+    }
+    profiles.push({ choice, name, alreadyImported });
+  }
+
+  const profile = profiles.find((candidate) => !candidate.alreadyImported)
+    ?? profiles.find((candidate) => candidate.alreadyImported);
+  if (!profile) {
+    throw new Error('The deployed worker has no compatible machine profile for this printer model');
+  }
+  if (!profile.alreadyImported && !(await profile.choice.isChecked())) {
+    await profile.choice.check();
+  }
+  return { name: profile.name, alreadyImported: profile.alreadyImported };
+}
+
+async function selectAlreadyImportedProfile(
+  choices: Locator,
+  importedProfileNames: string[],
   profileType: string,
-  requireUnimported: boolean,
 ): Promise<string> {
   for (let index = 0; index < await choices.count(); index++) {
     const choice = choices.nth(index);
-    const profile = await choice.evaluate((element: HTMLInputElement) => {
-      const label = element.labels?.[0];
-      const labelText = label?.innerText ?? '';
-      return {
-        name: labelText.split(/\r?\n/)[0].trim(),
-        isImported: labelText.includes('Imported') || Boolean(label?.querySelector('[title="Already imported"]')),
-      };
-    });
-    if (!profile.name || (requireUnimported && (profile.isImported || await choice.isChecked()))) {
+    const profileName = await choice.evaluate((element: HTMLInputElement) =>
+      element.labels?.[0]?.innerText.split(/\r?\n/)[0].trim() ?? ''
+    );
+    if (!profileName || !importedProfileNames.includes(profileName)) {
       continue;
     }
 
     if (!(await choice.isChecked())) {
       await choice.check();
     }
-    return profile.name;
+    return profileName;
   }
 
-  throw new Error(`The deployed worker has no ${requireUnimported ? 'unimported ' : ''}${profileType} profile for this printer model`);
+  throw new Error(`The deployed worker has no already-imported ${profileType} profile for this printer model`);
+}
+
+function expectSameValues(actual: string[], expected: string[], description: string): void {
+  expect(
+    [...actual].sort(),
+    `${description} must be unchanged by the profile import`,
+  ).toEqual([...expected].sort());
 }
 
 function getManagedProfileIds(profiles: ManagedProfilesResponse): Set<string> {
@@ -110,7 +145,7 @@ async function removeNewManagedProfiles(
 }
 
 test.describe('Slicer profile management', () => {
-  test('imports compatible worker profiles and opens the managed profile library', async ({ page }) => {
+  test('imports worker profiles, handles retries, and opens the managed profile library', async ({ page }) => {
     test.setTimeout(180_000);
     const modelId = await getProfileImportModelId(page);
     const profilesBeforeImport = await getManagedProfiles(page);
@@ -127,24 +162,26 @@ test.describe('Slicer profile management', () => {
         .toBeTruthy();
       const importedNames = await importedNamesResponse.json() as {
         machineProfileNames: string[];
+        processProfileNames: string[];
         filamentProfileNames: string[];
       };
       await expect(page.getByRole('heading', { name: 'Select Machine Profile(s)' })).toBeVisible({ timeout: 60_000 });
-      if (importedNames.machineProfileNames.length > 0) {
-        await expect(page.getByText('Imported', { exact: true }).first()).toBeVisible();
-      }
 
       const machineChoices = page.getByRole('checkbox');
       await expect(machineChoices.first(), 'The OrcaSlicer worker must expose compatible machine profiles')
         .toBeVisible({ timeout: 60_000 });
-      const machineProfileName = await selectFirstProfile(machineChoices, 'machine', true);
-      expect(importedNames.machineProfileNames).not.toContain(machineProfileName);
+      const { name: machineProfileName, alreadyImported: machineAlreadyImported } =
+        await selectMachineProfile(machineChoices, importedNames.machineProfileNames);
       await page.getByRole('button', { name: 'Next', exact: true }).click();
 
       const filamentChoices = page.getByRole('checkbox');
       await expect(filamentChoices.first(), 'The OrcaSlicer worker must expose compatible filament profiles')
         .toBeVisible({ timeout: 60_000 });
-      const filamentProfileName = await selectFirstProfile(filamentChoices, 'filament', false);
+      const filamentProfileName = await selectAlreadyImportedProfile(
+        filamentChoices,
+        importedNames.filamentProfileNames,
+        'filament',
+      );
       await page.getByRole('button', { name: 'Next', exact: true }).click();
 
       await expect(page.getByRole('heading', { name: 'Review & Import' })).toBeVisible();
@@ -164,7 +201,15 @@ test.describe('Slicer profile management', () => {
       const importSummary = page.getByText(/^Profiles imported:/);
       await expect(importSummary).toBeVisible({ timeout: 90_000 });
       const importResult = await importSummary.textContent() ?? '';
-      expect(importResult).toMatch(/Profiles imported: [1-9]\d* machine\(s\)/);
+      if (machineAlreadyImported) {
+        expect(importResult).toMatch(
+          /^Profiles imported: 0 machine\(s\), 0 process\(s\), 0 filament\(s\) \([1-9]\d* skipped as duplicates\)$/
+        );
+      } else {
+        expect(importResult).toMatch(
+          /^Profiles imported: 1 machine\(s\), 0 process\(s\), 0 filament\(s\) \([1-9]\d* skipped as duplicates\)$/
+        );
+      }
 
       const token = await getStoredAuthToken(page);
       expect(token, 'The authenticated emulator fixture must provide an API token').toBeTruthy();
@@ -178,16 +223,22 @@ test.describe('Slicer profile management', () => {
       ).toBeTruthy();
       const importedNamesAfter = await importedNamesAfterResponse.json() as {
         machineProfileNames: string[];
+        processProfileNames: string[];
         filamentProfileNames: string[];
       };
-      expect(
-        importedNamesAfter.machineProfileNames,
-        `The imported machine profile "${machineProfileName}" must be linked to the printer model`
-      ).toContain(machineProfileName);
-      expect(
-        importedNamesAfter.filamentProfileNames,
-        `The selected filament profile "${filamentProfileName}" must be available in the managed library`
-      ).toContain(filamentProfileName);
+      const expectedMachineProfileNames = machineAlreadyImported
+        ? importedNames.machineProfileNames
+        : [...importedNames.machineProfileNames, machineProfileName];
+      expectSameValues(importedNamesAfter.machineProfileNames, expectedMachineProfileNames, 'Machine profile links');
+      expectSameValues(importedNamesAfter.processProfileNames, importedNames.processProfileNames, 'Process profile links');
+      expectSameValues(importedNamesAfter.filamentProfileNames, importedNames.filamentProfileNames, 'Filament profile links');
+
+      const profilesAfterImport = await getManagedProfiles(page);
+      expectSameValues(
+        [...getManagedProfileIds(profilesAfterImport)],
+        [...existingProfileIds],
+        'Managed profile IDs',
+      );
 
       await page.goto('/admin/settings?scope=system&tab=slicing&sub=profiles');
       await expect(page.getByRole('heading', { name: 'Slicer Profiles' })).toBeVisible({ timeout: 60_000 });
