@@ -8,8 +8,11 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Services.Gcode.PrinterFiles;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.Spoolman;
+using Farm.Infrastructure.Settings;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
@@ -111,6 +114,87 @@ public sealed class MoonrakerSensorSubscriptionTests : IAsyncDisposable
 
     private static Dictionary<string, PrinterSensorDto> ById(IReadOnlyList<PrinterSensorDto> sensors) =>
         sensors.ToDictionary(s => s.Id, StringComparer.Ordinal);
+
+    [Theory]
+    [InlineData("standby", true)]
+    [InlineData("idle", true)]
+    [InlineData("complete", true)]
+    [InlineData("cancelled", true)]
+    [InlineData("printing", false)]
+    [InlineData("paused", false)]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData(" ", false)]
+    [InlineData("unknown", false)]
+    [InlineData("error", false)]
+    public async Task GetPrinterStatusAsync_ExplicitActivity_MatchesWebSocketConfirmedIdle(
+        string? activity, bool confirmedIdle)
+    {
+        string printStats = activity is null ? "{}" : JsonSerializer.Serialize(new { state = activity });
+        string statusJson = $$$"""
+            {"webhooks":{"state":"ready"},"print_stats":{{{printStats}}},"toolhead":{"homed_axes":"xyz"},"gcode_move":{}}
+            """;
+        using var handler = new ConfigurationHandler
+        {
+            Respond = (request, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    request.RequestUri!.AbsolutePath == "/printer/info"
+                        ? """{"result":{"state":"ready"}}"""
+                        : """{"result":{"status":""" + statusJson + "}}",
+                    Encoding.UTF8, "application/json"),
+            }),
+        };
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings());
+        var breakers = new Mock<ICircuitBreakerService>();
+        breakers.Setup(service => service.GetCircuitBreaker(It.IsAny<string>(), null, null, null))
+            .Returns(new CircuitBreaker());
+        var statusClient = new MoonrakerStatusClient(client, breakers.Object,
+            new ManagedSpoolProviderHelper(Mock.Of<ISpoolmanStatusCache>(), NullLogger<ManagedSpoolProviderHelper>.Instance),
+            NullLogger<MoonrakerStatusClient>.Instance);
+        DateTime observedAt = DateTime.UtcNow;
+
+        PrinterStatusDto rest = await statusClient.GetPrinterStatusAsync(Printer, _cts.Token);
+        await ProcessStatusAsync(statusJson);
+        PrinterStatusDto websocket = _cached[^1];
+
+        string? expectedRaw = string.IsNullOrWhiteSpace(activity) ? null : activity;
+        Assert.Equal(expectedRaw, rest.RawActivityState);
+        Assert.Equal(expectedRaw, websocket.RawActivityState);
+        Assert.Equal(PrinterStateNormalizer.NormalizeState(string.IsNullOrEmpty(activity) ? "ready" : activity), websocket.State);
+        Assert.Equal(confirmedIdle, PrinterFileIndexPolicy.IsConfirmedIdle(new(rest, observedAt), DateTime.UtcNow));
+        Assert.Equal(confirmedIdle, PrinterFileIndexPolicy.IsConfirmedIdle(new(websocket, observedAt), DateTime.UtcNow));
+
+        PrinterCompositeStatus composite = await client.GetCompositeStatusAsync(Printer.BackendUrl, Printer.Credential, _cts.Token);
+        Assert.Equal(expectedRaw, composite.RawActivityState);
+        _client.Setup(value => value.GetCompositeStatusAsync(
+                It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(composite);
+        await ReadHttpFactorsAsync(refresh: true);
+        Assert.Equal(expectedRaw, _cached[^1].RawActivityState);
+        Assert.Equal(confirmedIdle, PrinterFileIndexPolicy.IsConfirmedIdle(new(_cached[^1], observedAt), DateTime.UtcNow));
+        await ReadHttpFactorsAsync(refresh: false);
+        Assert.Equal(expectedRaw, _cached[^1].RawActivityState);
+        Assert.Equal(confirmedIdle, PrinterFileIndexPolicy.IsConfirmedIdle(new(_cached[^1], observedAt), DateTime.UtcNow));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("unknown")]
+    [InlineData("error")]
+    public async Task ProcessStatusUpdateAsync_InvalidActivityThenReadiness_DoesNotRestoreConfirmedIdle(string? activity)
+    {
+        await ProcessStatusAsync("""{"webhooks":{"state":"ready"},"print_stats":{"state":"standby"}}""");
+        Assert.True(PrinterFileIndexPolicy.IsConfirmedIdle(new(_cached[^1], DateTime.UtcNow), DateTime.UtcNow));
+
+        await ProcessStatusAsync(JsonSerializer.Serialize(new { print_stats = new { state = activity } }));
+        await ProcessStatusAsync("""{"webhooks":{"state":"ready"}}""");
+
+        Assert.Equal(string.IsNullOrWhiteSpace(activity) ? null : activity, _cached[^1].RawActivityState);
+        Assert.False(PrinterFileIndexPolicy.IsConfirmedIdle(new(_cached[^1], DateTime.UtcNow), DateTime.UtcNow));
+    }
 
     private static readonly List<string> HeaterObjects =
         ["configfile", "webhooks", "print_stats", "toolhead", "extruder", "extruder1", "extruder2", "extruder3", "heater_bed", "fan"];

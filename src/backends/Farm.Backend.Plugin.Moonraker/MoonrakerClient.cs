@@ -687,6 +687,8 @@ public partial class MoonrakerClient(
             SpeedFactorPercent: speedFactorPercent,
             FlowFactorPercent: flowFactorPercent)
         {
+            RawActivityState = string.Equals(status.State, "ready", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(job?.PrintState) ? job.PrintState : null,
             Sensors = sensors?.Snapshot(),
         };
     }
