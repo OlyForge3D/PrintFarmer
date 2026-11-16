@@ -854,6 +854,34 @@ export async function isolateCapture(context: BrowserContext, {
         await route.fulfill({ status: 200, json: { ...syntheticRole, displayName: 'Edited coverage role' } });
         return;
       }
+      if (flow.overlayMutation === 'role-members' && key === 'PUT /api/admin/roles/fixture-role/permissions') {
+        const expected = {
+          updatedAt: captureTime,
+          permissions: [],
+        };
+        if (JSON.stringify(request.postDataJSON()) !== JSON.stringify(expected)) {
+          violations.push('Unexpected role-permissions payload.');
+          await route.fulfill({ status: 400, json: { message: 'Unexpected synthetic role-permissions payload.' } });
+          return;
+        }
+        await route.fulfill({
+          status: 200,
+          json: {
+            role: {
+              ...syntheticRolePermissions,
+              resources: [{
+                ...syntheticRolePermissions.resources[0],
+                permissions: [{
+                  ...syntheticRolePermissions.resources[0].permissions[0],
+                  status: 'Denied',
+                }],
+              }],
+            },
+            revokedSessionCount: 0,
+          },
+        });
+        return;
+      }
       if (flow.overlayMutation === 'role-delete-conflict' && key === 'DELETE /api/admin/roles/fixture-role') {
         await route.fulfill({ status: 409, json: { error: 'This role still has 2 member(s).', memberCount: 2 } });
         return;

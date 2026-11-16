@@ -308,6 +308,26 @@ export async function prepareVisualScene(context: BrowserContext, page: Page, sc
       if (scene.overlay === 'role-members') {
         await roleRow.click();
         await expect(page.getByText('Printers', { exact: true }).last()).toBeVisible();
+        const grantView = page.getByRole('checkbox', { name: 'Grant View', exact: true });
+        await expect(grantView).toBeChecked();
+        await grantView.uncheck({ force: true });
+        const saveBar = page.getByTestId('admin-save-bar');
+        await expect(saveBar).toBeVisible();
+        await saveBar.getByRole('button', { name: 'Save changes', exact: true }).click();
+        const confirmation = page.getByRole('dialog', { name: 'Save permission changes' });
+        await expect(confirmation).toBeVisible();
+        const responsePromise = page.waitForResponse(response =>
+          response.request().method() === 'PUT' &&
+          new URL(response.url()).pathname === '/api/admin/roles/fixture-role/permissions',
+        );
+        await confirmation.getByRole('button', { name: 'Save changes', exact: true }).click();
+        const response = await responsePromise;
+        expect(response.status()).toBe(200);
+        expect(response.request().postDataJSON()).toEqual({
+          updatedAt: captureTime,
+          permissions: [],
+        });
+        await expect(page.getByText('Permissions saved.', { exact: true })).toBeVisible();
       } else if (scene.overlay === 'edit-role') {
         await roleRow.click();
         await roleRow.getByRole('button', { name: 'Edit Coverage role' }).click();
@@ -393,6 +413,10 @@ export async function prepareVisualScene(context: BrowserContext, page: Page, sc
         const conflictDialog = page.getByRole('dialog', { name: 'Conflict updating "Edited coverage tag"' });
         await expect(conflictDialog).toBeVisible();
         await expect(conflictDialog.getByRole('alert')).toContainText('This tag was changed by someone else');
+        await expect(conflictDialog.getByRole('table')).toContainText('Edited coverage tag');
+        await expect(conflictDialog.getByRole('table')).toContainText('Synthetic coverage tag');
+        await expect(conflictDialog.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
+        await expect(conflictDialog.getByRole('button', { name: 'Reload latest version', exact: true })).toBeVisible();
       } else {
         await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeHidden();
       }
@@ -482,6 +506,7 @@ export async function prepareVisualScene(context: BrowserContext, page: Page, sc
         await dialog.getByRole('button', { name: 'Delete User', exact: true }).click();
         const response = await responsePromise;
         expect(response.status()).toBe(409);
+        await expect(response.json()).resolves.toEqual({ message: 'Cannot delete the last administrator.' });
         await expect(page.getByRole('row').filter({ hasText: 'fixture.operator' })).toBeVisible();
         const errorToast = page.getByText('Failed to delete user', { exact: true });
         await expect(errorToast).toBeVisible();
