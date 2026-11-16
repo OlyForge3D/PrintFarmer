@@ -918,6 +918,121 @@ public class ProfilesServiceResolveOrImportTests
         Assert.Equal(0.08, Assert.Single(harness.Processes, profile => profile.Name == aliasOnlyProcessName).LayerHeight);
     }
 
+    [Fact]
+    public async Task ImportSelectedProfilesForModelAsync_ConflictingProcessNames_UsesOrdinalModelOrder()
+    {
+        MicronHarness harness = new();
+        using HttpClient httpClient = CreateMicronWorkerHttpClient(
+            new Dictionary<string, (MachineProfileDto[], ProcessProfileDto[])>
+            {
+                [MicronCatalogManufacturer] = ([MicronMachine()], [])
+            },
+            modelGroups: new Dictionary<string, PrinterModelProfilesDto[]>
+            {
+                [MicronCatalogManufacturer] =
+                [
+                    new()
+                    {
+                        Name = "Later model",
+                        ModelId = "model-z",
+                        MachineProfiles = [MicronMachine()],
+                        ProcessProfiles = [MicronProcess(0.3, MicronMachineName)]
+                    },
+                    new()
+                    {
+                        Name = "Earlier model",
+                        ModelId = "model-a",
+                        MachineProfiles = [MicronMachine()],
+                        ProcessProfiles = [MicronProcess(0.06, MicronMachineName)]
+                    }
+                ]
+            });
+
+        SelectiveProfileImportRequest request = new() { ManufacturerName = MicronCatalogManufacturer };
+        request.SelectedProcessProfiles.Add(MicronProcessName);
+
+        SelectiveProfileImportResultDto result = await harness.Service.ImportSelectedProfilesForModelAsync(
+            httpClient, harness.ModelId, request, CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.Equal(0.06, Assert.Single(harness.Processes).LayerHeight);
+        Assert.Equal(1, result.Skipped);
+    }
+
+    [Fact]
+    public async Task ImportSelectedProfilesForModelAsync_ProcessPersistFailure_AllowsLaterDuplicateCandidate()
+    {
+        MicronHarness harness = new(failFirstProcessAdd: true);
+        using HttpClient httpClient = CreateMicronWorkerHttpClient(new Dictionary<string, (MachineProfileDto[], ProcessProfileDto[])>
+        {
+            [MicronCatalogManufacturer] = ([MicronMachine()], [
+                MicronProcess(0.06, MicronMachineName),
+                MicronProcess(0.08, MicronMachineName)
+            ])
+        });
+
+        SelectiveProfileImportRequest request = new() { ManufacturerName = MicronCatalogManufacturer };
+        request.SelectedProcessProfiles.Add(MicronProcessName);
+
+        SelectiveProfileImportResultDto result = await harness.Service.ImportSelectedProfilesForModelAsync(
+            httpClient, harness.ModelId, request, CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.Equal(1, result.ProcessProfilesImported);
+        Assert.Equal(1, result.Skipped);
+        Assert.Equal(0.08, Assert.Single(harness.Processes).LayerHeight);
+    }
+
+    [Fact]
+    public async Task ImportSelectedProfilesForModelAsync_DuplicateMachineNames_ArePersistedOnce()
+    {
+        MicronHarness harness = new();
+        using HttpClient httpClient = CreateMicronWorkerHttpClient(new Dictionary<string, (MachineProfileDto[], ProcessProfileDto[])>
+        {
+            ["PrintFarmer-z"] = ([MicronMachine()], []),
+            ["PrintFarmer-a"] = ([MicronMachine()], [])
+        });
+
+        SelectiveProfileImportRequest request = new() { ManufacturerName = MicronCatalogManufacturer };
+        request.SelectedMachineProfiles.Add(MicronMachineName);
+
+        SelectiveProfileImportResultDto result = await harness.Service.ImportSelectedProfilesForModelAsync(
+            httpClient, harness.ModelId, request, CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.Equal(1, result.MachineProfilesImported);
+        Assert.Equal(1, result.Skipped);
+        Assert.Single(harness.Machines);
+    }
+
+    [Fact]
+    public async Task ImportSelectedProfilesForModelAsync_DuplicateFilamentIdentities_ArePersistedOnce()
+    {
+        MicronHarness harness = new();
+        FilamentProfileDto[] filaments =
+        [
+            new() { Name = "PLA @Micron", Material = "PLA", NozzleTemperature = 210, CompatiblePrinters = [MicronMachineName] },
+            new() { Name = "PLA @Micron", Material = "PLA", NozzleTemperature = 220, CompatiblePrinters = [MicronMachineName] }
+        ];
+        using HttpClient httpClient = CreateMicronWorkerHttpClient(
+            new Dictionary<string, (MachineProfileDto[], ProcessProfileDto[])>
+            {
+                [MicronCatalogManufacturer] = ([MicronMachine()], [])
+            },
+            filaments: filaments);
+
+        SelectiveProfileImportRequest request = new() { ManufacturerName = MicronCatalogManufacturer };
+        request.SelectedFilamentProfiles.Add("PLA @Micron");
+
+        SelectiveProfileImportResultDto result = await harness.Service.ImportSelectedProfilesForModelAsync(
+            httpClient, harness.ModelId, request, CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.Equal(1, result.FilamentProfilesImported);
+        Assert.Equal(1, result.Skipped);
+        Assert.Equal(210, Assert.Single(harness.Filaments).NozzleTemperature);
+    }
+
     /// <summary>
     /// When no worker bucket holds an alias-matched machine and none is named after the catalog
     /// manufacturer, the import still fails with the manufacturer error rather than scanning
@@ -965,11 +1080,13 @@ public class ProfilesServiceResolveOrImportTests
 
         public List<MachineProfile> Machines { get; } = [];
 
+        public List<FilamentProfile> Filaments { get; } = [];
+
         public List<ProcessProfile> Processes { get; } = [];
 
         public ProfilesService Service { get; }
 
-        public MicronHarness()
+        public MicronHarness(bool failFirstProcessAdd = false)
         {
             Guid manufacturerId = Guid.NewGuid();
 
@@ -992,9 +1109,30 @@ public class ProfilesServiceResolveOrImportTests
             _ = processRepo
                 .Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((ProcessProfile?)null);
+            int processAddCount = 0;
             _ = processRepo
                 .Setup(r => r.AddAsync(It.IsAny<ProcessProfile>(), It.IsAny<CancellationToken>()))
-                .Callback<ProcessProfile, CancellationToken>((p, _) => Processes.Add(p))
+                .Callback<ProcessProfile, CancellationToken>((p, _) =>
+                {
+                    if (failFirstProcessAdd && processAddCount++ == 0)
+                    {
+                        throw new InvalidOperationException("Simulated process profile persistence failure");
+                    }
+
+                    Processes.Add(p);
+                })
+                .Returns(Task.CompletedTask);
+
+            Mock<IFilamentProfileRepository> filamentRepo = new(MockBehavior.Loose);
+            _ = filamentRepo
+                .Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => new List<FilamentProfile>(Filaments));
+            _ = filamentRepo
+                .Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((FilamentProfile?)null);
+            _ = filamentRepo
+                .Setup(r => r.AddAsync(It.IsAny<FilamentProfile>(), It.IsAny<CancellationToken>()))
+                .Callback<FilamentProfile, CancellationToken>((p, _) => Filaments.Add(p))
                 .Returns(Task.CompletedTask);
 
             Mock<ICatalogService> catalogService = new(MockBehavior.Loose);
@@ -1033,6 +1171,7 @@ public class ProfilesServiceResolveOrImportTests
             Service = CreateService(
                 processRepoOverride: processRepo.Object,
                 machineRepoOverride: machineRepo.Object,
+                filamentRepoOverride: filamentRepo.Object,
                 catalogServiceOverride: catalogService.Object,
                 slicersServiceOverride: slicersService.Object,
                 parsingServiceOverride: parsingService.Object);
@@ -1046,25 +1185,38 @@ public class ProfilesServiceResolveOrImportTests
     /// </summary>
     private static HttpClient CreateMicronWorkerHttpClient(
         Dictionary<string, (MachineProfileDto[] Machines, ProcessProfileDto[] Processes)> buckets,
-        MachineProfileDto[]? aliasMachines = null)
+        MachineProfileDto[]? aliasMachines = null,
+        Dictionary<string, PrinterModelProfilesDto[]>? modelGroups = null,
+        FilamentProfileDto[]? filaments = null)
     {
         AllProfilesResponseDto response = new();
         foreach ((string vendor, (MachineProfileDto[] machines, ProcessProfileDto[] processes)) in buckets)
         {
+            Dictionary<string, PrinterModelProfilesDto> models = new(StringComparer.Ordinal);
+            if (modelGroups != null && modelGroups.TryGetValue(vendor, out PrinterModelProfilesDto[]? configuredModels))
+            {
+                for (int i = 0; i < configuredModels.Length; i++)
+                {
+                    PrinterModelProfilesDto model = configuredModels[i];
+                    models[model.ModelId.Length == 0 ? vendor + "-model-" + i.ToString(CultureInfo.InvariantCulture) : model.ModelId] = model;
+                }
+            }
+            else
+            {
+                models[vendor + "-model"] = new PrinterModelProfilesDto
+                {
+                    Name = machines.FirstOrDefault()?.PrinterModel ?? vendor,
+                    ModelId = vendor + "-model",
+                    MachineProfiles = [.. machines],
+                    FilamentProfiles = [.. filaments ?? []],
+                    ProcessProfiles = [.. processes]
+                };
+            }
+
             response.ByHierarchy[vendor] = new ManufacturerProfilesDto
             {
                 Name = vendor,
-                Models = new Dictionary<string, PrinterModelProfilesDto>
-                {
-                    [vendor + "-model"] = new()
-                    {
-                        Name = machines.FirstOrDefault()?.PrinterModel ?? vendor,
-                        ModelId = vendor + "-model",
-                        MachineProfiles = [.. machines],
-                        FilamentProfiles = [],
-                        ProcessProfiles = [.. processes]
-                    }
-                }
+                Models = models
             };
         }
 

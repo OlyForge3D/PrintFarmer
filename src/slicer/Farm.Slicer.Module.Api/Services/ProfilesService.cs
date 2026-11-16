@@ -1372,9 +1372,13 @@ public class ProfilesService(
                 return compatiblePrinters.Any(aliasMatchedMachineNames.Contains);
             }
 
-            // Iterate through all models to find matching profiles
+            // Sort model groups too: worker dictionary enumeration order must not decide which
+            // conflicting profile wins inside a manufacturer bucket.
             foreach ((string bucketKey, PrinterModelProfilesDto? modelProfiles) in manufacturerBuckets
-                         .SelectMany(bucket => bucket.Profiles.Models.Values.Select(model => (bucket.Key, model))))
+                         .SelectMany(bucket => bucket.Profiles.Models
+                             .OrderBy(model => model.Key, StringComparer.OrdinalIgnoreCase)
+                             .ThenBy(model => model.Key, StringComparer.Ordinal)
+                             .Select(model => (bucket.Key, model.Value))))
             {
                 if (modelProfiles == null)
                 {
@@ -1406,8 +1410,10 @@ public class ProfilesService(
                             continue;
                         }
 
-                        if (!importedMachineNames.Add(machineProfile.Name ?? string.Empty))
+                        string machineIdentity = machineProfile.Name ?? string.Empty;
+                        if (importedMachineNames.Contains(machineIdentity))
                         {
+                            _logger.LogDebug("[ImportSelectedProfilesForModel] Skipping duplicate machine profile '{MachineProfileName}' from bucket '{BucketKey}' and model '{ModelDisplayName}'", machineProfile.Name, bucketKey, modelDisplayName);
                             result.Skipped++;
                             continue;
                         }
@@ -1419,6 +1425,7 @@ public class ProfilesService(
                                 printerModelId, orcaVersion, checkDuplicates: true, ct,
                                 attributeToCatalogManufacturer);
 
+                            importedMachineNames.Add(machineIdentity);
                             if (imported)
                             {
                                 result.MachineProfilesImported++;
@@ -1454,8 +1461,10 @@ public class ProfilesService(
                             continue;
                         }
 
-                        if (!importedFilamentIdentities.Add(FilamentIdentity(filamentProfile.Name, filamentProfile.Material)))
+                        string filamentIdentity = FilamentIdentity(filamentProfile.Name, filamentProfile.Material);
+                        if (importedFilamentIdentities.Contains(filamentIdentity))
                         {
+                            _logger.LogDebug("[ImportSelectedProfilesForModel] Skipping duplicate filament profile '{FilamentProfileName}' with material '{Material}' from bucket '{BucketKey}' and model '{ModelDisplayName}'", filamentProfile.Name, filamentProfile.Material, bucketKey, modelDisplayName);
                             result.Skipped++;
                             continue;
                         }
@@ -1466,6 +1475,7 @@ public class ProfilesService(
                                 filamentProfile, request.ManufacturerName, modelDisplayName,
                                 orcaVersion, checkDuplicates: true, ct);
 
+                            importedFilamentIdentities.Add(filamentIdentity);
                             if (imported)
                             {
                                 result.FilamentProfilesImported++;
@@ -1501,8 +1511,10 @@ public class ProfilesService(
                             continue;
                         }
 
-                        if (!importedProcessIdentities.Add(ProcessIdentity(processProfile.Name, printerModelId)))
+                        string processIdentity = ProcessIdentity(processProfile.Name, printerModelId);
+                        if (importedProcessIdentities.Contains(processIdentity))
                         {
+                            _logger.LogDebug("[ImportSelectedProfilesForModel] Skipping duplicate process profile '{ProcessProfileName}' from bucket '{BucketKey}' and model '{ModelDisplayName}'", processProfile.Name, bucketKey, modelDisplayName);
                             result.Skipped++;
                             continue;
                         }
@@ -1513,6 +1525,7 @@ public class ProfilesService(
                                 processProfile, modelDisplayName, printerModelId,
                                 orcaVersion, checkDuplicates: true, ct);
 
+                            importedProcessIdentities.Add(processIdentity);
                             if (imported)
                             {
                                 result.ProcessProfilesImported++;
