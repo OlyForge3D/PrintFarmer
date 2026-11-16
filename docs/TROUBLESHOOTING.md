@@ -74,11 +74,8 @@ Prusa Buddy firmware's PrusaLink API does not expose the OctoPrint-style
 `POST /api/printer/printhead` endpoint. Older PrintFarmer builds advertised it
 anyway, then reported its `404` rejection as an unknown motion outcome.
 Current builds check endpoint support without sending motion, disable
-Home/jog controls until support is confirmed, and identify explicit endpoint
-rejection separately from transport uncertainty. The disabled-controls help
-does not distinguish an unsupported endpoint from inconclusive discovery.
-Check the printer connection and credentials, then reload the page to check
-again. Use the printer's physical controls if remote motion remains unavailable;
+unsupported Home/jog controls, and identify explicit endpoint rejection
+separately from transport uncertainty. Use the printer's physical controls;
 changing credentials cannot add an unsupported endpoint.
 
 Legacy Raspberry Pi PrusaLink has a different API and can expose these controls.

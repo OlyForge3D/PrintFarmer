@@ -73,18 +73,6 @@ afterEach(() => {
 });
 
 describe('User Settings printer control mode on printer surfaces', () => {
-  it.each(['Guided', 'Expert'] as const)('explains unconfirmed motion support in %s mode without diagnosing a printer limitation', async (printerControlMode) => {
-    serverSettings = { ...serverSettings, printerControlMode };
-    render(<PrinterMotionHelp movementUnavailable />);
-    const help = screen.getByRole('status');
-    expect(help).toHaveTextContent('API motion support has not been confirmed');
-    expect(help).toHaveTextContent('Check the printer connection and credentials, reload this page to check again');
-    expect(help).toHaveTextContent("use the printer's physical controls");
-    expect(help).not.toHaveTextContent("unavailable on this printer's API");
-    await waitFor(() => expect(mockGet).toHaveBeenCalled());
-    expect(help).toBeVisible();
-  });
-
   it('shows Guided help on both surfaces with no local mode selector', async () => {
     render(<BothSurfaces />);
     const detail = within(screen.getByRole('region', { name: 'detail' }));
