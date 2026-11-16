@@ -8,6 +8,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Services.Diagnostics;
 using Farm.Infrastructure.Services.Gcode.PrinterFiles;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
@@ -234,6 +235,32 @@ public sealed class MoonrakerSensorSubscriptionTests : IAsyncDisposable
 
         await ProcessStatusAsync("""{"print_stats":{"state":"standby"}}""");
         Assert.True(PrinterFileIndexPolicy.IsConfirmedIdle(new(_cached[^1], DateTime.UtcNow), DateTime.UtcNow));
+    }
+
+    [Fact]
+    public async Task ProcessJsonRpcMessageAsync_KlippyDisconnected_InvalidatesRealCacheWithoutRefreshingEvidence()
+    {
+        var cache = new PrinterStatusCache(NullLogger<PrinterStatusCache>.Instance, Mock.Of<IDiagnosticChannelService>());
+        _cacheWriter.Setup(writer => writer.UpdateStatus(It.IsAny<PrinterStatusDto>(), It.IsAny<long?>()))
+            .Callback<PrinterStatusDto, long?>((status, watermark) => cache.UpdateStatus(status, watermark));
+        _cacheWriter.Setup(writer => writer.ClearRawActivityState(It.IsAny<Guid>()))
+            .Callback<Guid>(cache.ClearRawActivityState);
+        _cacheWriter.Setup(writer => writer.ClearRuntimeFactors(It.IsAny<Guid>()))
+            .Returns<Guid>(cache.ClearRuntimeFactors);
+        await ProcessStatusAsync("""{"webhooks":{"state":"ready"},"print_stats":{"state":"standby"}}""");
+        PrinterStatusCacheSnapshot before = Assert.IsType<PrinterStatusCacheSnapshot>(cache.GetSnapshot(_printerId));
+        Assert.True(PrinterFileIndexPolicy.IsConfirmedIdle(before, DateTime.UtcNow));
+
+        await ProcessMessageAsync("""{"method":"notify_klippy_disconnected"}""");
+
+        PrinterStatusCacheSnapshot after = Assert.IsType<PrinterStatusCacheSnapshot>(cache.GetSnapshot(_printerId));
+        Assert.Equal(before with { Status = before.Status with { RawActivityState = null } }, after);
+        Assert.False(PrinterFileIndexPolicy.IsConfirmedIdle(after, DateTime.UtcNow));
+
+        await ProcessStatusAsync("""{"webhooks":{"state":"ready"}}""");
+        Assert.False(PrinterFileIndexPolicy.IsConfirmedIdle(cache.GetSnapshot(_printerId), DateTime.UtcNow));
+        await ProcessStatusAsync("""{"print_stats":{"state":"standby"}}""");
+        Assert.True(PrinterFileIndexPolicy.IsConfirmedIdle(cache.GetSnapshot(_printerId), DateTime.UtcNow));
     }
 
     private static readonly List<string> HeaterObjects =

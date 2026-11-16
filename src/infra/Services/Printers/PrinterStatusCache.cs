@@ -385,6 +385,17 @@ public class PrinterStatusCache :
         }
     }
 
+    public void ClearRawActivityState(Guid printerId)
+    {
+        lock (_lockObj)
+        {
+            if (_cache.TryGetValue(printerId, out PrinterStatusCacheSnapshot? snapshot))
+            {
+                _cache[printerId] = snapshot with { Status = snapshot.Status with { RawActivityState = null } };
+            }
+        }
+    }
+
     public void ClearStatus(Guid printerId)
     {
         lock (_lockObj)

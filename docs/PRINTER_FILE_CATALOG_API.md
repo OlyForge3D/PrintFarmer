@@ -112,6 +112,8 @@ cache updates apply the same confirmed-idle policy: `standby`, `complete` and
 do not. The displayed printer state retains its existing readiness fallback.
 Known Klippy shutdown or disconnection invalidates raw activity; readiness alone
 cannot restore it without a new explicit print-activity observation.
+Invalidation clears cached raw evidence atomically without refreshing observation
+timestamps or changing the displayed state.
 
 Busy or unknown sources receive a jittered next-attempt time without advancing
 last-seen or complete-scan evidence, so they cannot monopolize the due batch.

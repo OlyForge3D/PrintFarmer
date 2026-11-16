@@ -1117,6 +1117,7 @@ public sealed class MoonrakerSubscriptionService(
     /// </summary>
     private IReadOnlyList<PrinterSensorDto>? TakeUnavailableSensorSnapshot(Guid printerId)
     {
+        _statusCacheWriter.ClearRawActivityState(printerId);
         if (!_printerStates.TryGetValue(printerId, out PrinterState? state))
         {
             return null;
@@ -1136,6 +1137,7 @@ public sealed class MoonrakerSubscriptionService(
     {
         try
         {
+            _statusCacheWriter.ClearRawActivityState(printerId);
             _printerStates.TryGetValue(printerId, out PrinterState? state);
             if (state is not null)
             {
