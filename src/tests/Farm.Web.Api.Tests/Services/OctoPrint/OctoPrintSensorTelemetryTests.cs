@@ -123,9 +123,11 @@ public class OctoPrintSensorTelemetryTests : IDisposable
     [Fact]
     public async Task WebSocketFrame_PublishesSameSensorsToCacheAndSignalR()
     {
-        await HandleAsync(CurrentFrame(Temps(tool1Actual: 180, chamberActual: 35)));
+        DateTime observationStartedAtUtc = DateTime.UtcNow.AddSeconds(-1);
+        await HandleAsync(CurrentFrame(Temps(tool1Actual: 180, chamberActual: 35)), observationStartedAtUtc);
 
         IReadOnlyList<PrinterSensorDto> cached = _cacheWrites.Should().ContainSingle().Subject.Sensors;
+        _cacheWrites[0].ObservationStartedAtUtc.Should().Be(observationStartedAtUtc);
         cached.Should().HaveCount(4);
         SignalRUpdates().Should().ContainSingle().Which.Sensors.Should().Equal(cached);
     }
@@ -195,8 +197,9 @@ public class OctoPrintSensorTelemetryTests : IDisposable
     private static double? Number(PrinterSensorDto sensor, PrinterSensorQuantity quantity) =>
         sensor.Readings.Single(r => r.Quantity == quantity).Value.Number;
 
-    private Task HandleAsync(string currentFrame) =>
-        (Task)_handleMessageAsync.Invoke(_adapter, [$$"""{"current":{{currentFrame}}}""", null, CancellationToken.None])!;
+    private Task HandleAsync(string currentFrame, DateTime? observationStartedAtUtc = null) =>
+        (Task)_handleMessageAsync.Invoke(_adapter,
+            [$$"""{"current":{{currentFrame}}}""", null, observationStartedAtUtc ?? DateTime.UtcNow, CancellationToken.None])!;
 
     private List<PrinterStatusUpdate> SignalRUpdates() =>
         _clientProxy.Invocations

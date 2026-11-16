@@ -21,6 +21,12 @@ PrintFarmer does not relicense OrcaSlicer. Upstream license, copyright, and
 modification notices shipped inside the AppImage or source tree must remain
 intact. The worker integration and deployment wrappers are PrintFarmer code.
 
+The marketing fleet screenshot also embeds eight model covers from OrcaSlicer
+v2.4.2, revision `8500fcdccaa10b5099ac20d252af3a7c560046f1`. The site publishes
+the upstream license text at `site/assets/orcaslicer-LICENSE.txt` and credits
+with revision-bound links to each cover at `site/image-notices.html`.
+See `docs/MARKETING_CAPTURES.md` for exact blob identities and provenance limits.
+
 ### PrusaSlicer
 
 - Project: [PrusaSlicer](https://github.com/prusa3d/PrusaSlicer)
@@ -32,6 +38,16 @@ intact. The worker integration and deployment wrappers are PrintFarmer code.
 
 PrintFarmer does not relicense PrusaSlicer. Upstream notices shipped with the
 binary or source distribution must remain intact.
+
+## Design detection tooling
+
+Impeccable by Paul Bakaus ([impeccable.style](https://impeccable.style)) supplies
+the vendored deterministic web design detector used by development hooks and CI.
+It is licensed under Apache-2.0, copyright 2025 Paul Bakaus. The bundled
+`scripts/design/vendor/impeccable/` tree preserves upstream license and notice
+texts; its integrity manifest records the exact copied files and digests.
+PrintFarmer's CI integration and native SwiftUI companion rules are separate
+PrintFarmer code. The tooling is not a third-party design approval service.
 
 ## Icons and user-interface assets
 
@@ -45,6 +61,33 @@ Copyright and license files included by these packages are preserved in the
 package manager cache and identified in the release SBOM. New fonts, icons,
 screenshots, models, fixtures, or generated assets require an explicit source
 and license review before distribution.
+
+## Browser-test fonts
+
+The visual/accessibility harness uses the following exact `@fontsource` 5.3.0
+devDependencies for deterministic local rendering. Each published package
+contains its authors' copyright notice and the full SIL Open Font License 1.1:
+
+| Font | Exact-version license and copyright notice |
+|---|---|
+| Chakra Petch | [LICENSE](https://unpkg.com/@fontsource/chakra-petch@5.3.0/LICENSE) |
+| DM Mono | [LICENSE](https://unpkg.com/@fontsource/dm-mono@5.3.0/LICENSE) |
+| IBM Plex Sans | [LICENSE](https://unpkg.com/@fontsource/ibm-plex-sans@5.3.0/LICENSE) |
+| Inter | [LICENSE](https://unpkg.com/@fontsource/inter@5.3.0/LICENSE) |
+| JetBrains Mono | [LICENSE](https://unpkg.com/@fontsource/jetbrains-mono@5.3.0/LICENSE) |
+| Merriweather Sans | [LICENSE](https://unpkg.com/@fontsource/merriweather-sans@5.3.0/LICENSE) |
+| Nunito Sans | [LICENSE](https://unpkg.com/@fontsource/nunito-sans@5.3.0/LICENSE) |
+| Rajdhani | [LICENSE](https://unpkg.com/@fontsource/rajdhani@5.3.0/LICENSE) |
+| Space Grotesk | [LICENSE](https://unpkg.com/@fontsource/space-grotesk@5.3.0/LICENSE) |
+
+The package lock pins each tarball's integrity. Imports are confined to
+`e2e/marketing/ui-coverage-fonts.ts`; these fonts are not bundled into the
+production client. Retain each package's `LICENSE` with any redistributed
+font software. OFL permits embedding and bundling, but forbids selling fonts
+alone or relicensing them under the AGPL; modified fonts must respect reserved
+font names and must not imply author endorsement. Screenshots do not inherit
+the font license. This review is recorded in
+`compliance/dependency-license-policy.json`, not external legal approval.
 
 ## 3D viewer environment assets
 

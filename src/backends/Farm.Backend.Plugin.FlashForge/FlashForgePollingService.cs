@@ -350,6 +350,7 @@ public sealed class FlashForgePollingService(
                     IFlashForgeClient flashForgeClient = scope.ServiceProvider.GetRequiredService<IFlashForgeClient>();
                     ManagedSpoolProviderHelper spoolProvider = scope.ServiceProvider.GetRequiredService<ManagedSpoolProviderHelper>();
 
+                    DateTime observationStartedAtUtc = DateTime.UtcNow;
                     long? originWatermark = await OriginWatermark
                         .CaptureAsync(watermarkReader, _logger, "FlashForge status", ct)
                         .ConfigureAwait(false);
@@ -438,7 +439,7 @@ public sealed class FlashForgePollingService(
                         cacheUpdate = cacheUpdate with { Sensors = sensors };
                     }
 
-                    _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
+                    _statusCacheWriter.UpdateStatus(cacheUpdate with { ObservationStartedAtUtc = observationStartedAtUtc }, originWatermark);
 
                     var signalRUpdate = new PrinterStatusUpdate(
                         Id: printerId,

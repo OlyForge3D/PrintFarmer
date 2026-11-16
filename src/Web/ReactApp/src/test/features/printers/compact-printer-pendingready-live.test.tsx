@@ -5,6 +5,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AutoDispatchStatus, Printer } from '@/types/api';
 
+vi.mock('@/features/auth/hooks/useAuth', () => ({
+  useAuth: () => ({ hasPermission: () => true }),
+}));
+
 const {
   autoDispatchStateListeners,
   connectSignalR,

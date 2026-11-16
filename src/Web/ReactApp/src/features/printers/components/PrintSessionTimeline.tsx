@@ -176,10 +176,10 @@ function buildTimelineEvents(
       id: incident.id ?? `failure-${incident.detectedAt}-${index}`,
       occurredAt: incident.detectedAt,
       sequence: 1,
-      title: 'Failure incident detected',
+      title: `${incident.provider} failure incident detected`,
       detail: incident.autoPaused
-        ? 'Failure detection flagged the session and triggered auto-pause.'
-        : 'Failure detection flagged the session for operator review.',
+        ? `${incident.provider} flagged the session and triggered auto-pause.`
+        : `${incident.provider} flagged the session for operator review.`,
       tone: incident.autoPaused ? 'critical' : 'warning',
       icon: 'failure',
       confidenceLabel,

@@ -44,6 +44,10 @@ Secrets are random per run, saved separately in `runtime/secrets.json` and
 reloads them; every Compose command uses the same explicit env file, project
 and ordered file list. Ambient Compose/image/port variables cannot change them.
 No secrets or resolved Compose environment are printed.
+First-admin setup uses a fresh per-run `PFARM__Setup__BootstrapSecret`, passed
+through the API's existing Compose environment mapping and sent unchanged as
+the `bootstrapSecret` JSON property to `/api/setup/initial-admin`. It remains in
+the private runtime secret files and is removed with that runtime during cleanup.
 Mutable state and secrets are loaded under the command lock, so a concurrent
 status request cannot overwrite a newly completed phase. If preparation dies
 between writing secrets and checkpointing their hash, cleanup may discard that

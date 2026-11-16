@@ -107,7 +107,8 @@ public class FailureDetectionControllerTests : IClassFixture<CustomWebApplicatio
 
         await using var enabledFactory = new CustomWebApplicationFactory(new Dictionary<string, string?>
         {
-            ["Obico:Enabled"] = "true"
+            ["Obico:Enabled"] = "true",
+            ["Obico:ObicoApiUrl"] = "https://obico.example.test"
         });
         await enabledFactory.ResetDataAsync();
         using HttpClient enabledClient = await enabledFactory.CreateAdminClientAsync();
@@ -319,8 +320,7 @@ public class FailureDetectionControllerTests : IClassFixture<CustomWebApplicatio
         status.TryGetProperty("scanIntervalSeconds", out var scanIntervalSeconds).Should().BeTrue();
         scanIntervalSeconds.ValueKind.Should().Be(JsonValueKind.Number);
 
-        status.TryGetProperty("autoPauseOnFailure", out var autoPauseOnFailure).Should().BeTrue();
-        autoPauseOnFailure.ValueKind.Should().BeOneOf(JsonValueKind.True, JsonValueKind.False);
+        status.TryGetProperty("autoPauseOnFailure", out _).Should().BeFalse();
 
         // The default test configuration has Obico disabled (Enabled = false)
         // This verifies that the status correctly reflects the runtime configuration

@@ -73,11 +73,21 @@ public interface IQueueRepository
     Task<List<Printer>> GetCompatiblePrintersAsync(string modelNameOrAlias, CancellationToken ct);
 
     /// <summary>
+    /// Retrieves printers matching a model name or alias regardless of availability.
+    /// </summary>
+    /// <param name="modelNameOrAlias">The printer model name or slicer alias to match</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    Task<List<Printer>> GetPrintersMatchingModelAsync(string modelNameOrAlias, CancellationToken ct);
+
+    /// <summary>
     /// Get all print jobs assigned to a specific printer, ordered by priority and queue time.
     /// </summary>
     /// <param name="printerId">The printer ID to get jobs for</param>
     /// <param name="ct">Cancellation token for async operation</param>
     Task<List<PrintJob>> GetPrintJobsForPrinterAsync(Guid printerId, CancellationToken ct);
+
+    /// <summary>Reads only occupying, queued, and assigned job facts in bounded printer-ID batches.</summary>
+    Task<List<IdleWindowJobInput>> GetIdleWindowJobInputsAsync(IReadOnlyCollection<Guid> printerIds, CancellationToken ct);
 
     /// <summary>
     /// Get the currently printing or starting job for a printer.

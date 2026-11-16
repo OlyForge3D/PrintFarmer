@@ -3,6 +3,15 @@ import XCTest
 
 /// Tests for NFCTagParser: OpenSpool/OpenPrintTag parsing, payload creation, and edge cases.
 final class NFCTagParserTests: XCTestCase {
+    func testCanonicalUIDPreservesReportedByteOrderAndUsesUppercaseHex() {
+        let iso15693Bytes = Data([0xE0, 0x04, 0x01, 0x08, 0x66, 0x2F, 0x6F, 0xBC])
+        let reversedBytes = Data(iso15693Bytes.reversed())
+
+        XCTAssertEqual(NFCTagParser.canonicalUID(from: iso15693Bytes), "E0040108662F6FBC")
+        XCTAssertEqual(NFCTagParser.canonicalUID(from: reversedBytes), "BC6F2F66080104E0")
+        XCTAssertNil(NFCTagParser.canonicalUID(from: Data()))
+    }
+
     func testPrinterAndSpoolURITagsUseTheSharedDeepLinkParser() throws {
         let id = UUID()
         let printerURL = try XCTUnwrap(URL(string: "printfarmer://printer/\(id)"))
@@ -146,7 +155,7 @@ final class NFCTagParserTests: XCTestCase {
         ]
         let data = try JSONSerialization.data(withJSONObject: json)
 
-        let result = NFCTagParser.parseOpenPrintTag(data)
+        let result = NFCTagParser.parseLegacyOpenPrintTag(data)
 
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.material, "ABS")
@@ -164,7 +173,7 @@ final class NFCTagParserTests: XCTestCase {
         let json: [String: Any] = ["filament_type": "TPU"]
         let data = try JSONSerialization.data(withJSONObject: json)
 
-        let result = NFCTagParser.parseOpenPrintTag(data)
+        let result = NFCTagParser.parseLegacyOpenPrintTag(data)
 
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.material, "TPU")
@@ -179,7 +188,7 @@ final class NFCTagParserTests: XCTestCase {
         ]
         let data = try JSONSerialization.data(withJSONObject: json)
 
-        let result = NFCTagParser.parseOpenPrintTag(data)
+        let result = NFCTagParser.parseLegacyOpenPrintTag(data)
 
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.vendor, "eSUN")
@@ -197,6 +206,50 @@ final class NFCTagParserTests: XCTestCase {
     func testOpenPrintTagArrayJSON() throws {
         let data = try JSONSerialization.data(withJSONObject: [1, 2, 3])
         XCTAssertNil(NFCTagParser.parseOpenPrintTag(data))
+    }
+
+    func testCreateOpenPrintTagPayloadMatchesCrossRuntimeGoldenBytes() throws {
+        let spool = SpoolmanSpool(
+            id: 1,
+            name: "Fixture PLA",
+            material: "PLA",
+            colorHex: "#FF0000",
+            inUse: false,
+            filamentName: nil,
+            vendor: nil,
+            registeredAt: nil,
+            firstUsedAt: nil,
+            lastUsedAt: nil,
+            remainingWeightG: nil,
+            initialWeightG: 1000,
+            usedWeightG: nil,
+            spoolWeightG: 200,
+            remainingLengthMm: nil,
+            usedLengthMm: nil,
+            location: nil,
+            lotNumber: nil,
+            archived: nil,
+            price: nil,
+            comment: nil,
+            hasNfcTag: nil,
+            usedPercent: nil,
+            remainingPercent: nil
+        )
+        let payload = try XCTUnwrap(NFCTagParser.createOpenPrintTagPayload(from: spool))
+        let golden = Data([
+            0xA0, 0xA6, 0x08, 0x00, 0x09, 0x00,
+            0x0A, 0x63, 0x50, 0x4C, 0x41,
+            0x11, 0xFB, 0x40, 0x8F, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x12, 0xFB, 0x40, 0x69, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x13, 0x43, 0xFF, 0x00, 0x00
+        ])
+
+        XCTAssertEqual(NFCTagParser.openPrintTagMimeType, "application/vnd.openprinttag")
+        XCTAssertEqual(payload, golden)
+        let parsed = try XCTUnwrap(NFCTagParser.parseOpenPrintTag(payload))
+        XCTAssertEqual(parsed.material, "PLA")
+        XCTAssertEqual(parsed.weight, 1000)
+        XCTAssertEqual(parsed.colorHex, "#FF0000")
     }
 
     // MARK: - Payload Creation

@@ -39,10 +39,10 @@ public sealed class ObicoHealthCheckTests
     }
 
     [Theory]
-    [InlineData(true, true, HealthStatus.Healthy, 2)]
-    [InlineData(true, false, HealthStatus.Degraded, 1)]
+    [InlineData(true, true, HealthStatus.Healthy, 1)]
+    [InlineData(true, false, HealthStatus.Degraded, 0)]
     [InlineData(false, false, HealthStatus.Degraded, 0)]
-    public async Task CheckHealthAsync_GlobalAndPool_ReportsAvailability(bool globalHealthy, bool poolHealthy, HealthStatus status, int reachable)
+    public async Task CheckHealthAsync_RegisteredPool_ReportsOnlyEligiblePoolAvailability(bool globalHealthy, bool poolHealthy, HealthStatus status, int reachable)
     {
         using var fixture = new Fixture();
         await fixture.AddServerAsync("http://pool.invalid", "pool-key");
@@ -54,14 +54,14 @@ public sealed class ObicoHealthCheckTests
 
         result.Status.Should().Be(status);
         result.Data["enabled"].Should().Be(true);
-        result.Data["targetCount"].Should().Be(2);
+        result.Data["targetCount"].Should().Be(1);
         result.Data["reachableCount"].Should().Be(reachable);
         if (reachable == 0)
         {
             result.Description.Should().Contain("unavailable");
         }
 
-        fixture.Probe.Verify(probe => probe.ProbeAsync("http://global.invalid", null, It.IsAny<CancellationToken>()), Times.Once);
+        fixture.Probe.Verify(probe => probe.ProbeAsync("http://global.invalid", null, It.IsAny<CancellationToken>()), Times.Never);
         fixture.Probe.Verify(probe => probe.ProbeAsync("http://pool.invalid", "pool-key", It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -158,10 +158,58 @@ public sealed class ObicoHealthCheckTests
         HealthCheckResult result = await fixture.Check.CheckHealthAsync(new()).WaitAsync(TimeSpan.FromSeconds(9));
 
         result.Status.Should().Be(HealthStatus.Degraded);
-        result.Data["targetCount"].Should().Be(11);
+        result.Data["targetCount"].Should().Be(10);
         result.Data["reachableCount"].Should().Be(0);
         started.Should().Be(4);
         elapsed.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(8));
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_DisabledPool_DoesNotAdvertiseGlobalOverflow()
+    {
+        using var fixture = new Fixture();
+        await fixture.AddServerAsync("http://pool.invalid", null, enabled: false);
+
+        HealthCheckResult result = await fixture.Check.CheckHealthAsync(new());
+
+        result.Status.Should().Be(HealthStatus.Degraded);
+        result.Description.Should().Contain("unavailable");
+        result.Data["targetCount"].Should().Be(0);
+        fixture.Probe.Verify(probe => probe.ProbeAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("external:print", true, HealthStatus.Healthy, 2)]
+    [InlineData("external:print", false, HealthStatus.Degraded, 1)]
+    [InlineData(null, true, HealthStatus.Healthy, 2)]
+    [InlineData(null, false, HealthStatus.Degraded, 1)]
+    public async Task CheckHealthAsync_PreExistingGlobalReservationAfterPoolAdded_IncludesItsDestination(
+        string? printKey, bool globalHealthy, HealthStatus status, int reachable)
+    {
+        using var fixture = new Fixture();
+        await fixture.AddServerAsync("http://pool.invalid", null);
+        using (IServiceScope scope = fixture.Provider.CreateScope())
+        {
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.PrinterServiceStates.Add(new PrinterServiceState
+            {
+                PrinterId = Guid.NewGuid(),
+                ObicoPrintKey = printKey,
+                ObicoFallbackUrl = fixture.Settings.ObicoApiUrl
+            });
+            await db.SaveChangesAsync();
+        }
+
+        fixture.Probe.Setup(probe => probe.ProbeAsync(fixture.Settings.ObicoApiUrl, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ObicoConnectivityResult(globalHealthy, 1, "private diagnostics"));
+
+        HealthCheckResult result = await fixture.Check.CheckHealthAsync(new());
+
+        result.Status.Should().Be(status);
+        result.Data["targetCount"].Should().Be(2);
+        result.Data["reachableCount"].Should().Be(reachable);
+        fixture.Probe.Verify(probe => probe.ProbeAsync(fixture.Settings.ObicoApiUrl, null, It.IsAny<CancellationToken>()), Times.Once);
+        fixture.Probe.Verify(probe => probe.ProbeAsync("http://pool.invalid", null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

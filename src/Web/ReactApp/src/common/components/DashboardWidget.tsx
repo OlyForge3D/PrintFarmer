@@ -44,7 +44,7 @@ export interface DashboardWidgetProps {
 
 /**
  * DashboardWidget - A reusable widget for the dashboard.
- * Modeled after MaintenanceAlertsWidget and MaintenanceOverviewWidget.
+ * Modeled after MaintenanceAlertsWidget.
  * 
  * Structure:
  * - Optional icon with colored background

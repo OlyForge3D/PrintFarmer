@@ -64,7 +64,8 @@ export function PrintablesOAuthCallbackPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-pf-bg-1 px-4">
       <div className="w-full max-w-md rounded-lg border border-pf-border bg-pf-bg-0 p-6">
-        <Alert variant="error" title="Printables connection failed">
+        <h1 className="mb-3 text-lg font-semibold text-pf-text-primary">Printables connection failed</h1>
+        <Alert variant="error">
           {errorMessage}
         </Alert>
         <div className="mt-4 flex justify-end">

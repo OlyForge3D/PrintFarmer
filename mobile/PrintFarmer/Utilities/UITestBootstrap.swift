@@ -100,6 +100,11 @@ enum UITestBootstrap {
     static let coldOfflineShellLaunchArgument =
         "--uitesting-cold-offline-shell"
     #if DEBUG
+    /// Followed by a code value: installs a scanner stub that returns that
+    /// code, so XCUI can drive the scan result paths without a camera.
+    static let scanCodeLaunchArgument = "--uitesting-scan-code"
+    /// Selects remembered-code or catalog-loading faults for intake UI tests.
+    static let scanIntakeFaultLaunchArgument = "--uitesting-scan-intake-fault"
     static let queueReorderLaunchArgument = "--uitesting-queue-reorder"
     static let issue3259VisualAcceptanceLaunchArgument =
         "--uitesting-issue3259-visual-acceptance"
@@ -375,6 +380,43 @@ enum UITestBootstrap {
         )
         #endif
         #if DEBUG
+        if let index = arguments.firstIndex(of: scanCodeLaunchArgument),
+           arguments.indices.contains(index + 1) {
+            services.barcodeScannerService = UITestStubBarcodeScanner(code: arguments[index + 1])
+        }
+        if let index = arguments.firstIndex(of: scanIntakeFaultLaunchArgument),
+           arguments.indices.contains(index + 1),
+           let fault = DemoBarcodeIntakeService.Fault(rawValue: arguments[index + 1]) {
+            services.barcodeIntakeService = DemoBarcodeIntakeService(fault: fault)
+        }
+        if let index = arguments.firstIndex(of: scanIntakeFaultLaunchArgument),
+           arguments.indices.contains(index + 1),
+           arguments[index + 1] == "catalog-load-unreachable" {
+            services.spoolService = DemoSpoolService(failFirstFilamentLoad: true)
+        }
+        if let index = arguments.firstIndex(of: scanIntakeFaultLaunchArgument),
+           arguments.indices.contains(index + 1),
+           ["vendors-load-unreachable", "vendors-load-spool-timeout"].contains(arguments[index + 1]) {
+            services.spoolService = DemoSpoolService(failFirstVendorLoad: true)
+            if arguments[index + 1] == "vendors-load-spool-timeout" {
+                services.barcodeIntakeService = DemoBarcodeIntakeService(fault: .spoolCreateTimeout)
+            }
+        }
+        if let rawURL = ProcessInfo.processInfo.environment["PRINTFARMER_UITEST_INTAKE_URL"] {
+            guard let url = URL(string: rawURL),
+                  url.scheme == "http",
+                  url.host == "127.0.0.1",
+                  let token = ProcessInfo.processInfo.environment["PRINTFARMER_UITEST_INTAKE_TOKEN"],
+                  !token.isEmpty else {
+                preconditionFailure("Live intake UI tests require a loopback API URL and fixture token")
+            }
+            let client = APIClient(
+                baseURL: url,
+                authenticated: AuthenticatedIdentity(accessToken: token, serverID: UUID())
+            )
+            services.barcodeIntakeService = BarcodeIntakeService(apiClient: client)
+            services.spoolService = SpoolService(apiClient: client)
+        }
         if mode == .authenticatedQueueReorder {
             services.jobService = QueueReorderUITestJobService()
         }
@@ -3127,6 +3169,22 @@ private final class QueueReorderUITestJobService: DemoJobService, @unchecked Sen
             estimatedStartTime: nil,
             estimatedCompletionTime: nil
         )
+    }
+}
+#endif
+
+#if DEBUG
+private final class UITestStubBarcodeScanner: BarcodeScannerProtocol, @unchecked Sendable {
+    private let code: String
+
+    init(code: String) {
+        self.code = code
+    }
+
+    var isAvailable: Bool { true }
+
+    func scanBarcode() async -> BarcodeScanResult {
+        .barcode(code)
     }
 }
 #endif

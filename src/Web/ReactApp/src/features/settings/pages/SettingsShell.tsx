@@ -33,7 +33,6 @@ import { SettingsSection } from '@/features/settings/components/SettingsSection'
 import { SettingsSidebar } from '@/features/settings/components/SettingsSidebar';
 import { SettingsSubTabs } from '@/features/settings/components/SettingsSubTabs';
 import { UserSettingsSection } from '@/features/settings/components/UserSettingsSection';
-import { FarmSettingsSection } from '@/features/settings/components/FarmSettingsSection';
 import { TelegramSettingsCard } from '@/features/settings/components/TelegramSettingsCard';
 import { HomeAssistantSettingsCard, SpoolmanSettingsCard } from '@/features/settings/components/IntegrationSettingsCards';
 import { WorkspaceSearchResults } from '@/features/settings/components/WorkspaceSearchResults';
@@ -44,6 +43,7 @@ import {
   SETTINGS_SCOPES,
   getDefaultCategoryForScope,
   getDefaultSubPage,
+  getSettingsCategory,
   getSettingsCategoriesForScope,
   getSettingsScope,
   getSettingsScopeForCategory,
@@ -51,7 +51,7 @@ import {
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
 import { AdminNavPinButton } from '@/features/admin/components/AdminNavPinButton';
 import { BedTypeAdminPage } from '@/features/admin/pages/BedTypeAdminPage';
-import { NfcDevicesPage } from '@/features/nfc/pages/NfcDevicesPage';
+import { NfcSettingsPage } from '@/features/nfc/pages/NfcSettingsPage';
 import { CustomFieldsAdminPage } from '@/features/admin/pages/CustomFieldsAdminPage';
 import { WebhooksAdminPage } from '@/features/webhooks/pages/WebhooksAdminPage';
 import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
@@ -61,9 +61,9 @@ import { NotificationPreferencesPage } from '@/features/notifications/pages/Noti
 import { QuotaManagementPage } from '@/features/quotas/pages/QuotaManagementPage';
 import { RoleManagementPage } from '@/features/admin/pages/RoleManagementPage';
 import { PrinterGroupsPage } from '@/features/printer-groups/pages/PrinterGroupsPage';
-import { NfcBindingsPage } from '@/features/nfc/pages/NfcBindingsPage';
 import { PasskeysPage } from '@/features/profile/pages/PasskeysPage';
-import { SUB_PAGE_ALLOWED_GROUPS } from '@/features/settings/subpage-groups';
+import { FailureDetectionStatusCard } from '@/features/admin/components/FailureDetectionStatusCard';
+import { ObicoServersSection } from '@/features/admin/components/ObicoServersSection';
 
 const LazySlicerProfilesPage = lazy(() =>
   import('@/features/slicer/pages/SlicerProfilesPage').then((mod) => ({ default: mod.SlicerProfilesPage })),
@@ -103,7 +103,7 @@ function IntegrationConnectionsPanel() {
     <SettingsSection>
       {canEditMetadata ? (
         <SettingsPage
-          allowedGroups={SUB_PAGE_ALLOWED_GROUPS['integrations.connections']}
+          pageKey="integrations.connections"
           introText="Configure third-party services, Smart Plugs, and slicer API connections."
           afterContent={serviceCards}
         />
@@ -129,6 +129,11 @@ function UserAppearancePanel() {
 }
 
 const SINGLE_PAGE_CONTENT: Record<string, ReactNode> = {
+  system: <SettingsSection><SettingsPage pageKey="system" introText="Configure database, logging, printer connectivity, networking, and files." /></SettingsSection>,
+  costs: <SettingsSection><SettingsPage pageKey="costs" introText="Farm-wide cost and energy defaults. Power monitors may override the electricity tariff; printer and model rates remain independent fallbacks. Existing job costs are not recalculated." /></SettingsSection>,
+  planning: <SettingsSection><SettingsPage pageKey="planning" introText="Configure queue planning, shift plans, filament coverage, and history seeding. Work-window hours remain UTC." /></SettingsSection>,
+  'operator-features': <SettingsSection><SettingsPage pageKey="operator-features" introText="Control farm-wide operator workflow availability. Deployment-level hard disables still take precedence." /></SettingsSection>,
+  'failure-detection': <FailureDetectionPanel />,
   quotas: (
     <SettingsSection>
       <QuotaManagementPage embedded />
@@ -137,28 +142,11 @@ const SINGLE_PAGE_CONTENT: Record<string, ReactNode> = {
 };
 
 const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
-  'general.farm': (
+  'identity.details': (
     <SettingsSection>
       <SettingsPage
-        allowedGroups={SUB_PAGE_ALLOWED_GROUPS['general.farm']}
-        introText="Configure farm identity, timezone, and other farm-wide defaults."
-        afterContent={<FarmSettingsSection />}
-      />
-    </SettingsSection>
-  ),
-  'general.system': (
-    <SettingsSection>
-      <SettingsPage
-        allowedGroups={SUB_PAGE_ALLOWED_GROUPS['general.system']}
-        introText="Configure database, logging, network discovery, and file parameters."
-      />
-    </SettingsSection>
-  ),
-  'general.automation': (
-    <SettingsSection>
-      <SettingsPage
-        allowedGroups={SUB_PAGE_ALLOWED_GROUPS['general.automation']}
-        introText="Configure cost tracking, Obico print failure detection, and automatic tag rules."
+        pageKey="identity.details"
+        introText="Customize your farm name and the timezone used by the farm-local clock. Existing schedules, stored timestamps, and UTC planning hours are unchanged."
       />
     </SettingsSection>
   ),
@@ -188,7 +176,7 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'slicing.defaults': (
     <SettingsSection>
       <SettingsPage
-        allowedGroups={SUB_PAGE_ALLOWED_GROUPS['slicing.defaults']}
+        pageKey="slicing.defaults"
         introText="Configure slicer defaults, process behavior, and plate-related settings for the farm."
       />
     </SettingsSection>
@@ -199,14 +187,33 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
       <LazySlicerProfilesPage embedded />
     </Suspense>
   ),
-  'hardware.nfc': <NfcDevicesPage embedded />,
+  'hardware.nfc': <NfcSettingsPage embedded />,
   'hardware.printer-groups': <PrinterGroupsPage embedded />,
-  'hardware.nfc-bindings': <NfcBindingsPage embedded />,
-  'hardware.custom-fields': <CustomFieldsAdminPage embedded />,
   'users.accounts': <UserManagementPage embedded />,
   'users.roles': <RoleManagementPage embedded />,
   'data.tags': <TagAdminPage embedded />,
+  'data.auto-tagging': <SettingsSection><SettingsPage pageKey="data.auto-tagging" introText="Configure automatic tag rules alongside the farm's reusable tags." /></SettingsSection>,
+  'data.custom-fields': <CustomFieldsAdminPage embedded />,
 };
+
+function FailureDetectionPanel() {
+  const { hasPermission } = useAuth();
+  return (
+    <SettingsSection>
+      <div className="space-y-6">
+        <p className="text-sm text-pf-text-secondary">
+          PrintGuard is deployment-configured using PFARM__PrintGuardShadow__*.
+          Its per-printer provider state appears in the runtime status below.
+          PrintGuard shadow analysis is advisory only and never automatically pauses or cancels a print.
+          Provider configuration does not opt printers in; enable detection on each printer separately.
+        </p>
+        <FailureDetectionStatusCard />
+        {hasPermission('system_settings', 'admin') && <SettingsPage pageKey="failure-detection" introText="Configure Obico and shared monitoring timing." />}
+        {hasPermission('obico', 'manage') && <ObicoServersSection />}
+      </div>
+    </SettingsSection>
+  );
+}
 
 /**
  * Position of the current entry in the browser history stack.
@@ -441,8 +448,8 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   );
 
   const resolvedRequestedTarget = useMemo(
-    () => resolveSettingsNavigationTarget(requestedCategory, requestedSubPage, routeScope ?? requestedScope),
-    [requestedCategory, requestedScope, requestedSubPage, routeScope],
+    () => resolveSettingsNavigationTarget(requestedCategory, requestedSubPage, routeScope ?? requestedScope, requestedField),
+    [requestedCategory, requestedScope, requestedSubPage, routeScope, requestedField],
   );
 
   const requestedFieldTarget = useMemo(() => {
@@ -997,6 +1004,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         queryText?: string;
         replace?: boolean;
         scopeId?: string;
+        focusSection?: boolean;
       },
     ) => {
       const target = resolveSettingsNavigationTarget(categoryId, explicitSubPageId, options?.scopeId ?? activeScope);
@@ -1025,7 +1033,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
             subPageId: subToUse,
           }
         : null;
-      shouldFocusSectionRef.current = true;
+      shouldFocusSectionRef.current = options?.focusSection ?? true;
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
         next.set('scope', target.scopeId);
@@ -1065,6 +1073,10 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const handleSubPageChange = useCallback(
     (subPageId: string) => {
       const doNavigate = () => {
+        if (isAdminRoute) {
+          executeCategoryChange(activeCategory, subPageId, { focusSection: false });
+          return;
+        }
         shouldFocusSectionRef.current = true;
         liveWorkspaceQueryRef.current = '';
         explicitCategoryQueryOverrideRef.current = null;
@@ -1086,7 +1098,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         doNavigate();
       }
     },
-    [activeCategory, activeScope, isDirty, setSearchParams],
+    [activeCategory, activeScope, executeCategoryChange, isAdminRoute, isDirty, setSearchParams],
   );
 
   const handleSelectDestination = useCallback(
@@ -1274,12 +1286,15 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       return requestedFieldTarget.categoryId;
     }
 
+    const canonicalRequestedCategory = requestedCategory && getSettingsCategory(requestedCategory)
+      ? resolvedRequestedTarget.categoryId
+      : requestedCategory;
     if (
-      requestedCategory !== null
+      canonicalRequestedCategory !== null
       && shouldHonorExplicitQueryNavigation
-      && scopeCategories.some((category) => category.id === requestedCategory)
+      && scopeCategories.some((category) => category.id === canonicalRequestedCategory)
     ) {
-      return requestedCategory;
+      return canonicalRequestedCategory;
     }
 
     if (!canAutoNavigate || !matchingCategoryIds || matchingCategoryIds.length === 0) {
@@ -1294,7 +1309,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
 
     const firstMatchingCategory = scopeCategories.find((category) => matchingCategoryIds.includes(category.id));
     return firstMatchingCategory?.id ?? scopeCategories[0]?.id ?? getDefaultCategoryForScope(effectiveScope);
-  }, [activeCategory, canAutoNavigate, effectiveScope, isDirty, matchingCategoryIds, requestedCategory, requestedFieldTarget, scopeCategories, shouldHonorExplicitQueryNavigation]);
+  }, [activeCategory, canAutoNavigate, effectiveScope, isDirty, matchingCategoryIds, requestedCategory, requestedFieldTarget, resolvedRequestedTarget.categoryId, scopeCategories, shouldHonorExplicitQueryNavigation]);
 
   const currentCategory = useMemo(
     () => scopeCategories.find((category) => category.id === effectiveCategory) ?? scopeCategories[0],
@@ -1355,9 +1370,12 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     const requestedFieldSubPage = requestedFieldTarget?.categoryId === currentCategory.id
       ? requestedFieldTarget.subPageId
       : undefined;
-    const isExplicitSubPage = Boolean(requestedSubPage || requestedFieldSubPage);
+    const isExplicitSubPage = Boolean(requestedFieldSubPage || (requestedSubPage && (
+      requestedSubPage === resolvedRequestedTarget.subPageId
+      || (requestedCategory === 'hardware' && requestedSubPage === 'nfc-bindings')
+    )));
     const requestedTargetSubPage = requestedFieldSubPage ?? (resolvedRequestedTarget.categoryId === currentCategory.id
-      ? (requestedSubPage ?? resolvedRequestedTarget.subPageId)
+      ? resolvedRequestedTarget.subPageId
       : undefined);
 
     const isAccessibleSubPage = requestedTargetSubPage
@@ -1397,7 +1415,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     const firstAccessibleSubPage = accessibleSubPages[0]?.id;
 
     return firstAccessibleSubPage ?? getDefaultSubPage(currentCategory.id);
-  }, [accessibleCategories, canAutoNavigate, currentCategory, matchingCurrentSubPageIds, requestedFieldTarget, requestedSubPage, resolvedRequestedTarget.categoryId, resolvedRequestedTarget.subPageId, shouldHonorExplicitQueryNavigation]);
+  }, [accessibleCategories, canAutoNavigate, currentCategory, matchingCurrentSubPageIds, requestedCategory, requestedFieldTarget, requestedSubPage, resolvedRequestedTarget.categoryId, resolvedRequestedTarget.subPageId, shouldHonorExplicitQueryNavigation]);
 
   const hasSubTabs = accessibleCategories.length > 0 && currentCategory.subPages.length >= 2;
   const renderedContentKey = currentCategory.subPages.length === 0
@@ -1465,6 +1483,10 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       return;
     }
     if (requestedField && (fieldSearchIndex.isLoading || fieldSearchIndex.isError)) {
+      return;
+    }
+    if (requestedFieldTarget?.categoryId === 'maintenance' && requestedField) {
+      navigate(`/maintenance?${new URLSearchParams({ tab: 'settings', field: requestedField })}`, { replace: true });
       return;
     }
     const syncScope = requestedFieldTarget?.scopeId ?? activeScope;
@@ -1544,6 +1566,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     requestedFieldTarget,
     requestedScope,
     requestedSubPage,
+    navigate,
     setSearchParams,
     shouldHonorExplicitQueryNavigation,
   ]);
@@ -1615,10 +1638,26 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       );
     }
     if (!canAccessActiveTab) {
+      // A wholly denied category has no permitted sub-pages, so recovery
+      // offers the other categories this user may open instead.
+      const recoveryOptions = visibleSubPages.length > 0
+        ? visibleSubPages.map((subPage) => ({ key: subPage.id, label: subPage.label, categoryId: currentCategory.id, subPageId: subPage.id }))
+        : accessibleCategories
+          .filter((category) => category.id !== currentCategory.id)
+          .map((category) => ({ key: category.id, label: category.label, categoryId: category.id, subPageId: category.subPages[0]?.id }));
       return (
         <SettingsSection>
           <div className="py-8 text-center text-pf-text-secondary">
             <p className="text-sm">You don't have permission to view {activeSubPageLabel ?? currentCategory.label}.</p>
+            {isAdminRoute && recoveryOptions.length > 0 && (
+              <nav aria-label="Available settings sections" className="mt-4 flex flex-wrap justify-center gap-2">
+                {recoveryOptions.map((option) => (
+                  <Button key={option.key} variant="subtle" onClick={() => handleCategoryChange(option.categoryId, option.subPageId)}>
+                    {option.label}
+                  </Button>
+                ))}
+              </nav>
+            )}
           </div>
         </SettingsSection>
       );
@@ -1639,10 +1678,14 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         <p className="text-sm">Content not found for {renderedContentKey}</p>
       </div>
     );
-  }, [accessibleCategories.length, activeSubPageLabel, canAccessActiveTab, currentCategory, isAdminRoute, isAuthLoading, renderedContentKey]);
+  }, [accessibleCategories, activeSubPageLabel, canAccessActiveTab, currentCategory, handleCategoryChange, isAdminRoute, isAuthLoading, renderedContentKey, visibleSubPages]);
 
-  const pageTitle = currentScopeMeta?.label ?? 'Settings';
-  const pageDescription = currentScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.';
+  const pageTitle = isAdminRoute && accessibleCategories.length > 0
+    ? currentCategory.label
+    : currentScopeMeta?.label ?? 'Settings';
+  const pageDescription = isAdminRoute && accessibleCategories.length > 0
+    ? currentCategory.description
+    : currentScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.';
 
   const hasNoMatches = !isAuthLoading
     && accessibleCategories.length > 0
@@ -1687,19 +1730,32 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     </HeaderActions>
   );
 
-  const showSubTabs = !isAdminRoute && effectiveScope !== 'system' && !hasNoMatches && visibleSubPages.length > 0;
+  const showSubTabs = !hasNoMatches && canAccessActiveTab && visibleSubPages.length > 1;
+  // Admin pages title the category in the H1, so the content heading names the
+  // sub-page instead. With a single permitted sub-page there is no tab to show
+  // it, so the heading becomes visible.
+  const contentHeading = isAdminRoute && accessibleCategories.length === 0
+    ? 'Configuration'
+    : isAdminRoute && canAccessActiveTab && activeSubPageLabel
+      ? activeSubPageLabel
+      : currentCategory.label;
+  const showVisibleSubPageHeading = isAdminRoute
+    && !showSubTabs
+    && canAccessActiveTab
+    && contentHeading !== currentCategory.label;
   const subTabs = showSubTabs ? (
-      <div className="border-b border-pf-border px-4 pt-4 md:px-6">
+      <nav aria-label={`${currentCategory.label} settings pages`} className="border-b border-pf-border px-4 pt-4 md:px-6">
         <SettingsSubTabs
           subPages={visibleSubPages}
           activeSubPage={activeSubPage}
           onSubPageChange={handleSubPageChange}
           matchingSubPageIds={matchingCurrentSubPageIds}
-          isFiltering={isFiltering}
-          ariaLabel={`${currentCategory.label} settings`}
+          isFiltering={isFiltering && !isAdminRoute}
+          ariaLabel={`${currentCategory.label} sub-pages`}
           searchQuery={query}
+          wrap={isAdminRoute}
         />
-      </div>
+      </nav>
     ) : null;
 
   return (
@@ -1709,6 +1765,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         <SettingsFooterSlotContext.Provider value={footerSlot}>
           <PageTemplate
             title={pageTitle}
+            titleWrap
             subtitle={pageDescription}
             showHeader
             fill
@@ -1754,8 +1811,8 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-1 min-h-0 flex-col md:grid md:grid-cols-[13.5rem_minmax(0,1fr)]">
-                  <SettingsSidebar
+                <div className={`flex flex-1 min-h-0 flex-col${isAdminRoute ? '' : ' md:grid md:grid-cols-[13.5rem_minmax(0,1fr)]'}`}>
+                  {!isAdminRoute && <SettingsSidebar
                     categories={accessibleCategories}
                     activeScope={effectiveScope}
                     activeCategory={effectiveCategory}
@@ -1767,9 +1824,9 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                     matchingCategoryIds={matchingCategoryIds}
                     isFiltering={isFiltering}
                     searchQuery={query}
-                  />
+                  />}
 
-                  <div className="relative flex min-h-0 flex-1 flex-col border-t border-pf-border md:border-t-0 md:border-l md:border-pf-border">
+                  <div className={`relative flex min-h-0 flex-1 flex-col${isAdminRoute ? '' : ' border-t border-pf-border md:border-t-0 md:border-l md:border-pf-border'}`}>
                     <p className="sr-only" aria-live="polite">
                       {sectionAnnouncement}
                     </p>
@@ -1781,9 +1838,11 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                           id="settings-content-heading"
                           ref={sectionHeadingRef}
                           tabIndex={-1}
-                          className="sr-only focus-visible:not-sr-only focus-visible:mb-4 focus-visible:block focus-visible:w-fit focus-visible:rounded-md focus-visible:text-xl focus-visible:leading-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
+                          className={showVisibleSubPageHeading
+                            ? 'mb-4 w-fit rounded-md px-1 py-0.5 text-lg font-semibold leading-none text-pf-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent'
+                            : 'sr-only focus-visible:not-sr-only focus-visible:mb-4 focus-visible:block focus-visible:w-fit focus-visible:rounded-md focus-visible:px-1 focus-visible:py-0.5 focus-visible:text-xl focus-visible:leading-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent'}
                         >
-                          {isAdminRoute && accessibleCategories.length === 0 ? 'Configuration' : currentCategory.label}
+                          {contentHeading}
                         </h2>
 
                         <SettingsContentTransition key={renderedContentKey} className="relative">

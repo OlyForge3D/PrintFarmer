@@ -43,7 +43,8 @@ import { useFleetFilamentCoverage } from '@/features/filament-coverage/hooks';
 import { useFleetPrinterTags } from '@/features/printers/hooks/usePrinterTagsFleet';
 import { useFleetQueueSummaries } from '@/features/printers/hooks/useQueueSummariesFleet';
 import { useDiscoveryAvailable } from '@/features/printers/hooks/useDiscoveryAvailability';
-import { FailureDetectionPollingProvider } from '@/features/printers/hooks/useFailureDetectionPolling';
+import { FailureDetectionPollingProvider } from '@/features/printers/hooks/FailureDetectionPollingProvider';
+import { hasFailureDetectionEnabledPrinter } from '@/features/printers/hooks/useFailureDetectionPolling';
 import type { DetailedPrinterCardProps } from '@/features/printers/components/DetailedPrinterCard';
 import type { EditPrinterModalProps } from '@/features/printers/components/EditPrinterModal';
 import type { PrinterDiscoveryModalProps } from '@/features/printers/components/PrinterDiscoveryModal';
@@ -83,6 +84,25 @@ export function PrintersPage() {
   useFleetPrinterTags();
   useFleetQueueSummaries();
   const queryClient = useQueryClient();
+  const canChangeServiceStatus = hasPermission('printers', 'admin');
+  const handleToggleEnabled = useCallback(async (printer: Printer) => {
+    try {
+      const updated = { backend: printer.backend, isEnabled: printer.isEnabled === false };
+      if (!printer.rowVersion) {
+        throw new Error('Printer revision unavailable; refresh and review again.');
+      }
+      await apiClient.updatePrinter(printer.id, updated, printer.rowVersion);
+      toast.success(`${printer.name || 'Printer'} is now ${updated.isEnabled ? 'In Service' : 'Out of Service'}`);
+      await queryClient.invalidateQueries({ queryKey: ['printers'] });
+    } catch (err) {
+      console.error('Failed to change printer service status', err);
+      if ([412, 428].includes(mutationErrorStatus(err) ?? 0)) {
+        await queryClient.refetchQueries({ queryKey: ['printers'] });
+      }
+      toast.error(mutationErrorMessage(err, 'Failed to change service status'));
+    }
+  }, [queryClient]);
+  const onToggleEnabled = canChangeServiceStatus ? handleToggleEnabled : undefined;
 
   const {
     data: printers,
@@ -137,12 +157,12 @@ export function PrintersPage() {
   // Merge with realtime SignalR updates for display
   const displayPrinters = usePrinterDisplays(printersWithCameraUrls);
 
-  // Whether ANY printer in the fleet has Obico/failure detection enabled,
+  // Whether ANY printer in the fleet has a failure-detection provider enabled,
   // computed once here (not per-card) and shared via context so the
   // failure-detection status poll is controlled at the page level instead of
   // depending on which mix of cards happens to be mounted (#1146 item 3).
-  const anyObicoEnabled = useMemo(
-    () => displayPrinters.some((printer) => !!printer.obicoEnabled),
+  const anyFailureDetectionEnabled = useMemo(
+    () => hasFailureDetectionEnabledPrinter(displayPrinters),
     [displayPrinters]
   );
 
@@ -400,7 +420,7 @@ export function PrintersPage() {
     setDeleteConfirmation({ isOpen: false, printers: [] });
   };
 
-  // Import/export handled by admin components (PrinterImportControls / PrinterExportControls)
+  // Import is handled by the admin PrinterImportControls component.
 
   // Stable identity so memoized printer cards don't re-render when the page does
   const handleEditPrinter = useCallback((printer: Printer) => {
@@ -574,7 +594,7 @@ export function PrintersPage() {
         </HeaderActions>
       }
     >
-      <FailureDetectionPollingProvider value={anyObicoEnabled}>
+      <FailureDetectionPollingProvider value={anyFailureDetectionEnabled}>
       <div className={isSidebarOpen ? 'min-w-0 lg:grid lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start lg:gap-6' : 'min-w-0'}>
         <div className="min-w-0">
           {/* Actions, sort and view remain available while filters are collapsed.
@@ -702,6 +722,7 @@ export function PrintersPage() {
                 printer={expandedPrinterId ? printersById[expandedPrinterId] : undefined}
                 backendCapabilities={expandedPrinterId ? backendCapabilitiesByPrinterId[expandedPrinterId] : undefined}
                 onClose={handleClosePrinterDetails}
+                onToggleEnabled={onToggleEnabled}
                 layout="content"
               />
             </div>
@@ -737,6 +758,7 @@ export function PrintersPage() {
                       printer={printer}
                       backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}
                       onExpand={handleOpenPrinterDetails}
+                      onToggleEnabled={onToggleEnabled}
                       onEdit={handleEditPrinter}
                     />
                   )}
@@ -761,6 +783,7 @@ export function PrintersPage() {
                         printer={printer}
                         backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}
                         onEdit={handleEditPrinter}
+                        onToggleEnabled={onToggleEnabled}
                       />
                     )}
                   />
@@ -786,36 +809,9 @@ export function PrintersPage() {
                     onBulkSetMaintenance={handleBulkSetMaintenance}
                     onOpenDetails={(printer) => handleOpenPrinterDetails(printer.id)}
                     onOpenMaintenance={handleOpenMaintenance}
-                    showEnableColumn={hasPermission('printers', 'admin')}
+                    showEnableColumn={canChangeServiceStatus}
                     onSelectionChange={(ids) => setSelectedPrinterIds(ids)}
-                    onToggleEnabled={async (printer) => {
-                      try {
-                        const updated = { isEnabled: !printer.isEnabled } as unknown as import('@/types/api').UpdatePrinterDto;
-                        if (!printer.rowVersion) {
-                          throw new Error('Printer revision unavailable; refresh and review again.');
-                        }
-                        await apiClient.updatePrinter(
-                          printer.id,
-                          updated,
-                          printer.rowVersion
-                        );
-                        toast.success(`${printer.name || 'Printer'} ${updated.isEnabled ? 'enabled' : 'disabled'}`);
-                        await queryClient.invalidateQueries({ queryKey: ['printers'] });
-                      } catch (err) {
-                        console.error('Failed to toggle enabled', err);
-                        if ([412, 428].includes(mutationErrorStatus(err) ?? 0)) {
-                          await queryClient.refetchQueries({
-                            queryKey: ['printers'],
-                          });
-                        }
-                        toast.error(
-                          mutationErrorMessage(
-                            err,
-                            'Failed to toggle enabled state'
-                          )
-                        );
-                      }
-                    }}
+                    onToggleEnabled={onToggleEnabled}
                   />
                 </>
               )
@@ -835,6 +831,7 @@ export function PrintersPage() {
               printer={expandedPrinterId ? printersById[expandedPrinterId] : undefined}
               backendCapabilities={expandedPrinterId ? backendCapabilitiesByPrinterId[expandedPrinterId] : undefined}
               onClose={handleClosePrinterDetails}
+              onToggleEnabled={onToggleEnabled}
               layout="content"
             />
           </div>

@@ -20,7 +20,7 @@
 
 services:
   obico-ml-api:
-    image: ${OBICO_ML_IMAGE:-thespaghettidetective/ml_api:base-1.4}
+    image: ${OBICO_ML_IMAGE:-ghcr.io/thespaghettidetective/obico-ml-api-cpu@sha256:e1b1c5b4cfc517ed884cad24e4a709d31b935ea49dab45ff60d31a62f4cb86ee}
     container_name: printfarmer-obico-ml-api
     restart: unless-stopped
     networks:

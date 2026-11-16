@@ -28,6 +28,11 @@ private actor DelayedSpoolLookupService: SpoolServiceProtocol {
     func listVendors() async throws -> [SpoolmanVendor] { [] }
     func listMaterials() async throws -> [SpoolmanMaterial] { [] }
     func listAvailableMaterials() async throws -> [String] { [] }
+    func scanTag(uid: String, format: String?, payloadB64: String?) async throws -> SpoolmanTagScanResponse {
+        SpoolmanTagScanResponse(matchedSpoolId: nil, matchedFilamentId: nil, spool: nil, filament: nil, created: false)
+    }
+    func linkTag(uid: String, toSpoolID spoolID: Int) async throws {}
+    func unlinkTag(uid: String, fromSpoolID spoolID: Int) async throws {}
 }
 
 @MainActor

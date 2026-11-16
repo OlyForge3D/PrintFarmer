@@ -25,9 +25,14 @@ public sealed class CameraPrinterJoinMigrationTests
         IMigrator migrator = context.GetService<IMigrator>();
         await migrator.MigrateAsync(PreviousMigration);
 
-        Printer printerA = AddPrinter(context, "Printer A");
-        Printer printerB = AddPrinter(context, "Printer B");
-        await context.SaveChangesAsync();
+        Printer printerA;
+        Printer printerB;
+        await using (PrePrintGuardAppDbContext legacyContext = CreatePrePrintGuardContext(connection))
+        {
+            printerA = AddPrinter(legacyContext, "Printer A");
+            printerB = AddPrinter(legacyContext, "Printer B");
+            await legacyContext.SaveChangesAsync();
+        }
 
         // Printer A: SortOrder decides primary even though the primary was inserted last; Id breaks the tie.
         Guid aSecond = Guid.Parse("00000000-0000-0000-0000-00000000000a");
@@ -96,6 +101,11 @@ public sealed class CameraPrinterJoinMigrationTests
             .UseSqlite(connection, options => options.MigrationsAssembly("Farm.Migrations.Sqlite"))
             .Options);
 
+    private static PrePrintGuardAppDbContext CreatePrePrintGuardContext(SqliteConnection connection) =>
+        new(new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection, options => options.MigrationsAssembly("Farm.Migrations.Sqlite"))
+            .Options);
+
     private static Printer AddPrinter(AppDbContext context, string name)
     {
         Manufacturer manufacturer = context.Manufacturers.Local.FirstOrDefault()
@@ -130,4 +140,13 @@ public sealed class CameraPrinterJoinMigrationTests
             VALUES ({id}, {name}, 'General', 'Healthy', 'Moonraker', 0, {DateTime.UtcNow},
                     1, {sortOrder}, {printerId}, {location}, 'http://camera.example.test/stream');
             """);
+
+    private sealed class PrePrintGuardAppDbContext(DbContextOptions<AppDbContext> options) : AppDbContext(options)
+    {
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+            modelBuilder.Entity<Printer>().Ignore(printer => printer.PrintGuardEnabled);
+        }
+    }
 }

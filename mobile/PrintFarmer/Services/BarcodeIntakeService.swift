@@ -31,6 +31,21 @@ actor BarcodeIntakeService: BarcodeIntakeServiceProtocol {
         )
     }
 
+    func lookupCodeAlias(code: String) async throws -> ScanCodeAliasLookup {
+        try await apiClient.get("/api/spoolman/code-aliases/filament?code=\(Self.encodedQueryValue(code))")
+    }
+
+    func saveCodeAlias(code: String, filamentId: Int) async throws -> ScanCodeAlias {
+        try await apiClient.post(
+            "/api/spoolman/code-aliases",
+            body: CodeAliasRequest(code: code, filamentId: filamentId)
+        )
+    }
+
+    func createSpool(filamentId: Int) async throws -> SpoolmanSpool {
+        try await apiClient.post("/api/spoolman/spools", body: SpoolmanSpoolRequest(filamentId: filamentId))
+    }
+
     private static func encodedQueryValue(_ value: String) -> String {
         var allowed = CharacterSet.urlQueryAllowed
         allowed.remove(charactersIn: ":#[]@!$&'()*+,;=/?% ")
@@ -40,6 +55,11 @@ actor BarcodeIntakeService: BarcodeIntakeServiceProtocol {
 
 private struct BarcodeMappingRequest: Encodable, Sendable {
     let barcode: String
+    let filamentId: Int
+}
+
+private struct CodeAliasRequest: Encodable, Sendable {
+    let code: String
     let filamentId: Int
 }
 

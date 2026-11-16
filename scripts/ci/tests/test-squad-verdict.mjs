@@ -83,6 +83,55 @@ test('accepts a trusted approval for the exact current head', () => {
   assert.equal(verdict.carriedAcrossSync, false);
 });
 
+test('verifier preserves additive design approval, dissent and blocking reasons from the trusted gate', () => {
+  const roster = rosterFromLabels(['squad:bishop', 'squad:hicks', 'squad:design-reviewer']);
+  const record = (reviewer, verdict, sha = reviewedHeadSha) => ({
+    body: `<!-- squad-verdict -->\nSquad-Reviewer: ${reviewer}\nSquad-Verdict: ${verdict}\nSquad-Head-SHA: ${sha}`,
+    user: { login: 'jpapiez' }, author_association: 'OWNER', squadWriteAccess: true,
+  });
+  for (const [design, classification] of [
+    [undefined, 'MISSING'],
+    [record('design-reviewer', 'APPROVE', movedHeadSha), 'MISSING'],
+    [record('design-reviewer', 'REQUEST_CHANGES'), 'CHANGES_REQUESTED'],
+    [record('design-reviewer', 'APPROVE'), 'REVIEWED'],
+  ]) {
+    const result = evaluateGate({
+      headSha: reviewedHeadSha, squadLabeled: true, roster,
+      changedPaths: ['src/Web/ReactApp/src/components/PrinterCard.tsx'],
+      comments: [record('bishop', 'APPROVE'), ...(design ? [design] : [])],
+    });
+    const evidence = fixture();
+    evidence.status.state = result.state;
+    evidence.status.description = result.description;
+    const verified = verifySquadVerdict(evidence);
+    assert.equal(verified.classification, classification);
+    assert.equal(exitCodeFor(verified.classification), classification === 'REVIEWED'
+      ? 0 : classification === 'CHANGES_REQUESTED' ? 2 : 3);
+    if (classification === 'MISSING') {
+      assert.match(verified.blockedReason, /design-reviewer/);
+    } else {
+      assert.match(verified.actor, /design-reviewer/);
+    }
+  }
+});
+
+test('trusted deployment bootstrap is missing evidence without design, never a success fallback', () => {
+  const evidence = fixture();
+  evidence.status.state = 'failure';
+  evidence.status.description =
+    `BLOCKED @ ${shortSha}: trusted UI policy not deployed; exact-head design-reviewer approval required`;
+  const blocked = verifySquadVerdict(evidence);
+  assert.equal(blocked.classification, 'MISSING');
+  assert.equal(exitCodeFor(blocked.classification), 3);
+  assert.match(blocked.blockedReason, /trusted UI policy not deployed/);
+  evidence.status.state = 'success';
+  evidence.status.description = `REVIEWED (self-attested) @ ${shortSha} by bishop+hicks+design-reviewer`;
+  const reviewed = verifySquadVerdict(evidence);
+  assert.equal(reviewed.classification, 'REVIEWED');
+  assert.equal(reviewed.carriedAcrossSync, false);
+  assert.match(reviewed.actor, /design-reviewer/);
+});
+
 test('a carried-across-sync description is classified REVIEWED and flagged as such', () => {
   const evidence = fixture();
   evidence.status.description =

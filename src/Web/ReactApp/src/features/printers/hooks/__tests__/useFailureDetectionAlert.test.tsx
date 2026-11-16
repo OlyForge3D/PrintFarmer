@@ -27,6 +27,7 @@ function emit(event: FailureDetectionEvent) {
 
 function makeEvent(overrides: Partial<FailureDetectionEvent> = {}): FailureDetectionEvent {
   return {
+    provider: 'Obico',
     printerId: 'printer-1',
     printerName: 'Printer One',
     confidence: 0.9,

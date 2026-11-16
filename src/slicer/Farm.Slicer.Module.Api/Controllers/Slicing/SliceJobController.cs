@@ -354,7 +354,9 @@ public partial class SliceJobController(
                 "A model file name is required.");
         }
 
-        IActionResult? profileFailure = await BindResolvedProfilesAsync(job, request, userId, ct);
+        IActionResult? profileFailure = request.ProfileSelections is not null
+            ? await BindExplicitProfilesAsync(job, request, userId, ct)
+            : await BindResolvedProfilesAsync(job, request, userId, ct);
         if (profileFailure is not null)
         {
             return profileFailure;
@@ -461,7 +463,8 @@ public partial class SliceJobController(
             return BadRequest("Invalid user ID.");
         }
 
-        IReadOnlyList<SliceJob> jobs = await _jobRepository.GetByUserIdAsync(userGuid, limit, offset, ct);
+        IReadOnlyList<SliceJobStatusProjection> jobs =
+            await _jobRepository.GetJobStatusProjectionsByUserIdAsync(userGuid, limit, offset, ct);
         return Ok(jobs.Select(MapToPublicStatusResponse).ToList());
     }
 
@@ -1282,13 +1285,14 @@ public partial class SliceJobController(
             resourceId);
     }
 
-    private SliceJobStatusResponse MapToPublicStatusResponse(SliceJob job)
+    private SliceJobStatusResponse MapToPublicStatusResponse(ISliceJobStatusSource job)
     {
         bool isAdmin = PrintFarmerPermissions.IsFarmAdmin(User);
         return new()
         {
             Id = job.Id,
             Status = job.Status,
+            PrinterId = job.PrinterId,
             ProgressPercent = job.ProgressPercent,
             ProgressMessage = job.Status == SliceJobStatus.Processing
                 ? GetPublicProgressMessage(job.ProgressPercent)
@@ -1322,7 +1326,7 @@ public partial class SliceJobController(
             FilamentUsedGrams = job.FilamentUsedGrams,
             WorkerId = null,
             ModelFileName = SanitizeFileName(job.ModelFileName, "model"),
-            SlicerEngine = SlicerEngineNames.Resolve(job),
+            SlicerEngine = SlicerEngineNames.ResolvePersistedName(job.SlicerEngineName),
             ArtifactsRoute = $"/api/artifacts/job/{job.Id}",
         };
     }
@@ -1384,6 +1388,7 @@ public partial class SliceJobController(
             MachineProfileJson = job.MachineProfileJson,
             ProcessProfileJson = job.ProcessProfileJson,
             FilamentProfileJson = job.FilamentProfileJson,
+            ExtruderFilamentProfilesJson = job.ExtruderFilamentProfilesJson,
             MachineProfileSha256 = job.MachineProfileSha256,
             ProcessProfileSha256 = job.ProcessProfileSha256,
             FilamentProfileSha256 = job.FilamentProfileSha256,

@@ -149,8 +149,6 @@ public sealed class PrintersControllerTestConnectionEgressTests
             backendClientFactory: backendClientFactory,
             httpClientFactory: httpClientFactory.Object,
             egressGuard: egressGuard,
-            obicoServerAssignment: Mock.Of<Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService>(),
-            settingsService: Mock.Of<Farm.Infrastructure.Settings.ISettingsService>(),
             telemetryService: Mock.Of<IPrintFarmerTelemetryService>(),
             bedTypeService: Mock.Of<Farm.Infrastructure.Services.BedTypes.IBedTypeService>());
         return controller;

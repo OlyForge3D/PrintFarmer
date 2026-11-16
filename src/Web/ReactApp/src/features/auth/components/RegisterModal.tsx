@@ -237,7 +237,7 @@ export function RegisterModal({
                 name="password"
                 value={formData.password}
                 onChange={(e) => handleInputChange('password', e.target.value)}
-                className="bg-pf-bg-0 pr-10"
+                className="bg-pf-bg-0 pr-12"
                 placeholder="Create a password"
                 required
                 autoComplete="new-password"
@@ -249,7 +249,7 @@ export function RegisterModal({
                 size="sm"
                 disabled={isLoading}
                 type="button"
-                className="absolute right-3 top-1/2 !h-auto !p-0 -translate-y-1/2"
+                className="absolute right-1 top-1/2 !h-11 !w-11 !p-0 -translate-y-1/2"
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
               >
                 {showPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
@@ -268,7 +268,7 @@ export function RegisterModal({
                 name="confirmPassword"
                 value={formData.confirmPassword}
                 onChange={(e) => handleInputChange('confirmPassword', e.target.value)}
-                className="bg-pf-bg-0 pr-10"
+                className="bg-pf-bg-0 pr-12"
                 placeholder="Confirm your password"
                 required
                 autoComplete="new-password"
@@ -280,7 +280,7 @@ export function RegisterModal({
                 size="sm"
                 disabled={isLoading}
                 type="button"
-                className="absolute right-3 top-1/2 !h-auto !p-0 -translate-y-1/2"
+                className="absolute right-1 top-1/2 !h-11 !w-11 !p-0 -translate-y-1/2"
                 aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
               >
                 {showConfirmPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}

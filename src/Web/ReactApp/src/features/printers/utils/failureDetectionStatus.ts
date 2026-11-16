@@ -18,11 +18,11 @@ function getFailureDetectionAction(
 
   if (
     normalizedReason.includes('snapshot url request')
-    || normalizedReason.includes('reachable from the obico server')
+    || normalizedReason.includes('reachable from the detection provider')
     || normalizedReason.includes('private to the printer lan')
     || normalizedReason.includes('printer lan')
   ) {
-    return 'Make the saved snapshot URL reachable from the Obico server network, or switch to a camera feed that PrintFarmer can fetch locally.';
+    return 'Make the saved snapshot URL reachable from the configured detection provider, or switch to a camera feed that PrintFarmer can fetch locally.';
   }
 
   if (
@@ -36,7 +36,7 @@ function getFailureDetectionAction(
     normalizedReason.includes('analysis timed out')
     || normalizedReason.includes('timed out while analyzing')
   ) {
-    return 'Check the Obico ML service load and retry after the service recovers.';
+    return 'Check the detection provider and retry after the service recovers.';
   }
 
   if (normalizedReason.includes('snapshot') || normalizedReason.includes('camera')) {
@@ -46,7 +46,7 @@ function getFailureDetectionAction(
   }
 
   if (context === 'scan-error') {
-    return 'Check the camera feed or monitoring service before relying on automatic pause.';
+    return 'Check the camera feed or monitoring service before relying on failure alerts.';
   }
 
   if (
@@ -88,6 +88,10 @@ export function getFailureDetectionStateLabel(state?: string, enabled = false): 
       return 'Guarding';
     case 'idle':
       return 'Ready';
+    case 'reservation-held':
+      return 'Reservation held';
+    case 'unknown':
+      return 'Activity unknown';
     case 'misconfigured':
       return 'Needs setup';
     case 'error':
@@ -106,6 +110,8 @@ export function getFailureDetectionStateVariant(state?: string, enabled = false)
     case 'idle':
       return 'primary';
     case 'misconfigured':
+    case 'reservation-held':
+    case 'unknown':
       return 'warning';
     case 'error':
       return 'error';
@@ -137,6 +143,8 @@ export function getFailureDetectionIconColorClass(state?: string, enabled = fals
     case 'idle':
       return 'text-pf-status-idle-text';
     case 'misconfigured':
+    case 'reservation-held':
+    case 'unknown':
       return 'text-pf-warning';
     case 'error':
       return 'text-pf-error';
@@ -153,6 +161,10 @@ export function getFailureDetectionSourceLabel(source?: string): string | null {
       return 'Pooled';
     case 'global':
       return 'Global';
+    case 'printguard':
+      return 'PrintGuard';
+    case 'multiple':
+      return 'Multiple';
     default:
       return null;
   }
@@ -206,13 +218,12 @@ export function getFailureDetectionDetail(
       const confidence = status.lastConfidence != null
         ? ` • ${Math.round(status.lastConfidence * 100)}% confidence`
         : '';
-      const pauseNote = status.lastAutoPaused ? ' • auto-paused' : '';
-      return `Last scan ${scanTime} • failure detected${confidence}${pauseNote}`;
+      return `Last scan ${scanTime} • failure detected${confidence}`;
     }
     case 'healthy':
       return `Last scan ${scanTime} • no failure detected`;
     case 'error':
-      return `Last scan ${scanTime} • scan failed — check the camera feed or ML service`;
+      return `Last scan ${scanTime} • scan failed — check the camera feed or detection provider`;
     default:
       return `Last scan ${scanTime} • actively watching this print`;
   }
@@ -223,6 +234,13 @@ export function getFailureDetectionAttentionContent(
 ): { issue: string; action: string } | null {
   if (!status) {
     return null;
+  }
+
+  if (status.state === 'reservation-held') {
+    return {
+      issue: ensureSentence(status.reason, 'Printer activity is unknown. Obico reservation retained.'),
+      action: 'Restore printer connectivity, physically verify the printer is idle, and wait for the runtime to confirm the print has ended. The reservation releases on reconciliation without disabling Obico. If it remains held, review connectivity and any tracked job still starting; do not disable monitoring just to free capacity. Before the next print, verify Obico remains enabled and confirm active monitoring once the print starts.',
+    };
   }
 
   if (status.state === 'misconfigured') {

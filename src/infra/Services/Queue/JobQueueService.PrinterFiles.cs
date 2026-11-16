@@ -9,7 +9,7 @@ public partial class JobQueueService
     /// The linked job, pin and operation transition use the same context and transaction.
     /// The ordinary public queue contract cannot supply an operation or bypass this boundary.
     /// </summary>
-    public Task<JobQueuePrintJobDto?> AddAsync(
+    public async Task<JobQueuePrintJobDto?> AddAsync(
         PrinterFileOperation operation, QueuePrintJobDto request, CancellationToken ct)
     {
         if (_db is null || _db.Database.CurrentTransaction is null ||
@@ -25,6 +25,7 @@ public partial class JobQueueService
             throw new InvalidOperationException("Catalog queue admission requires the owning fenced transaction.");
         }
 
-        return AddJobCoreAsync(request, operation.ActorId, operation, ct);
+        QueueJobAddResult result = await AddJobCoreAsync(request, operation.ActorId, operation, ct);
+        return result.Job;
     }
 }

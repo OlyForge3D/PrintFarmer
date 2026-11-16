@@ -51,6 +51,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var getStatusCalledWith: UUID?
     var listCameraUrlsCalled = false
     var getCameraUrlCalledWith: UUID?
+    var getCameraUrlCallCount = 0
     var getSnapshotCalledWith: UUID?
     var getSnapshotCallCount = 0
     var listPrintersCallCount = 0
@@ -162,6 +163,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
 
     func getCameraUrl(id: UUID) async throws -> PrinterCameraUrl {
         getCameraUrlCalledWith = id
+        getCameraUrlCallCount += 1
         if let error = errorToThrow { throw error }
         guard let cameraUrl = cameraUrlToReturn else { throw NetworkError.notFound }
         return cameraUrl
@@ -433,6 +435,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         getStatusCalledWith = nil
         listCameraUrlsCalled = false
         getCameraUrlCalledWith = nil
+        getCameraUrlCallCount = 0
         getSnapshotCalledWith = nil
         getSnapshotCallCount = 0
         snapshotHandler = nil

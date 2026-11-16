@@ -59,6 +59,12 @@ public class SubmitSliceJobRequest
     /// <summary>Filament profile whose exact native JSON is snapshotted onto the job.</summary>
     public Guid? FilamentProfileId { get; set; }
 
+    /// <summary>
+    /// Explicit source-qualified selections. When supplied, all profiles must resolve exactly;
+    /// names are never substituted from another source. Omit for legacy name-only submissions.
+    /// </summary>
+    public SliceProfileSelections? ProfileSelections { get; set; }
+
     /// <summary>Soft reference to the owning calibration project (idempotency scope).</summary>
     public Guid? CalibrationProjectId { get; set; }
 
@@ -163,6 +169,9 @@ public class SliceJobStatusResponse
     public string Status { get; set; } = string.Empty;
 
     public int ProgressPercent { get; set; }
+
+    /// <summary>The physical printer selected for this slice, if any.</summary>
+    public Guid? PrinterId { get; set; }
 
     public string? ProgressMessage { get; set; }
 
@@ -283,6 +292,9 @@ public sealed class WorkerSliceJobResponse
 
     /// <summary>Exact native upstream-Orca filament profile JSON.</summary>
     public string? FilamentProfileJson { get; set; }
+
+    /// <summary>Ordered immutable native filament documents and digests for explicit extruder selections.</summary>
+    public string? ExtruderFilamentProfilesJson { get; set; }
 
     /// <summary>Expected SHA-256 of <see cref="MachineProfileJson"/>.</summary>
     public string? MachineProfileSha256 { get; set; }

@@ -774,7 +774,7 @@ src/Web/ReactApp/src/
 │   │   ├── components/          # Printer cards, discovery, modals
 │   │   └── hooks/               # Printer-specific hooks
 │   ├── slicer/                  # Slicing operations
-│   │   ├── pages/               # NewSliceJobPage, SliceJobsPage
+│   │   ├── pages/               # NewSliceJobPage
 │   │   ├── components/          # Job components, profile selector
 │   │   └── hooks/               # Slicer-specific hooks
 │   ├── queue/                   # Print job queue

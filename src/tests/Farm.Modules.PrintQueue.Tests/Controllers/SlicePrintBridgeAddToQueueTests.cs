@@ -1,5 +1,6 @@
 ﻿using System.Security.Claims;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
@@ -32,6 +33,68 @@ public sealed class SlicePrintBridgeAddToQueueTests
     private readonly Mock<IJobQueueService> _queue = new();
     private readonly Mock<ISpoolmanService> _spoolman = new();
     private readonly Mock<ISliceArtifactLibraryService> _library = new();
+    private readonly Mock<IQueueResourceAuthorizationService> _authorization = new();
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AddToQueueAsync_ForwardsExplicitPrinterOrAutoAssignment(bool pinned)
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid? printerId = pinned ? Guid.NewGuid() : null;
+        SetupCompletedJob(jobId);
+        SetupPromotion(jobId, Guid.NewGuid(), createdNew: true);
+        if (printerId is Guid target)
+        {
+            _authorization.Setup(service => service.CanAccessPrinterAsync(
+                It.IsAny<ClaimsPrincipal>(), target, PrinterGroupAccessLevel.Submit, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+            _printers.Setup(service => service.FindByIdWithIncludesAsync(target, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Printer { Id = target, Name = "Sliced-for printer" });
+        }
+
+        _queue.Setup(service => service.AddJobToQueueAsync(
+            It.Is<QueuePrintJobDto>(request => request.AssignedPrinterId == printerId),
+            TestUserId,
+            It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new JobQueuePrintJobDto { Id = Guid.NewGuid(), AssignedPrinterId = printerId });
+
+        IActionResult result = await BuildController().AddToQueueAsync(
+            jobId, new AddSliceToQueueRequest { AssignedPrinterId = printerId }, CancellationToken.None);
+
+        result.Should().BeOfType<OkObjectResult>();
+        _queue.Verify(service => service.AddJobToQueueAsync(
+            It.Is<QueuePrintJobDto>(request => request.AssignedPrinterId == printerId),
+            TestUserId,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AddToQueueAsync_MissingOrInaccessiblePrinter_Returns404BeforePromotion(bool authorized)
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        SetupCompletedJob(jobId);
+        _authorization.Setup(service => service.CanAccessPrinterAsync(
+            It.IsAny<ClaimsPrincipal>(), printerId, PrinterGroupAccessLevel.Submit, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(authorized);
+
+        IActionResult result = await BuildController().AddToQueueAsync(
+            jobId, new AddSliceToQueueRequest { AssignedPrinterId = printerId }, CancellationToken.None);
+
+        result.Should().BeOfType<NotFoundObjectResult>();
+        _library.Verify(service => service.PromoteAsync(
+            It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CalibrationActor>(), It.IsAny<CancellationToken>()), Times.Never);
+        _queue.Verify(service => service.AddJobToQueueAsync(
+            It.IsAny<QueuePrintJobDto>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
+        if (!authorized)
+        {
+            _printers.Verify(service => service.FindByIdWithIncludesAsync(
+                It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+    }
 
     [Fact]
     public async Task AddToQueueAsync_WhenPromotionServiceUnavailable_Returns503()
@@ -197,7 +260,8 @@ public sealed class SlicePrintBridgeAddToQueueTests
             jobRepository: _jobs.Object,
             jobQueueService: _queue.Object,
             spoolmanService: _spoolman.Object,
-            sliceArtifactLibraryService: includeLibrary ? _library.Object : null);
+            sliceArtifactLibraryService: includeLibrary ? _library.Object : null,
+            resourceAuthorization: _authorization.Object);
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext

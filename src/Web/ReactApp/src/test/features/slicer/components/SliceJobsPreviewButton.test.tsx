@@ -43,12 +43,14 @@ vi.mock('@/features/slicer/components/SendToPrinterModal', () => ({
     isOpen,
     jobId,
     artifactId,
+    defaultPrinterId,
   }: {
     isOpen: boolean;
     jobId: string;
     artifactId: string;
+    defaultPrinterId?: string | null;
   }) => isOpen
-    ? <div data-testid="print-modal">{jobId}:{artifactId}</div>
+    ? <div data-testid="print-modal" data-printer-id={defaultPrinterId}>{jobId}:{artifactId}</div>
     : null,
 }));
 
@@ -93,6 +95,7 @@ describe('SliceJobsPanel Preview button', () => {
       mockGetMyJobs.mockResolvedValue([
         {
           id: 'job-completed-actions',
+          printerId: 'original-physical-printer',
           status: 'Completed',
           progressPercent: 100,
           queuedAt: '2026-05-31T09:00:00Z',
@@ -129,6 +132,7 @@ describe('SliceJobsPanel Preview button', () => {
         '/api/artifacts/job/job-completed-actions',
       );
       expect(screen.getByTestId('print-modal')).not.toHaveTextContent('newest-artifact');
+      expect(screen.getByTestId('print-modal')).toHaveAttribute('data-printer-id', 'original-physical-printer');
     },
   );
 

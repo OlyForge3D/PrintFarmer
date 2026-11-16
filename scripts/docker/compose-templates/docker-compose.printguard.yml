@@ -1,0 +1,38 @@
+# PrintGuard image classification service
+# Internal-only service; PrintFarmer reaches it over printfarmer-network.
+# The integration uses classification only and does not expose control operations.
+
+services:
+  printguard:
+    image: ${PRINTGUARD_IMAGE}
+    container_name: printfarmer-printguard
+    restart: unless-stopped
+    expose:
+      - "8000"
+    networks:
+      - printfarmer-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "${PRINTGUARD_CPU_LIMIT:-2.0}"
+          memory: ${PRINTGUARD_MEMORY_LIMIT:-2gb}
+        reservations:
+          cpus: "${PRINTGUARD_CPU_REQUEST:-0.5}"
+          memory: ${PRINTGUARD_MEMORY_REQUEST:-512m}
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  printfarmer-network:
+    name: printfarmer-network
+    driver: bridge

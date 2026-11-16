@@ -18,6 +18,11 @@ public sealed class FailureDetectionDto
     public Guid PrinterId { get; set; }
 
     /// <summary>
+    /// Provider that reported the failure.
+    /// </summary>
+    public string Provider { get; set; } = "Obico";
+
+    /// <summary>
     /// Name of the printer.
     /// </summary>
     public string PrinterName { get; set; } = string.Empty;

@@ -100,9 +100,13 @@ public sealed class ObicoHealthCheck(
             .Select(server => new { server.Url, server.ApiKey })
             .ToListAsync(ct);
 
-        // The monitor falls back to the global URL (without credentials) for missing or
-        // disabled assignments. It does not choose an arbitrary reachable pooled server.
-        if (!string.IsNullOrWhiteSpace(settings.ObicoApiUrl))
+        bool hasPool = await db.ObicoServers.AnyAsync(ct);
+        bool hasGlobalReservation = await db.PrinterServiceStates.AnyAsync(
+            state => state.ObicoFallbackUrl == settings.ObicoApiUrl, ct);
+
+        // A registered pool is authoritative, even if disabled or full. Held global routes,
+        // including unconfirmed legacy identities, still need availability checks.
+        if ((!hasPool || hasGlobalReservation) && !string.IsNullOrWhiteSpace(settings.ObicoApiUrl))
         {
             targets.Add(new { Url = settings.ObicoApiUrl, ApiKey = (string?)null });
         }

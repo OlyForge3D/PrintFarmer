@@ -267,10 +267,19 @@ public partial class JobQueueService : IJobQueueService, IPrinterFileQueueAdmiss
     /// If no compatible printer is available, the operation returns null. The job is assigned a queue position based on
     /// the next available position for its assigned printer. Job status defaults to Queued.
     /// </remarks>
-    public Task<JobQueuePrintJobDto?> AddJobToQueueAsync(QueuePrintJobDto request, Guid? userId, CancellationToken ct) =>
+    public async Task<JobQueuePrintJobDto?> AddJobToQueueAsync(QueuePrintJobDto request, Guid? userId, CancellationToken ct)
+    {
+        QueueJobAddResult result = await AddJobCoreAsync(request, userId, null, ct);
+        return result.Job;
+    }
+
+    public Task<QueueJobAddResult> AddJobToQueueWithOutcomeAsync(
+        QueuePrintJobDto request,
+        Guid? userId,
+        CancellationToken ct) =>
         AddJobCoreAsync(request, userId, null, ct);
 
-    private async Task<JobQueuePrintJobDto?> AddJobCoreAsync(
+    private async Task<QueueJobAddResult> AddJobCoreAsync(
         QueuePrintJobDto request, Guid? userId, PrinterFileOperation? catalogOperation, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -278,7 +287,7 @@ public partial class JobQueueService : IJobQueueService, IPrinterFileQueueAdmiss
         GcodeFile? gcode = await _dataService.GetGcodeFileAsync(request.GcodeFileId, ct);
         if (gcode == null)
         {
-            return null;
+            return QueueJobAddResult.Rejected(QueueJobAddFailureReason.GcodeFileNotFound);
         }
 
         // Enforce printer group ACL when a userId is provided
@@ -422,16 +431,19 @@ public partial class JobQueueService : IJobQueueService, IPrinterFileQueueAdmiss
         Guid? assignedPrinterId = effectiveRequest.AssignedPrinterId;
         if (assignedPrinterId is null)
         {
-            assignedPrinterId = await FindBestAvailablePrinterAsync(effectiveRequest, userId, ct);
+            PrinterAssignmentResult assignment = await FindBestAvailablePrinterAsync(effectiveRequest, userId, ct);
+            assignedPrinterId = assignment.PrinterId;
 
             if (assignedPrinterId is null)
             {
                 _logger.LogInformation(
-                    "No compatible printer found for job. Model={Model}, Material={Material}, Nozzle={Nozzle}",
+                    "No compatible printer found for job. Reason={Reason}, Model={Model}, Material={Material}, Nozzle={Nozzle}",
+                    assignment.FailureReason,
                     LogSanitizer.Sanitize(effectiveRequest.RequiredPrinterModel ?? "(any)"),
                     LogSanitizer.Sanitize(effectiveRequest.RequiredMaterialType ?? "(any)"),
                     LogSanitizer.Sanitize(effectiveRequest.RequiredNozzleDiameter?.ToString("F2") ?? "(any)"));
-                return null;
+                return QueueJobAddResult.Rejected(assignment.FailureReason
+                    ?? throw new InvalidOperationException("Printer assignment failed without a reason."));
             }
         }
 
@@ -475,7 +487,7 @@ public partial class JobQueueService : IJobQueueService, IPrinterFileQueueAdmiss
 
             if (replay is not null)
             {
-                return replay;
+                return QueueJobAddResult.Queued(replay);
             }
         }
 
@@ -670,7 +682,7 @@ public partial class JobQueueService : IJobQueueService, IPrinterFileQueueAdmiss
                     ct);
                 if (winner is not null)
                 {
-                    return winner;
+                    return QueueJobAddResult.Queued(winner);
                 }
 
                 throw;
@@ -746,7 +758,7 @@ public partial class JobQueueService : IJobQueueService, IPrinterFileQueueAdmiss
             (await _dataService.GetAvailablePrintersAsync(ct)).Find(p => p.Id == assignedPrinterId)?.Name ?? "Unknown");
         await ApplyAuthoritativeDispatchProjectionAsync(dto, job, ct);
 
-        return dto;
+        return QueueJobAddResult.Queued(dto);
     }
 
     /// <summary>Notifies existing ready/dispatch machinery only after the owning transaction commits.</summary>
@@ -1405,7 +1417,7 @@ public partial class JobQueueService : IJobQueueService, IPrinterFileQueueAdmiss
         });
     }
 
-    private async Task<Guid?> FindBestAvailablePrinterAsync(
+    private async Task<PrinterAssignmentResult> FindBestAvailablePrinterAsync(
         QueuePrintJobDto request,
         Guid? userId,
         CancellationToken ct)
@@ -1415,6 +1427,21 @@ public partial class JobQueueService : IJobQueueService, IPrinterFileQueueAdmiss
             ? await _dataService.GetAvailablePrintersAsync(ct)
             : await _dataService.GetCompatiblePrintersAsync(request.RequiredPrinterModel, ct);
 
+        if (printers.Count == 0)
+        {
+            QueueJobAddFailureReason noCandidateReason = QueueJobAddFailureReason.NoAvailablePrinter;
+            if (!string.IsNullOrWhiteSpace(request.RequiredPrinterModel) &&
+                (await _dataService.GetPrintersMatchingModelAsync(request.RequiredPrinterModel, ct)).Count == 0)
+            {
+                noCandidateReason = QueueJobAddFailureReason.PrinterModelMismatch;
+            }
+
+            return new(null, noCandidateReason);
+        }
+
+        bool hasAuthorizedPrinter = false;
+        bool hasNozzleCompatiblePrinter = false;
+        bool hasMaterialCompatiblePrinter = false;
         foreach (Printer printer in printers)
         {
             if (userId.HasValue &&
@@ -1428,6 +1455,8 @@ public partial class JobQueueService : IJobQueueService, IPrinterFileQueueAdmiss
                 continue;
             }
 
+            hasAuthorizedPrinter = true;
+
             // Check nozzle diameter - now per-toolhead, check if any toolhead's nozzle model matches
             if (request.RequiredNozzleDiameter.HasValue)
             {
@@ -1438,6 +1467,8 @@ public partial class JobQueueService : IJobQueueService, IPrinterFileQueueAdmiss
                     continue;
                 }
             }
+
+            hasNozzleCompatiblePrinter = true;
 
             // Check supported materials - case-insensitive comparison for material matching
             if (!string.IsNullOrEmpty(request.RequiredMaterialType))
@@ -1450,15 +1481,26 @@ public partial class JobQueueService : IJobQueueService, IPrinterFileQueueAdmiss
                 }
             }
 
+            hasMaterialCompatiblePrinter = true;
+
             int queueCount = await _dataService.CountQueuedJobsForPrinterAsync(printer.Id, ct);
             if (queueCount < 5)
             {
-                return printer.Id;
+                return new(printer.Id, null);
             }
         }
 
-        return null;
+        QueueJobAddFailureReason reason = !hasAuthorizedPrinter
+            ? QueueJobAddFailureReason.PrinterAccessDenied
+            : !hasNozzleCompatiblePrinter
+                ? QueueJobAddFailureReason.NozzleMismatch
+                : !hasMaterialCompatiblePrinter
+                    ? QueueJobAddFailureReason.MaterialMismatch
+                    : QueueJobAddFailureReason.QueueCapacity;
+        return new(null, reason);
     }
+
+    private sealed record PrinterAssignmentResult(Guid? PrinterId, QueueJobAddFailureReason? FailureReason);
 
     private async Task EnsureActorCanAccessJobAsync(
         string? actorSubject,

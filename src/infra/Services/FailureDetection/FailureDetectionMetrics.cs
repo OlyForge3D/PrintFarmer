@@ -18,17 +18,13 @@ public sealed class FailureDetectionMetrics
         "printfarmer.failure_detection.failures_detected_total",
         description: "Total number of failure detections");
 
-    private static readonly Counter<long> s_autoPausesTotal = s_meter.CreateCounter<long>(
-        "printfarmer.failure_detection.auto_pauses_total",
-        description: "Total number of auto-pauses triggered by failure detection");
-
     private static readonly Counter<long> s_errorsTotal = s_meter.CreateCounter<long>(
         "printfarmer.failure_detection.errors_total",
         description: "Total number of analysis errors (timeouts, HTTP failures, parse errors)");
 
     private static readonly Histogram<double> s_analysisDurationMs = s_meter.CreateHistogram<double>(
         "printfarmer.failure_detection.analysis_duration_ms",
-        description: "Duration of individual Obico ML API calls");
+        description: "Duration of individual provider analysis calls");
 
     private static readonly Histogram<double> s_cycleDurationMs = s_meter.CreateHistogram<double>(
         "printfarmer.failure_detection.cycle_duration_ms",
@@ -36,7 +32,7 @@ public sealed class FailureDetectionMetrics
 
     private static readonly Histogram<double> s_confidence = s_meter.CreateHistogram<double>(
         "printfarmer.failure_detection.confidence",
-        description: "Distribution of ML confidence values returned by Obico (0.0–1.0)");
+        description: "Distribution of provider confidence values (0.0–1.0)");
 
 #pragma warning disable S1450 // ObservableGauge fields must be retained to prevent GC; callbacks read shared state
     private static readonly ObservableGauge<int> s_activePrinters = s_meter.CreateObservableGauge(
@@ -60,8 +56,8 @@ public sealed class FailureDetectionMetrics
     public ObservableGauge<int> ConfiguredPrintersGauge => s_configuredPrinters;
 
     /// <summary>Record a successful analysis.</summary>
-    /// <param name="durationMs">Duration of the ML API call in milliseconds.</param>
-    /// <param name="confidence">Confidence value returned by the model (0.0–1.0).</param>
+    /// <param name="durationMs">Duration of the provider analysis call in milliseconds.</param>
+    /// <param name="confidence">Confidence value returned by the provider (0.0–1.0).</param>
     /// <param name="isFailure">Whether the analysis detected a failure.</param>
     public void RecordAnalysis(double durationMs, double confidence, bool isFailure)
     {
@@ -72,12 +68,6 @@ public sealed class FailureDetectionMetrics
         {
             s_failuresDetectedTotal.Add(1);
         }
-    }
-
-    /// <summary>Record an auto-pause event.</summary>
-    public void RecordAutoPause()
-    {
-        s_autoPausesTotal.Add(1);
     }
 
     /// <summary>Record an analysis error (timeout, HTTP failure, parse error).</summary>

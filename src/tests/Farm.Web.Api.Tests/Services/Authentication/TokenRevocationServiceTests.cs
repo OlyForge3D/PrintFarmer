@@ -1,10 +1,15 @@
-﻿using System.Security.Claims;
+﻿using System.Data.Common;
+using System.Security.Claims;
 using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Authentication;
 using Farm.Infrastructure.Services.Authentication;
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
@@ -58,7 +63,6 @@ public class TokenRevocationServiceTests
             Id = userId,
             Username = $"user_{userId:N}",
             Email = $"user_{userId:N}@example.com",
-            PasswordHash = "not-a-real-hash",
             IsActive = true,
             EmailConfirmed = true,
             CreatedAt = DateTime.UtcNow,
@@ -74,6 +78,95 @@ public class TokenRevocationServiceTests
 
         TokenRevocationService service = new(db, logger.Object, authAuditService.Object);
         return (service, db);
+    }
+
+    [Fact]
+    public async Task RevokeAllUserTokensAsync_PostCommitAuditDatabaseFailure_KeepsCommittedRevocationAndLogs()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        await using AppDbContext db = new(options);
+        await db.Database.EnsureCreatedAsync();
+        Guid userId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Username = $"audit-user-{userId:N}",
+            Email = $"audit-user-{userId:N}@example.com",
+            PasswordHash = "old-hash",
+            IsActive = true
+        };
+        db.Users.Add(user);
+        db.RefreshTokens.Add(new RefreshToken
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Token = "test-refresh-token",
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddDays(1)
+        });
+        await db.SaveChangesAsync();
+        await db.Database.ExecuteSqlRawAsync("DROP TABLE AuthAuditLogs");
+        user.PasswordHash = "new-hash";
+        Mock<ILogger<TokenRevocationService>> logger = new();
+        AuthAuditService audit = new(
+            new EfAuthAuditLogRepository(new PooledDbContextFactory<AppDbContext>(options)),
+            Mock.Of<ILogger<AuthAuditService>>());
+        TokenRevocationService service = new(db, logger.Object, audit);
+
+        int revokedCount = await service.RevokeAllUserTokensAsync(userId, userId, "Test password change");
+
+        Assert.Equal(2, revokedCount);
+        db.ChangeTracker.Clear();
+        Assert.Equal("new-hash", (await db.Users.SingleAsync(user => user.Id == userId)).PasswordHash);
+        Assert.True((await db.RefreshTokens.SingleAsync(refresh => refresh.UserId == userId)).IsRevoked);
+        Assert.True(await db.RevokedTokens.AnyAsync(marker => marker.UserId == userId));
+        logger.Verify(log => log.Log(
+            LogLevel.Error, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(),
+            It.Is<Exception>(exception => exception is DbUpdateException),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("unexpected")]
+    [InlineData("invalid-operation")]
+    [InlineData("disposed")]
+    [InlineData("caller-cancellation")]
+    public async Task RevokeAllUserTokensAsync_PostCommitUnexpectedFaultOrCallerCancellation_Propagates(string scenario)
+    {
+        bool cancelCaller = scenario == "caller-cancellation";
+        using CancellationTokenSource cancellation = new();
+        Guid userId = Guid.NewGuid();
+        var (_, db) = await CreateServiceAsync(userId);
+        using (db)
+        {
+            Exception failure = scenario switch
+            {
+                "caller-cancellation" => new OperationCanceledException(cancellation.Token),
+                "disposed" => new ObjectDisposedException("audit-store"),
+                "invalid-operation" => new InvalidOperationException("Invalid audit tracker state."),
+                _ => new ArgumentException("Audit implementation fault.")
+            };
+            Mock<IAuthAuditService> audit = new(MockBehavior.Strict);
+            audit.Setup(service => service.LogTokenRevokedAsync(
+                    userId, userId, It.IsAny<string>(), null, null, It.IsAny<CancellationToken>()))
+                .Returns(async () =>
+                {
+                    if (cancelCaller)
+                    {
+                        await cancellation.CancelAsync();
+                    }
+                    await Task.FromException(failure);
+                });
+            TokenRevocationService service = new(db, Mock.Of<ILogger<TokenRevocationService>>(), audit.Object);
+
+            Exception? propagated = await Record.ExceptionAsync(() =>
+                service.RevokeAllUserTokensAsync(userId, userId, "Test revocation", cancellationToken: cancellation.Token));
+
+            Assert.Same(failure, propagated);
+            Assert.True(await db.RevokedTokens.AnyAsync(marker => marker.UserId == userId));
+        }
     }
 
     [Fact]
@@ -166,5 +259,178 @@ public class TokenRevocationServiceTests
 
         // Assert
         isRevoked.Should().BeFalse("a token issued in a strictly later second than the revoke-all marker must remain valid");
+    }
+
+    [Fact]
+    public async Task RevokeAllUserTokensAsync_MarkerPersistenceFails_Throws()
+    {
+        Guid userId = Guid.NewGuid();
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .AddInterceptors(new FailRevocationMarkerSaveInterceptor())
+            .Options;
+        AppDbContext db = new(options);
+        User user = new()
+        {
+            Id = userId,
+            Username = $"user_{userId:N}",
+            Email = $"user_{userId:N}@example.com",
+            IsActive = true,
+            EmailConfirmed = true,
+            CreatedAt = DateTime.UtcNow,
+            PasswordHash = "old-password-hash",
+        };
+        PasswordResetToken resetToken = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Token = "valid-reset-token",
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddHours(1),
+        };
+        RefreshToken refreshToken = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Token = "active-refresh-token",
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddDays(1),
+        };
+        db.Users.Add(user);
+        db.PasswordResetTokens.Add(resetToken);
+        db.RefreshTokens.Add(refreshToken);
+        await db.SaveChangesAsync();
+        user.PasswordHash = "new-password-hash";
+        resetToken.IsUsed = true;
+        resetToken.UsedAt = DateTime.UtcNow;
+
+        Mock<ILogger<TokenRevocationService>> logger = new();
+        Mock<IAuthAuditService> authAuditService = new();
+        TokenRevocationService service = new(db, logger.Object, authAuditService.Object);
+
+        await Assert.ThrowsAsync<DbUpdateException>(
+            () => service.RevokeAllUserTokensAsync(userId, userId, "test marker persistence failure"));
+        authAuditService.Verify(
+            audit => audit.LogTokenRevokedAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+
+        db.ChangeTracker.Clear();
+        (await db.Users.SingleAsync(candidate => candidate.Id == userId)).PasswordHash.Should().Be("old-password-hash");
+        (await db.PasswordResetTokens.SingleAsync(candidate => candidate.Id == resetToken.Id)).IsUsed.Should().BeFalse();
+        (await db.RefreshTokens.SingleAsync(candidate => candidate.Id == refreshToken.Id)).IsRevoked.Should().BeFalse();
+        (await db.RevokedTokens.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RevokeAllUserTokensAsync_TransactionCommitFails_RollsBackPasswordResetAndRefreshRevocation()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        FailTransactionCommitInterceptor interceptor = new();
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor)
+            .Options;
+        await using AppDbContext db = new(options);
+        await db.Database.EnsureCreatedAsync();
+
+        Guid userId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Username = $"user_{userId:N}",
+            Email = $"user_{userId:N}@example.com",
+            IsActive = true,
+            EmailConfirmed = true,
+            CreatedAt = DateTime.UtcNow,
+            PasswordHash = "old-password-hash",
+        };
+        PasswordResetToken resetToken = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Token = "valid-reset-token",
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddHours(1),
+        };
+        RefreshToken refreshToken = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Token = "active-refresh-token",
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddDays(1),
+        };
+        db.Users.Add(user);
+        db.PasswordResetTokens.Add(resetToken);
+        db.RefreshTokens.Add(refreshToken);
+        await db.SaveChangesAsync();
+
+        user.PasswordHash = "new-password-hash";
+        resetToken.IsUsed = true;
+        resetToken.UsedAt = DateTime.UtcNow;
+        interceptor.FailNextCommit = true;
+        TokenRevocationService service = new(
+            db,
+            Mock.Of<ILogger<TokenRevocationService>>(),
+            Mock.Of<IAuthAuditService>());
+
+        await Assert.ThrowsAsync<DbUpdateException>(
+            () => service.RevokeAllUserTokensAsync(userId, userId, "test transaction rollback"));
+
+        Assert.True(interceptor.CommitFailed);
+        db.ChangeTracker.Clear();
+        (await db.Users.SingleAsync(candidate => candidate.Id == userId)).PasswordHash.Should().Be("old-password-hash");
+        (await db.PasswordResetTokens.SingleAsync(candidate => candidate.Id == resetToken.Id)).IsUsed.Should().BeFalse();
+        RefreshToken persistedRefreshToken =
+            await db.RefreshTokens.SingleAsync(candidate => candidate.Id == refreshToken.Id);
+        persistedRefreshToken.IsRevoked.Should().BeFalse();
+        (await db.RevokedTokens.CountAsync()).Should().Be(0);
+    }
+
+    private sealed class FailTransactionCommitInterceptor : DbTransactionInterceptor
+    {
+        public bool FailNextCommit { get; set; }
+
+        public bool CommitFailed { get; private set; }
+
+        public override ValueTask<InterceptionResult> TransactionCommittingAsync(
+            DbTransaction transaction,
+            TransactionEventData eventData,
+            InterceptionResult result,
+            CancellationToken cancellationToken = default)
+        {
+            if (FailNextCommit)
+            {
+                FailNextCommit = false;
+                CommitFailed = true;
+                throw new DbUpdateException("Injected transaction commit failure.");
+            }
+
+            return base.TransactionCommittingAsync(transaction, eventData, result, cancellationToken);
+        }
+    }
+
+    private sealed class FailRevocationMarkerSaveInterceptor : SaveChangesInterceptor
+    {
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (eventData.Context?.ChangeTracker.Entries<RevokedToken>()
+                    .Any(entry => entry.State == EntityState.Added) == true)
+            {
+                throw new DbUpdateException("Injected revocation marker write failure.");
+            }
+
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
     }
 }

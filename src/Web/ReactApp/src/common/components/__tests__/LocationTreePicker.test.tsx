@@ -60,7 +60,6 @@ vi.mock('@/services/locationService', () => ({
   locationService: {
     getLocationTree: vi.fn(),
     getAllLocations: vi.fn(),
-    getLocationAncestors: vi.fn(),
     getLocationDescendants: vi.fn(),
     createLocation: vi.fn(),
     updateLocation: vi.fn(),

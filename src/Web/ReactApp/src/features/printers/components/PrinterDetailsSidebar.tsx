@@ -1,7 +1,10 @@
-import { PrinterCoordinateRow } from '@/features/printers/components/PrinterCoordinateRow';
-import { PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
+import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
+import { PrinterActionBar } from '@/features/printers/components/PrinterActionBar';
+import { CancelPrintConfirmation } from '@/features/printers/components/CancelPrintConfirmation';
+import { usePrinterControls } from '@/features/printers/hooks/use-printer-controls';
+import { PrinterServiceStatus } from '@/features/printers/components/PrinterServiceStatus';
+import { BedClearEvidencePanel } from '@/features/printers/components/BedClearEvidencePanel';
 import { RuntimeFactorControls } from '@/features/printers/components/RuntimeFactorControls';
-import { MotionControlButton } from '@/features/printers/components/MotionControlButton';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys, usePrintJobObjects, usePrinter, usePrinterDetails } from '@/common/hooks/useApi';
@@ -15,61 +18,31 @@ import {
 import { maintenanceService } from '@/services/maintenanceService';
 import { getPrinterDisplayState } from '@/common/utils/printerStateDisplay';
 import { formatPrinterModelSubtitle } from '@/common/utils/printerModelDisplay';
-import { PrinterBackend, type ApiError, type MoveRequest, type Printer, type PrinterBackendCapabilitiesDto, type PrintJobObjectDto, type PrintJobObjectListDto } from '@/types/api';
+import { PrinterBackend, type ApiError, type Printer, type PrinterBackendCapabilitiesDto, type PrintJobObjectDto, type PrintJobObjectListDto } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
 import { PrinterSensorsSection } from '@/features/printers/components/PrinterSensorsPanel';
-import { usePrinterMovement } from '@/features/printers/hooks/use-printer-movement';
 import {
-  canCancel,
-  canCooldown,
-  canDisableMotors,
-  canEmergencyStop,
   canExcludeObject,
   isActivePrintForObjects,
-  filamentControlBlockedReason,
-  canMove,
   canOpenFiles,
   canOpenHistory,
-  canPauseOrResume,
-  canSetStep,
-  canSetTemperatures,
-  canUseManualMove,
   getPrinterSupport,
 } from '@/features/printers/utils/printerSupport';
-import {
-  getPresetTargets,
-  temperatureTargetLimitError,
-  EXTRUDE_DISTANCE_OPTIONS,
-  DEFAULT_EXTRUDE_DISTANCE_MM,
-  EXTRUDE_SPEED_OPTIONS,
-  DEFAULT_EXTRUDE_SPEED_MMS,
-} from '@/features/printers/constants/temperaturePresets';
-import { getHomeButtonStyle } from '@/features/printers/utils/homeButtonStyle';
 import { getStatusHeaderClassName, getStatusIndicatorColor, isPrinterStateShutdown } from '@/features/printers/utils/statusColors';
 // This component's scrollable content follows PRINTER_DETAIL_SECTION_ORDER
 // (see printerDetailSectionOrder.ts): Statistics, Version, Control, Objects,
 // Move, Temperature, Materials/MMU, Spool. DetailedPrinterCard mirrors this
 // order for its shared sections (#1698).
 import { renderUnknown } from '@/common/utils/renderUnknown';
-import { Button, MoveDistanceSlider, CollapsibleSection, LoadedFilamentCard } from '@/common/components/ui';
+import { Button, CollapsibleSection, LoadedFilamentCard } from '@/common/components/ui';
 import { ControlPadButton } from '@/common/components/ui/ControlPadButton';
 import {
-  DisableMotorsIcon,
-  HomeIcon,
-  PlayIcon,
-  PauseIcon,
-  EmergencyStopIcon,
-  ArrowUpIcon,
-  ArrowDownIcon,
-  ArrowLeftIcon,
-  ArrowRightIcon,
   FileIcon,
   RefreshIcon,
   HistoryIcon,
   CloseIcon,
-  XCircleIcon,
   FilamentChangeIcon,
   EjectIcon,
 } from '@/common/components/icons/MdiIcons';
@@ -78,7 +51,7 @@ import { FilamentCoverageBreakdown } from '@/features/filament-coverage/componen
 import { resolveMaterialLoadout } from '@/features/printers/utils/materialLoadout';
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 import { MmuControlBox } from '@/features/printers/components/MmuControlBox';
-import { MaterialLoadout, type FilamentMacroControl } from '@/features/printers/components/MaterialLoadout';
+import { MaterialLoadout } from '@/features/printers/components/MaterialLoadout';
 import { useAutoDispatchStatus } from '@/features/printers/hooks/useAutoDispatch';
 import { Modal } from '@/common/components/modals/Modal';
 import { toast } from 'sonner';
@@ -161,16 +134,16 @@ interface PrinterDetailsSidebarProps {
   printer?: Printer;
   backendCapabilities?: PrinterBackendCapabilitiesDto;
   onClose: () => void;
+  onToggleEnabled?: (printer: Printer) => void | Promise<void>;
   /** Layout mode: drawer panel or bounded content panel. */
   layout?: 'panel' | 'content';
 }
 
-export function PrinterDetailsSidebar({ printerId, printer: printerProp, backendCapabilities, onClose, layout = 'panel' }: PrinterDetailsSidebarProps) {
+export function PrinterDetailsSidebar({ printerId, printer: printerProp, backendCapabilities, onClose, onToggleEnabled, layout = 'panel' }: PrinterDetailsSidebarProps) {
   // Call hooks first before any early returns (React Rules of Hooks)
   // Only fetch if printer prop is not provided
   const shouldFetch = !printerProp && !!printerId;
   const { data: apiPrinter, isLoading, refetch } = usePrinter(shouldFetch ? printerId : '');
-  const motion = usePrinterMovement(printerProp ?? apiPrinter);
   const { data: autoDispatchStatus } = useAutoDispatchStatus(printerId ?? '');
   const queryClient = useQueryClient();
   const { ready: spoolmanReady } = useSpoolmanConfigured();
@@ -222,11 +195,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const [isMoveExpanded, setIsMoveExpanded] = useState(true);
 
   const [showSpoolPicker, setShowSpoolPicker] = useState(false);
-  const [controlActionPending, setControlActionPending] = useState(false);
-  const [temperatureActionPending, setTemperatureActionPending] = useState(false);
-  const [localMovementActionPending, setMovementActionPending] = useState(false);
-  const movementActionPending = localMovementActionPending || motion.blocked;
-  const [filamentActionPending, setFilamentActionPending] = useState(false);
   const [spoolActionPending, setSpoolActionPending] = useState(false);
 
   const printerStatisticsQuery = useQuery({
@@ -269,12 +237,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
-  const [moveX, setMoveX] = useState<number | ''>('');
-  const [moveY, setMoveY] = useState<number | ''>('');
-  const [moveZ, setMoveZ] = useState<number | ''>('');
-  const [step, setStep] = useState(10);
-  const [extrudeStep, setExtrudeStep] = useState(DEFAULT_EXTRUDE_DISTANCE_MM);
-  const [extrudeSpeed, setExtrudeSpeed] = useState(DEFAULT_EXTRUDE_SPEED_MMS);
   const [objectToSkip, setObjectToSkip] = useState<PrintJobObjectDto | null>(null);
   const [objectToSkipPrinterId, setObjectToSkipPrinterId] = useState(printerId);
 
@@ -386,6 +348,9 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     [printer?.mmuStatus, printerDetails?.toolheads, printer?.currentSpoolId, printer?.modelName, printer?.spoolInfo],
   );
 
+  const controls = usePrinterControls(printerId && printer?.id === printerId ? printer : undefined, backendCapabilities, printerDetails, 10);
+  const { activeExtruderId, filamentControl } = controls;
+
   // Guard early after all hooks are called
   if (!printerId) {
     return null;
@@ -393,7 +358,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   // API now returns complete printer DTO with status merged in - no client-side merge needed
   const displayPrinter = printer;
-  const activeExtruderId = printer?.backend === PrinterBackend.Moonraker ? printer.activeExtruderId ?? null : undefined;
   const hasMoonrakerSensorSnapshot = printer?.backend === PrinterBackend.Moonraker && printer.sensors !== undefined;
 
   // Authoritative reviewed revision for spool mutations. `displayPrinter`
@@ -435,21 +399,10 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const headerClassName = getStatusHeaderClassName({ state: rawState, isOnline, isPrinting, isPaused, isShutdown });
   const statusIndicatorClassName = getStatusIndicatorColor({ state: rawState, isOnline, isPrinting, isPaused, isShutdown });
 
-  const canPauseOrResumeNow = canPauseOrResume({ isOnline, isEnabled, isPrinting, isPaused, support });
-  const canCancelNow = canCancel({ isOnline, isEnabled, isPrinting, isPaused, support });
-  const canEmergencyStopNow = canEmergencyStop({ isOnline, isEnabled, support });
-  const canDisableMotorsNow = !motion.blocked && backendCapabilities?.supportsDisableMotors !== false && canDisableMotors({ isOnline, isEnabled, isPrinting, support });
-  const canMoveNow = canMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
-  const canSetStepNow = canSetStep({ isOnline, isShutdown, support });
-  const canManualMoveNow = canUseManualMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
-  const canSetTemperaturesNow = canSetTemperatures({ isOnline, isEnabled, support });
-  const canCooldownNow = canCooldown({ isOnline, isEnabled, isPrinting, support, supportsHeaterShutdown: backendCapabilities?.supportsHeaterShutdown });
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
   const canOpenHistoryNow = canOpenHistory({ isOnline, isEnabled, support });
   const canExcludeObjectNow = canExcludeObject({ isOnline, isEnabled, isPrinting, isPaused, support });
   const printJobObjects = printJobObjectsQuery.data?.objects ?? [];
-
-  const canExtrudeNow = isOnline && isEnabled && !isPrinting && !isShutdown && backendCapabilities?.supportsExtrusion === true;
 
   // Use state values to track last known values for display (fallback when data is undefined)
   const lastKnownHotendTemp = lastKnownValues.hotendTemp;
@@ -469,261 +422,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     return `${Math.round(grams)}g`;
   };
 
-  // Check if axes are homed based on homedAxes string from Moonraker
-  // homedAxes is a string like "xyz", "xy", "z", or "" if not homed
-  const homedAxesRaw = displayPrinter?.homedAxes;
-  const isHomedStateKnown = typeof homedAxesRaw === 'string';
-  const homedAxes = (homedAxesRaw ?? '').toLowerCase();
-
-  // Guarded debug logging - only log if enabled in window.PrintFarmerDebug
-  if ((window as unknown as { PrintFarmerDebug?: { printerDetailsSidebar?: boolean } }).PrintFarmerDebug?.printerDetailsSidebar) {
-    console.log('PrinterDetailsSidebar - Status update:', {
-      printerId,
-      homedAxesRaw: displayPrinter?.homedAxes,
-      homedAxesLower: homedAxes,
-      status: displayPrinter?.state,
-      x: displayPrinter?.x,
-      y: displayPrinter?.y,
-      z: displayPrinter?.z
-    });
-  }
-
-  // Determine if each axis is homed
-  const isXHomed = isHomedStateKnown && homedAxes.includes('x');
-  const isYHomed = isHomedStateKnown && homedAxes.includes('y');
-  const isZHomed = isHomedStateKnown && homedAxes.includes('z');
-  const isXYHomed = isXHomed && isYHomed;
-
-  // Printer is fully homed if all axes are homed
-  const isAllHomed = isXYHomed && isZHomed;
-
-  if ((window as unknown as { PrintFarmerDebug?: { printerDetailsSidebar?: boolean } }).PrintFarmerDebug?.printerDetailsSidebar) {
-    console.log('Homing state:', { isXHomed, isYHomed, isZHomed, homedAxes });
-  }
-
-  const handleHome = async (axes?: 'all' | 'xy' | 'z') => {
-    if (movementActionPending) {
-      return;
-    }
-
-    setMovementActionPending(true);
-    try {
-      const result = await motion.execute({ kind: axes === 'xy' ? 'HomeXY' : axes === 'z' ? 'HomeZ' : 'HomeAll' });
-      if (!result.success) {
-        console.error('Failed to home:', result.error);
-        toast.error(result.error || result.message || 'Failed to home printer');
-      }
-    } catch (error) {
-      console.error('Error homing:', error);
-      toast.error(mutationErrorMessage(error, 'Failed to home printer'));
-    } finally {
-      setMovementActionPending(false);
-    }
-  };
-
-  const handleMove = async (axis: 'X' | 'Y' | 'Z', distance: number) => {
-    if (movementActionPending) {
-      return;
-    }
-
-    setMovementActionPending(true);
-    try {
-      const move: MoveRequest = {};
-      move[axis.toLowerCase() as keyof MoveRequest] = distance;
-      const result = await motion.execute({ kind: 'Jog', ...move });
-      if (!result.success) {
-        console.error(`Failed to move ${axis}:`, result.error);
-        toast.error(result.error || result.message || `Failed to move ${axis}`);
-      }
-    } catch (error) {
-      console.error(`Error moving ${axis}:`, error);
-      toast.error(mutationErrorMessage(error, `Failed to move ${axis}`));
-    } finally {
-      setMovementActionPending(false);
-    }
-  };
-
-  const handleMoveTo = async (position: MoveRequest) => {
-    if (movementActionPending || !canManualMoveNow || !Object.values(position).length || !Object.values(position).every(Number.isFinite)) return;
-    setMovementActionPending(true);
-    try {
-      const result = await motion.execute({ kind: 'MoveTo', ...position });
-      if (!result.success) toast.error(result.error || result.message || 'Movement did not succeed');
-    } catch (error) {
-      toast.error(mutationErrorMessage(error, 'Movement status uncertain'));
-    } finally {
-      setMovementActionPending(false);
-    }
-  };
-
-  const handleControlAction = async (action: 'pause' | 'resume' | 'cancel' | 'stop' | 'firmware-restart' | 'disable-motors') => {
-    if (controlActionPending) {
-      return;
-    }
-
-    setControlActionPending(true);
-    try {
-      let result;
-      switch (action) {
-        case 'pause':
-          result = await apiClient.pausePrint(printer.id);
-          break;
-        case 'resume':
-          result = await apiClient.resumePrint(printer.id);
-          break;
-        case 'cancel':
-          result = await apiClient.cancelPrint(printer.id);
-          break;
-        case 'stop':
-          result = await apiClient.emergencyStop(printer.id);
-          break;
-        case 'firmware-restart':
-          result = await apiClient.firmwareRestart(printer.id);
-          break;
-        case 'disable-motors':
-          result = await apiClient.disableMotors(printer.id);
-          break;
-      }
-      if (result && !result.success) {
-        console.error(`Failed to ${action}:`, result.error);
-      }
-    } catch (error) {
-      console.error(`Error performing ${action}:`, error);
-    } finally {
-      setControlActionPending(false);
-    }
-  };
-
-  const handleFilamentAction = async (action: 'load' | 'unload') => {
-    if (filamentActionPending) {
-      return;
-    }
-
-    setFilamentActionPending(true);
-    try {
-      const methodMap = {
-        load: () => apiClient.loadFilament(printer.id),
-        unload: () => apiClient.unloadFilament(printer.id),
-      };
-      const result = await methodMap[action]();
-      if (!result.success) {
-        console.error(`Failed to ${action} filament:`, result.error);
-        toast.error(result.error || result.message || `Failed to ${action} filament`);
-      }
-    } catch (error) {
-      console.error(`Error during filament ${action}:`, error);
-      toast.error(mutationErrorMessage(error, `Failed to ${action} filament`));
-    } finally {
-      setFilamentActionPending(false);
-    }
-  };
-
-  // Printer-level LOAD/UNLOAD_FILAMENT macros, surfaced in the materials slot panel.
-  const filamentControl: FilamentMacroControl | undefined = support.supportsFilamentControl
-    ? {
-      blockedReason: filamentControlBlockedReason({ isOnline, isEnabled, isPrinting }),
-      pending: filamentActionPending,
-      supportsLoad: backendCapabilities?.supportsFilamentLoad,
-      supportsUnload: backendCapabilities?.supportsFilamentUnload,
-      onAction: (action) => void handleFilamentAction(action),
-    }
-    : undefined;
   const showExternalSpool = displayPrinter?.showExternalSpool ?? printerDetails?.showExternalSpool ?? false;
-
-  const handleExtrude = async (direction: 'extrude' | 'retract') => {
-    if (movementActionPending) return;
-
-    setMovementActionPending(true);
-    try {
-      const distance = direction === 'extrude' ? extrudeStep : -extrudeStep;
-      const feedrate = extrudeSpeed * 60; // mm/s to mm/min
-      const result = await apiClient.extrudeFilament(
-        printer.id,
-        distance,
-        feedrate
-      );
-      if (!result.success) {
-        console.error(`Failed to ${direction}:`, result.error);
-        toast.error(result.error || result.message || `Failed to ${direction}`);
-      }
-    } catch (error) {
-      console.error(`Error ${direction}ing:`, error);
-      toast.error(mutationErrorMessage(error, `Failed to ${direction}`));
-    } finally {
-      setMovementActionPending(false);
-    }
-  };
-
-  const handleApplyPreset = async (preset: string) => {
-    if (temperatureActionPending || (preset.toLowerCase() !== 'cooldown' && (isPrinting || isPaused))) {
-      return;
-    }
-
-    setTemperatureActionPending(true);
-    try {
-      const targets = preset.toLowerCase() === 'cooldown'
-        ? { hotend: 0, bed: 0 }
-        : getPresetTargets(preset);
-
-      if (!targets) {
-        console.warn(`Unknown preset: ${preset}`);
-        return;
-      }
-      const limitError = preset.toLowerCase() === 'cooldown' && backendCapabilities?.supportsHeaterShutdown
-        ? undefined : temperatureTargetLimitError(targets, displayPrinter?.sensors, printerDetails?.capabilities, activeExtruderId);
-      if (limitError) {
-        toast.error(limitError);
-        return;
-      }
-
-      const result = preset.toLowerCase() === 'cooldown' && backendCapabilities?.supportsHeaterShutdown
-        ? await apiClient.turnOffHeaters(printer.id)
-        : await apiClient.setTemperatures(printer.id, targets);
-
-      if (!result.success) {
-        console.error(`Failed to apply ${preset} preset:`, result.error);
-        toast.error(result.error || result.message || `Failed to apply ${preset} preset`);
-      }
-    } catch (error) {
-      console.error(`Error applying ${preset} preset:`, error);
-      toast.error(mutationErrorMessage(error, `Failed to apply ${preset} preset`));
-    } finally {
-      setTemperatureActionPending(false);
-    }
-  };
-
-  const handleApplySingleHeaterPreset = async (heater: 'hotend' | 'bed', preset: string) => {
-    if (temperatureActionPending || isPrinting || isPaused) {
-      return;
-    }
-
-    const presetTargets = getPresetTargets(preset);
-    if (!presetTargets) {
-      console.warn(`Unknown preset: ${preset}`);
-      return;
-    }
-
-    const targets = { [heater]: presetTargets[heater] };
-    const limitError = temperatureTargetLimitError(targets, displayPrinter?.sensors, printerDetails?.capabilities, activeExtruderId);
-    if (limitError) {
-      toast.error(limitError);
-      return;
-    }
-
-    setTemperatureActionPending(true);
-    try {
-      const result = await apiClient.setTemperatures(printer.id, targets);
-      if (!result.success) {
-        console.error(`Failed to apply ${heater} preset:`, result.error);
-        toast.error(result.error || result.message || `Failed to apply ${heater} preset`);
-      }
-    } catch (error) {
-      console.error(`Error applying ${heater} preset:`, error);
-      toast.error(mutationErrorMessage(error, `Failed to apply ${heater} preset`));
-    } finally {
-      setTemperatureActionPending(false);
-    }
-  };
 
   return (
     <div
@@ -743,6 +442,9 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             </div>
             <p className="text-xs text-pf-text-secondary">{formatPrinterModelSubtitle(printer.manufacturerName, printer.modelName)}</p>
             <p className="text-xs text-pf-text-secondary mt-1">Live printer controls and status</p>
+            <div className="mt-2">
+              <PrinterServiceStatus printer={printer} onToggleEnabled={onToggleEnabled} />
+            </div>
           </div>
           <Button
             type="button"
@@ -878,39 +580,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         >
           <div className="flex gap-4 items-start">
             {/* Control buttons */}
-            <div className="flex flex-col gap-1">
-              <div className="text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide">Control</div>
-              <div className="grid grid-cols-3 gap-1 w-fit">
-                <ControlPadButton
-                  disabled={controlActionPending || !canPauseOrResumeNow}
-                  onClick={() => handleControlAction(isPaused ? 'resume' : 'pause')}
-                  title={isPaused ? 'Resume print' : 'Pause print'}
-                  aria-label={isPaused ? 'Resume print' : 'Pause print'}
-                  padSize="small"
-                >
-                  {isPaused ? <PlayIcon className="h-4 w-4" /> : <PauseIcon className="h-4 w-4" />}
-                </ControlPadButton>
-                <ControlPadButton
-                  disabled={controlActionPending || !canCancelNow}
-                  onClick={() => handleControlAction('cancel')}
-                  title="Cancel print"
-                  aria-label="Cancel print"
-                  padSize="small"
-                >
-                  <XCircleIcon className="h-4 w-4" ariaLabel="Cancel" />
-                </ControlPadButton>
-                <ControlPadButton
-                  variant={isShutdown ? 'secondary' : 'danger'}
-                  disabled={controlActionPending || !canEmergencyStopNow}
-                  onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
-                  title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
-                  aria-label={isShutdown ? 'Firmware Restart' : 'Emergency Stop'}
-                  padSize="small"
-                >
-                  {isShutdown ? <RefreshIcon className="h-4 w-4" /> : <EmergencyStopIcon className="h-4 w-4" />}
-                </ControlPadButton>
-              </div>
-            </div>
+            <PrinterActionBar layout="sidebar" {...controls.actionBarProps} />
 
             {/* Quick Access buttons */}
             <div className="flex flex-col gap-1">
@@ -1008,189 +678,13 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           onToggle={setIsMoveExpanded}
           hideExpandedTitle
         >
-          <div className="flex flex-wrap gap-4 items-start">
-            {/* XY + Z Pad */}
-            <div className="flex flex-col gap-1">
-              <div className="text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide">Move</div>
-              <div className="flex gap-2 items-start">
-            <div className="grid grid-cols-3 grid-rows-3 gap-1 w-fit">
-              {/* Top row */}
-              <MotionControlButton
-                disabled={movementActionPending || !canMoveNow || backendCapabilities?.supportsHoming === false}
-                onClick={() => handleHome('all')}
-                title="Home all axes"
-                padSize="small"
-                className={getHomeButtonStyle(isHomedStateKnown, isAllHomed).className}
-                style={getHomeButtonStyle(isHomedStateKnown, isAllHomed).style}
-              >
-                <HomeIcon className="h-4 w-4" />
-              </MotionControlButton>
-              <MotionControlButton
-                disabled={movementActionPending || !canMoveNow}
-                onClick={() => handleMove('Y', step)}
-                aria-label="Jog Y positive"
-                padSize="small"
-              >
-                <ArrowUpIcon className="h-4 w-4" />
-              </MotionControlButton>
-              <ControlPadButton
-                disabled={controlActionPending || !canDisableMotorsNow}
-                onClick={() => handleControlAction('disable-motors')}
-                title="Disable Motors (M84)"
-                padSize="small"
-              >
-                <DisableMotorsIcon className="h-4 w-4" />
-              </ControlPadButton>
-
-              {/* Middle row */}
-              <MotionControlButton
-                disabled={movementActionPending || !canMoveNow}
-                onClick={() => handleMove('X', -step)}
-                aria-label="Jog X negative"
-                padSize="small"
-              >
-                <ArrowLeftIcon className="h-4 w-4" />
-              </MotionControlButton>
-              <MotionControlButton
-                disabled={movementActionPending || !canMoveNow || backendCapabilities?.supportsHomingXY === false}
-                onClick={() => handleHome('xy')}
-                title="Home X/Y"
-                padSize="small"
-                className={getHomeButtonStyle(isHomedStateKnown, isXYHomed).className}
-                style={getHomeButtonStyle(isHomedStateKnown, isXYHomed).style}
-              >
-                <HomeIcon className="h-4 w-4" />
-              </MotionControlButton>
-              <MotionControlButton
-                disabled={movementActionPending || !canMoveNow}
-                onClick={() => handleMove('X', step)}
-                aria-label="Jog X positive"
-                padSize="small"
-              >
-                <ArrowRightIcon className="h-4 w-4" />
-              </MotionControlButton>
-
-              {/* Bottom row */}
-              <div></div>
-              <MotionControlButton
-                disabled={movementActionPending || !canMoveNow}
-                onClick={() => handleMove('Y', -step)}
-                aria-label="Jog Y negative"
-                padSize="small"
-              >
-                <ArrowDownIcon className="h-4 w-4" />
-              </MotionControlButton>
-              <div></div>
-            </div>
-
-            {/* Z Pad */}
-            <div className="grid grid-cols-1 grid-rows-3 gap-1 w-fit">
-              <MotionControlButton
-                disabled={movementActionPending || !canMoveNow}
-                onClick={() => handleMove('Z', step)}
-                aria-label="Jog Z positive"
-                padSize="small"
-              >
-                Z+
-              </MotionControlButton>
-              <MotionControlButton
-                disabled={movementActionPending || !canMoveNow || backendCapabilities?.supportsHomingZ === false}
-                onClick={() => handleHome('z')}
-                title="Home Z"
-                padSize="small"
-                className={getHomeButtonStyle(isHomedStateKnown, isZHomed).className}
-                style={getHomeButtonStyle(isHomedStateKnown, isZHomed).style}
-              >
-                <HomeIcon className="h-4 w-4" />
-              </MotionControlButton>
-              <MotionControlButton
-                disabled={movementActionPending || !canMoveNow}
-                onClick={() => handleMove('Z', -step)}
-                aria-label="Jog Z negative"
-                padSize="small"
-              >
-                Z-
-              </MotionControlButton>
-            </div>
-
-            {/* Extrude Pad - vertical sliders flanking E+/E- buttons */}
-            <div className="flex gap-1.5 items-center">
-              {/* Length vertical slider */}
-              <div className="flex flex-col items-center gap-0.5">
-                <span className="text-[8px] text-pf-text-tertiary uppercase leading-none">len</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={EXTRUDE_DISTANCE_OPTIONS.length - 1}
-                  step={1}
-                  value={(EXTRUDE_DISTANCE_OPTIONS as readonly number[]).indexOf(extrudeStep) >= 0 ? (EXTRUDE_DISTANCE_OPTIONS as readonly number[]).indexOf(extrudeStep) : 0}
-                  onChange={(e) => setExtrudeStep(EXTRUDE_DISTANCE_OPTIONS[Number(e.target.value)])}
-                  disabled={!canExtrudeNow}
-                  className="h-20 w-4 accent-pf-accent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed [writing-mode:vertical-lr] [direction:rtl]"
-                  aria-label="Extrude distance"
-                />
-                <span className="text-[9px] font-bold text-pf-text-primary tabular-nums leading-none">{extrudeStep}mm</span>
-              </div>
-
-              {/* E+ / E- buttons */}
-              <div className="flex flex-col gap-1 w-fit">
-                <ControlPadButton
-                  disabled={movementActionPending || !canExtrudeNow}
-                  onClick={() => handleExtrude('extrude')}
-                  title="Extrude filament"
-                  aria-label={`Extrude ${extrudeStep}mm at ${extrudeSpeed}mm/s`}
-                  padSize="small"
-                >
-                  E+
-                </ControlPadButton>
-                <div className="h-8 w-8" />
-                <ControlPadButton
-                  disabled={movementActionPending || !canExtrudeNow}
-                  onClick={() => handleExtrude('retract')}
-                  title="Retract filament"
-                  aria-label={`Retract ${extrudeStep}mm at ${extrudeSpeed}mm/s`}
-                  padSize="small"
-                >
-                  E-
-                </ControlPadButton>
-              </div>
-
-              {/* Speed vertical slider */}
-              <div className="flex flex-col items-center gap-0.5">
-                <span className="text-[8px] text-pf-text-tertiary uppercase leading-none">spd</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={EXTRUDE_SPEED_OPTIONS.length - 1}
-                  step={1}
-                  value={(EXTRUDE_SPEED_OPTIONS as readonly number[]).indexOf(extrudeSpeed) >= 0 ? (EXTRUDE_SPEED_OPTIONS as readonly number[]).indexOf(extrudeSpeed) : 0}
-                  onChange={(e) => setExtrudeSpeed(EXTRUDE_SPEED_OPTIONS[Number(e.target.value)])}
-                  disabled={!canExtrudeNow}
-                  className="h-20 w-4 accent-pf-accent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed [writing-mode:vertical-lr] [direction:rtl]"
-                  aria-label="Extrude speed"
-                />
-                <span className="text-[9px] font-bold text-pf-text-primary tabular-nums leading-none">{extrudeSpeed}mm/s</span>
-              </div>
-            </div>
-
-            </div>
-            </div>
-          </div>
-          {/* Move distance slider */}
-          <div className="my-4">
-            <div className="text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide mb-1">Step Size</div>
-            <MoveDistanceSlider value={step} onChange={setStep} disabled={!canSetStepNow} />
-          </div>
-          <PrinterCoordinateRow
-            values={{ X: moveX, Y: moveY, Z: moveZ }}
-            positions={{ X: lastKnownX, Y: lastKnownY, Z: lastKnownZ }}
-            homedAxes={homedAxesRaw}
-            onChange={(axis, value) => ({ X: setMoveX, Y: setMoveY, Z: setMoveZ })[axis](value)}
-            disabled={movementActionPending || !canManualMoveNow}
-            onMove={handleMove}
-            onMoveTo={backendCapabilities?.supportsAbsoluteMovement === true ? handleMoveTo : undefined}
+          <MovementControlSection
+            {...controls.movementProps}
+            layout="sidebar"
+            printerX={lastKnownX}
+            printerY={lastKnownY}
+            printerZ={lastKnownZ}
           />
-          <PrinterMotionHelp />
         </CollapsibleSection>
 
         {/* Temperatures Section */}
@@ -1203,11 +697,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           isOnline={isOnline}
         >
           {additionalRows => <TemperatureControlSection
+            {...controls.temperatureProps}
             printerId={printer.id}
-            activeExtruderId={activeExtruderId}
-            presetsDisabled={isPrinting || isPaused}
-            isOnline={isOnline}
-            sensors={displayPrinter?.sensors}
             showHeading={false}
             additionalRows={additionalRows}
             hotendTarget={displayPrinter?.hotendTarget}
@@ -1215,17 +706,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             hotendCurrent={hasMoonrakerSensorSnapshot ? displayPrinter?.hotendTemp : displayPrinter?.hotendTemp ?? lastKnownHotendTemp ?? undefined}
             bedCurrent={hasMoonrakerSensorSnapshot ? displayPrinter?.bedTemp : displayPrinter?.bedTemp ?? lastKnownBedTemp ?? undefined}
             reportedTemperatures={displayPrinter ?? {}}
-            maxHotendTemp={printerDetails?.capabilities?.maxHotendTemp}
-            maxBedTemp={printerDetails?.capabilities?.maxBedTemp}
-            temperatureActionPending={temperatureActionPending}
-            canSetTemperatures={canSetTemperaturesNow}
-            canCooldown={canCooldownNow}
-            onApplyPreset={(preset) => {
-              void handleApplyPreset(preset);
-            }}
-            onApplySingleHeaterPreset={(heater, preset) => {
-              void handleApplySingleHeaterPreset(heater, preset);
-            }}
           />}
         </PrinterSensorsSection>
 
@@ -1355,6 +835,9 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             </CollapsibleSection>
           );
         })()}
+        <CollapsibleSection title="Camera bed-clear evidence" defaultExpanded={false}>
+          <BedClearEvidencePanel printerId={printer.id} />
+        </CollapsibleSection>
         {window.PrintFarmerDebug?.expandablePrinterCardDisplay && (
           <div className="mt-3 p-2 bg-pf-bg-0 border border-pf-border rounded-sm text-xs text-pf-text-tertiary">
             {renderUnknown({ status, lastKnownHotendTemp, lastKnownBedTemp, lastKnownX, lastKnownY, lastKnownZ })}
@@ -1375,6 +858,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         onClose={() => setShowFiles(false)}
         printer={printer}
       />
+
+      <CancelPrintConfirmation {...controls.cancelConfirmation} />
 
       <Modal
         isOpen={objectToSkip !== null && support.supportsObjectExclusion && isActivePrintForObjectQuery}

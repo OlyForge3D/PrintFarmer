@@ -28,9 +28,10 @@ const mockPrinters = [
   { id: 'printer-2', name: 'Voron 2.4', isOnline: true, backend: 'Moonraker', backendUrl: 'http://voron' },
   { id: 'printer-3', name: 'Offline Ender', isOnline: false, backend: 'Moonraker', backendUrl: 'http://ender' },
 ];
+let printerQuery = { data: mockPrinters, isLoading: false, isError: false };
 
 vi.mock('@/common/hooks/useApi', () => ({
-  usePrintersFast: () => ({ data: mockPrinters, isLoading: false }),
+  usePrintersFast: () => printerQuery,
 }));
 
 function createWrapper() {
@@ -62,6 +63,7 @@ function renderModal(props: Partial<React.ComponentProps<typeof SendToPrinterMod
 describe('SendToPrinterModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    printerQuery = { data: mockPrinters, isLoading: false, isError: false };
   });
 
   it('renders printer selector with online printers only', () => {
@@ -75,16 +77,18 @@ describe('SendToPrinterModal', () => {
 
   it('disables submit when no printer is selected', () => {
     renderModal();
+    fireEvent.click(screen.getByRole('radio', { name: /upload file only/i }));
 
-    const sendButton = screen.getByRole('button', { name: /send to printer/i });
+    const sendButton = screen.getByRole('button', { name: /upload file only/i });
     expect(sendButton).toBeDisabled();
   });
 
   it('enables submit when a printer is selected', () => {
     renderModal();
+    fireEvent.click(screen.getByRole('radio', { name: /upload file only/i }));
 
     fireEvent.change(screen.getByLabelText('Select printer'), { target: { value: 'printer-1' } });
-    const sendButton = screen.getByRole('button', { name: /send to printer/i });
+    const sendButton = screen.getByRole('button', { name: /upload file only/i });
     expect(sendButton).toBeEnabled();
   });
 
@@ -98,9 +102,10 @@ describe('SendToPrinterModal', () => {
     });
 
     renderModal();
+    fireEvent.click(screen.getByRole('radio', { name: /upload file only/i }));
 
     fireEvent.change(screen.getByLabelText('Select printer'), { target: { value: 'printer-1' } });
-    fireEvent.click(screen.getByRole('button', { name: /send to printer/i }));
+    fireEvent.click(screen.getByRole('button', { name: /upload file only/i }));
 
     await waitFor(() => {
       expect(mockSendToPrinter).toHaveBeenCalledWith(
@@ -122,10 +127,11 @@ describe('SendToPrinterModal', () => {
     });
 
     renderModal();
+    fireEvent.click(screen.getByRole('radio', { name: /upload file only/i }));
 
     fireEvent.change(screen.getByLabelText('Select printer'), { target: { value: 'printer-2' } });
     fireEvent.click(screen.getByText('Start printing immediately'));
-    fireEvent.click(screen.getByRole('button', { name: /send to printer/i }));
+    fireEvent.click(screen.getByRole('button', { name: /upload file only/i }));
 
     await waitFor(() => {
       expect(mockSendToPrinter).toHaveBeenCalledWith(
@@ -148,9 +154,10 @@ describe('SendToPrinterModal', () => {
     });
 
     renderModal({ onClose });
+    fireEvent.click(screen.getByRole('radio', { name: /upload file only/i }));
 
     fireEvent.change(screen.getByLabelText('Select printer'), { target: { value: 'printer-1' } });
-    fireEvent.click(screen.getByRole('button', { name: /send to printer/i }));
+    fireEvent.click(screen.getByRole('button', { name: /upload file only/i }));
 
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith('Sent benchy.gcode to Prusa MK4');
@@ -162,9 +169,10 @@ describe('SendToPrinterModal', () => {
     mockSendToPrinter.mockRejectedValue(new Error('Upload failed'));
 
     renderModal();
+    fireEvent.click(screen.getByRole('radio', { name: /upload file only/i }));
 
     fireEvent.change(screen.getByLabelText('Select printer'), { target: { value: 'printer-1' } });
-    fireEvent.click(screen.getByRole('button', { name: /send to printer/i }));
+    fireEvent.click(screen.getByRole('button', { name: /upload file only/i }));
 
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith('Failed to send to printer: Upload failed');
@@ -178,20 +186,108 @@ describe('SendToPrinterModal', () => {
   });
 
   describe('mode chooser', () => {
-    it('shows both Send to Printer and Add to Queue mode buttons', () => {
+    it('shows both Upload file only and Add to Queue mode buttons', () => {
       renderModal();
-      expect(screen.getByRole('radio', { name: /send to printer/i })).toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: /upload file only/i })).toBeInTheDocument();
       expect(screen.getByRole('radio', { name: /add to queue/i })).toBeInTheDocument();
     });
 
-    it('defaults to Send to Printer mode', () => {
+    it('defaults to Add to Queue without submitting or starting anything', () => {
       renderModal();
-      const directBtn = screen.getByRole('radio', { name: /send to printer/i });
-      expect(directBtn).toHaveAttribute('aria-checked', 'true');
+      expect(screen.getByRole('radio', { name: /add to queue/i })).toHaveAttribute('aria-checked', 'true');
+      expect(mockSendToPrinter).not.toHaveBeenCalled();
+      expect(mockAddSliceToQueue).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('radio', { name: /upload file only/i }));
+      expect(screen.getByText(/without creating a PrintFarmer job/)).toBeInTheDocument();
+      expect(screen.getByLabelText('Start printing immediately')).not.toBeChecked();
     });
   });
 
   describe('Add to Queue mode', () => {
+    it('preselects the sliced-for printer and submits it to the queue', async () => {
+      mockAddSliceToQueue.mockResolvedValue({ printJobId: 'pj-1', queuePosition: 1 });
+      renderModal({ defaultPrinterId: 'printer-2' });
+      expect(screen.getByLabelText('Select printer')).toHaveValue('printer-2');
+      fireEvent.click(screen.getByRole('button', { name: /add to queue/i }));
+      await waitFor(() => expect(mockAddSliceToQueue).toHaveBeenCalledWith(
+        'job-123', expect.objectContaining({ assignedPrinterId: 'printer-2' }),
+      ));
+      expect(mockSendToPrinter).not.toHaveBeenCalled();
+    });
+
+    it('allows an explicit auto-assign override', async () => {
+      mockAddSliceToQueue.mockResolvedValue({ printJobId: 'pj-1' });
+      renderModal({ defaultPrinterId: 'printer-1' });
+      fireEvent.change(screen.getByLabelText('Select printer'), { target: { value: '' } });
+      expect(screen.getByRole('option', { name: 'Any compatible printer (auto-assign)' })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /add to queue/i }));
+      await waitFor(() => expect(mockAddSliceToQueue).toHaveBeenCalledWith(
+        'job-123', expect.objectContaining({ assignedPrinterId: null }),
+      ));
+    });
+
+    it('keeps manual selection across modes and submits upload with start off', async () => {
+      mockSendToPrinter.mockResolvedValue({ fileName: 'model.gcode' });
+      renderModal({ defaultPrinterId: 'printer-1' });
+      fireEvent.change(screen.getByLabelText('Select printer'), { target: { value: 'printer-2' } });
+      fireEvent.click(screen.getByRole('radio', { name: /upload file only/i }));
+      expect(screen.getByLabelText('Select printer')).toHaveValue('printer-2');
+      fireEvent.click(screen.getByRole('radio', { name: /add to queue/i }));
+      expect(screen.getByLabelText('Select printer')).toHaveValue('printer-2');
+      fireEvent.click(screen.getByRole('radio', { name: /upload file only/i }));
+      fireEvent.click(screen.getByRole('button', { name: /upload file only/i }));
+      await waitFor(() => expect(mockSendToPrinter).toHaveBeenCalledWith(
+        'job-123', 'artifact-selected', 'printer-2', false,
+      ));
+    });
+
+    it.each(['printer-3', 'deleted-printer'])('never substitutes unavailable printer %s', (defaultPrinterId) => {
+      renderModal({ defaultPrinterId });
+      expect(screen.getByLabelText('Select printer')).toHaveValue(defaultPrinterId);
+      expect(screen.getByRole('alert')).toHaveTextContent(/offline or unavailable/);
+      expect(screen.getByRole('button', { name: /add to queue/i })).toBeDisabled();
+      fireEvent.click(screen.getByRole('radio', { name: /upload file only/i }));
+      expect(screen.getByRole('button', { name: /upload file only/i })).toBeDisabled();
+      expect(mockSendToPrinter).not.toHaveBeenCalled();
+      expect(mockAddSliceToQueue).not.toHaveBeenCalled();
+    });
+
+    it('retains the default while printers load and enables only after resolution', () => {
+      printerQuery = { data: [], isLoading: true, isError: false };
+      const { rerender, props } = renderModal({ defaultPrinterId: 'printer-2' });
+      expect(screen.getByLabelText('Select printer')).toHaveValue('printer-2');
+      expect(screen.getByRole('button', { name: /add to queue/i })).toBeDisabled();
+      printerQuery = { data: mockPrinters, isLoading: false, isError: false };
+      rerender(<SendToPrinterModal {...props} />);
+      expect(screen.getByLabelText('Select printer')).toHaveValue('printer-2');
+      expect(screen.getByRole('button', { name: /add to queue/i })).toBeEnabled();
+    });
+
+    it('blocks submission after an offline refetch or a query error', () => {
+      const { rerender, props } = renderModal({ defaultPrinterId: 'printer-1' });
+      printerQuery = { data: mockPrinters.map(p => ({ ...p, isOnline: false })), isLoading: false, isError: false };
+      rerender(<SendToPrinterModal {...props} />);
+      expect(screen.getByLabelText('Select printer')).toHaveValue('printer-1');
+      expect(screen.getByRole('button', { name: /add to queue/i })).toBeDisabled();
+      printerQuery = { data: mockPrinters, isLoading: false, isError: true };
+      rerender(<SendToPrinterModal {...props} />);
+      expect(screen.getByRole('alert')).toHaveTextContent('Unable to load printers');
+      expect(screen.getByRole('button', { name: /add to queue/i })).toBeDisabled();
+    });
+
+    it('resets on a different job and on close/reopen, not on unrelated prop changes', () => {
+      const { rerender, props } = renderModal({ defaultPrinterId: 'printer-1' });
+      fireEvent.change(screen.getByLabelText('Select printer'), { target: { value: 'printer-2' } });
+      rerender(<SendToPrinterModal {...props} requiredMaterialType="PETG" />);
+      expect(screen.getByLabelText('Select printer')).toHaveValue('printer-2');
+      rerender(<SendToPrinterModal {...props} jobId="older-job" defaultPrinterId="printer-1" />);
+      expect(screen.getByLabelText('Select printer')).toHaveValue('printer-1');
+      fireEvent.change(screen.getByLabelText('Select printer'), { target: { value: 'printer-2' } });
+      rerender(<SendToPrinterModal {...props} isOpen={false} />);
+      rerender(<SendToPrinterModal {...props} />);
+      expect(screen.getByLabelText('Select printer')).toHaveValue('printer-1');
+    });
+
     it('uses the canonical promote-first queue contract and refreshes queue queries', async () => {
       mockAddSliceToQueue.mockResolvedValue({
         printJobId: 'pj-1',
@@ -209,6 +305,7 @@ describe('SendToPrinterModal', () => {
       await waitFor(() => {
         expect(mockAddSliceToQueue).toHaveBeenCalledWith('job-123', expect.objectContaining({
           artifactId: 'artifact-selected',
+          assignedPrinterId: null,
           priority: 'Normal',
           copies: 1,
           spoolId: 42,
@@ -277,7 +374,7 @@ describe('SendToPrinterModal', () => {
 
       fireEvent.click(screen.getByRole('radio', { name: /add to queue/i }));
 
-      expect(screen.getByText(/MK4/)).toBeInTheDocument();
+      expect(screen.getByText(/MK4/, { selector: 'span' })).toBeInTheDocument();
       expect(screen.getByText(/PETG/)).toBeInTheDocument();
       expect(screen.getByText(/0.6mm nozzle/)).toBeInTheDocument();
     });

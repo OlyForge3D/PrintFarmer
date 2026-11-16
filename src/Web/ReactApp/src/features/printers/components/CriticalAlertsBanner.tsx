@@ -164,7 +164,7 @@ export function CriticalAlertsBanner() {
           <Button
             variant="unstyled"
             onClick={() => setDismissed((prev) => new Set(prev).add(item.id))}
-            className="text-xs opacity-60 hover:opacity-100 transition-opacity"
+            className="text-xs text-pf-text-primary transition-opacity"
             aria-label={`Dismiss ${item.message}`}
           >
             Dismiss

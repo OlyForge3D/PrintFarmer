@@ -127,7 +127,7 @@ public class BackendClientFactory : IBackendClientFactory
         if (!_clientTypeMap.TryGetValue(backend, out Type? clientType))
         {
             _logger.LogError("✗ Unsupported printer backend requested: {Backend}. Available backends: {StringJoin}", backend, string.Join(", ", _clientTypeMap.Keys));
-            throw new ArgumentException($"Unsupported printer backend: {backend}", nameof(backend));
+            throw new UnsupportedBackendClientException($"Unsupported printer backend: {backend}", nameof(backend));
         }
 
         try
@@ -141,13 +141,13 @@ public class BackendClientFactory : IBackendClientFactory
             if (client == null)
             {
                 _logger.LogError("✗ Failed to resolve backend client for {Backend} (type: {ClientTypeName}). rawService was: {FullName}", backend, clientType.Name, rawService?.GetType().FullName ?? "NULL");
-                throw new InvalidOperationException($"Could not resolve backend client for backend {backend} (type: {clientType.Name}). Ensure you are calling this from within a scoped context (e.g., from a scoped service or HTTP request). The plugin may not have registered it correctly.");
+                throw new BackendClientNotRegisteredException($"Could not resolve backend client for backend {backend} (type: {clientType.Name}). Ensure you are calling this from within a scoped context (e.g., from a scoped service or HTTP request). The plugin may not have registered it correctly.");
             }
 
             _logger.LogDebug("✓ Resolved backend client for {Backend}: {ClientTypeName}", backend, clientType.Name);
             return client;
         }
-        catch (Exception ex) when (ex is not ArgumentException and not InvalidOperationException)
+        catch (Exception ex) when (ex is not ArgumentException and not InvalidOperationException and not OperationCanceledException)
         {
             _logger.LogError("✗ Error resolving backend client for {Backend} (type: {ClientTypeName}): {Message}", backend, clientType.Name, ex.Message);
             throw new InvalidOperationException($"Error resolving backend client for {backend}: {ex.Message}", ex);
@@ -163,5 +163,44 @@ public class BackendClientFactory : IBackendClientFactory
     public bool IsBackendSupported(PrinterBackend backend)
     {
         return _clientTypeMap.ContainsKey(backend);
+    }
+}
+
+internal sealed class UnsupportedBackendClientException : ArgumentException
+{
+    public UnsupportedBackendClientException()
+    {
+    }
+
+    public UnsupportedBackendClientException(string message)
+        : base(message)
+    {
+    }
+
+    public UnsupportedBackendClientException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+
+    public UnsupportedBackendClientException(string message, string paramName)
+        : base(message, paramName)
+    {
+    }
+}
+
+internal sealed class BackendClientNotRegisteredException : InvalidOperationException
+{
+    public BackendClientNotRegisteredException()
+    {
+    }
+
+    public BackendClientNotRegisteredException(string message)
+        : base(message)
+    {
+    }
+
+    public BackendClientNotRegisteredException(string message, Exception innerException)
+        : base(message, innerException)
+    {
     }
 }

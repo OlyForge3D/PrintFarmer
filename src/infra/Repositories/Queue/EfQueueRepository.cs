@@ -39,6 +39,35 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
 {
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
 
+    /// <inheritdoc/>
+    public async Task<List<IdleWindowJobInput>> GetIdleWindowJobInputsAsync(IReadOnlyCollection<Guid> printerIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(printerIds);
+        ct.ThrowIfCancellationRequested();
+        List<IdleWindowJobInput> inputs = [];
+
+        // Below both SQLite's legacy 999-variable limit and SQL Server's 2100-parameter limit.
+        foreach (Guid[] chunk in printerIds.Distinct().Chunk(500))
+        {
+            ct.ThrowIfCancellationRequested();
+            List<IdleWindowJobInput> rows = await _db.PrintJobs
+                .AsNoTracking()
+                .Where(j => j.AssignedPrinterId != null && chunk.Contains(j.AssignedPrinterId.Value))
+                .Where(j => PrintJobOccupancy.Statuses.Contains(j.Status)
+                    || j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned)
+                .OrderBy(j => PrintJobOccupancy.Statuses.Contains(j.Status) ? 0 : 1)
+                .ThenByDescending(j => j.Priority)
+                .ThenBy(j => j.QueuedAt)
+                .Select(j => new IdleWindowJobInput(
+                    j.Id, j.AssignedPrinterId, j.Status, j.Priority, j.QueuePosition, j.QueuedAt))
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            inputs.AddRange(rows);
+        }
+
+        return inputs;
+    }
+
     /// <summary>
     /// Retrieves all print jobs from the database.
     /// </summary>
@@ -132,19 +161,38 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
     /// <returns>List of compatible printers with model and toolhead information</returns>
     public async Task<List<Printer>> GetCompatiblePrintersAsync(string modelNameOrAlias, CancellationToken ct)
     {
+        return await GetPrintersMatchingModelAsync(modelNameOrAlias, true, ct);
+    }
+
+    /// <summary>
+    /// Retrieves printers matching the specified model name or alias regardless of availability.
+    /// </summary>
+    public async Task<List<Printer>> GetPrintersMatchingModelAsync(string modelNameOrAlias, CancellationToken ct)
+    {
+        return await GetPrintersMatchingModelAsync(modelNameOrAlias, false, ct);
+    }
+
+    private async Task<List<Printer>> GetPrintersMatchingModelAsync(
+        string modelNameOrAlias,
+        bool availableOnly,
+        CancellationToken ct)
+    {
         // Normalize the search term for comparison
         string normalizedSearch = NormalizeModelName(modelNameOrAlias);
 
-        // Get all available printers with their models, aliases, and toolhead details (including nozzle)
-        List<Printer> allPrinters = await _db.Printers
+        // Load models, aliases, and toolhead details (including nozzle) for consistent matching.
+        IQueryable<Printer> query = _db.Printers
             .Include(p => p.Model)
                 .ThenInclude(m => m!.Aliases)
             .Include(p => p.Toolheads)
                 .ThenInclude(t => t.NozzleModel)
-                    .ThenInclude(n => n!.NozzleMaterial)
-            .AsSplitQuery()
-            .Where(p => p.IsAvailable)
-            .ToListAsync(ct);
+                    .ThenInclude(n => n!.NozzleMaterial);
+        if (availableOnly)
+        {
+            query = query.Where(p => p.IsAvailable);
+        }
+
+        List<Printer> allPrinters = await query.AsSplitQuery().ToListAsync(ct);
 
         // Filter in-memory for flexible matching (EF Core can't translate complex string normalization)
         return allPrinters.Where(p =>

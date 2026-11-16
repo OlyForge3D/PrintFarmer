@@ -234,10 +234,9 @@ export function WorkspaceSearchResults({ initialQuery, onQueryChange, onQueryCom
   return (
     <div className={clsx('relative w-full max-w-xs', className)}>
       <div className="relative">
-        <SearchIcon
-          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-pf-text-tertiary"
-          ariaLabel=""
-        />
+        <span aria-hidden="true">
+          <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-pf-text-tertiary" />
+        </span>
         <Input
           ref={inputRef}
           value={query}

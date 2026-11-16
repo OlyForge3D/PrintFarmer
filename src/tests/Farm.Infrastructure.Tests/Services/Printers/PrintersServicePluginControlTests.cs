@@ -14,6 +14,46 @@ namespace Farm.Infrastructure.Tests.Services.Printers;
 
 public sealed class PrintersServicePluginControlTests
 {
+    [Theory]
+    [InlineData("home")]
+    [InlineData("xy")]
+    [InlineData("z")]
+    public async Task HomeAsync_UnsupportedEndpoint_PreservesDefinitiveRejection(string operation)
+    {
+        await using var db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.PrusaLink);
+        var client = new Mock<IBackendClient>();
+        Mock<ISupportsMovement> movement = client.As<ISupportsMovement>();
+        var rejection = new PrinterBackendUnsupportedException("No remote movement endpoint.");
+        movement.Setup(value => value.HomeAsync(printer.BackendUrl, It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>())).ThrowsAsync(rejection);
+        movement.Setup(value => value.HomeXYAsync(printer.BackendUrl, It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>())).ThrowsAsync(rejection);
+        movement.Setup(value => value.HomeZAsync(printer.BackendUrl, It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>())).ThrowsAsync(rejection);
+        PrintersService service = CreateService(db, printer, client.Object);
+
+        await Assert.ThrowsAsync<PrinterBackendUnsupportedException>(() => operation switch
+        {
+            "home" => service.SendHomeAsync(printer.Id, default),
+            "xy" => service.HomeXYAsync(printer.Id, default),
+            _ => service.HomeZAsync(printer.Id, default),
+        });
+        Assert.Single(movement.Invocations);
+    }
+
+    [Fact]
+    public async Task MoveAsync_UnsupportedEndpoint_ReturnsUnsupportedInsteadOfUnreachable()
+    {
+        await using var db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.PrusaLink);
+        var client = new Mock<IBackendClient>();
+        Mock<ISupportsMovement> movement = client.As<ISupportsMovement>();
+        movement.Setup(value => value.MoveAsync(printer.BackendUrl, 1, null, null, null, It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PrinterBackendUnsupportedException("No remote movement endpoint."));
+        PrintersService service = CreateService(db, printer, client.Object);
+
+        Assert.Equal(PrinterControlOutcome.BackendUnsupported, await service.MoveAsync(printer.Id, 1, null, null, null, default));
+        Assert.Single(movement.Invocations);
+    }
+
     [Fact]
     public async Task EmergencyStopAsync_PluginCancelled_PropagatesCancellationWithoutRetry()
     {

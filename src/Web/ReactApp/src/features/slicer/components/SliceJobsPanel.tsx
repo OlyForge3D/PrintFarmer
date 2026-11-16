@@ -41,7 +41,7 @@ import type { BadgeVariant } from '@/common/components/ui/Badge';
 
 type StatusFilter = 'all' | SliceJobStatus;
 type SaveFeedback = { kind: 'success' | 'error'; message: string };
-type PrintSelection = { jobId: string; artifactId: string };
+type PrintSelection = { jobId: string; artifactId: string; printerId?: string | null };
 
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: 'All Jobs' },
@@ -98,7 +98,7 @@ function hasActiveJobs(jobs: SliceJobStatusResponse[]): boolean {
 
 /**
  * Embeddable slice jobs panel with real-time updates, filtering, and job actions.
- * Used both standalone (SliceJobsPage) and embedded (WorkerManagementPage Jobs tab).
+ * Embedded in the WorkerManagementPage Jobs tab.
  */
 export function SliceJobsPanel() {
   const queryClient = useQueryClient();
@@ -171,7 +171,8 @@ export function SliceJobsPanel() {
   }, [jobs]);
 
   const handleDownloadArtifact = async (jobId: string) => {
-    const artifactsRoute = jobs.find(job => job.id === jobId)?.artifactsRoute;
+    const job = jobs.find(job => job.id === jobId);
+    const artifactsRoute = job?.artifactsRoute;
     if (!artifactsRoute) {
       toast.error('No G-code artifact is available for this job.');
       return;
@@ -230,7 +231,8 @@ export function SliceJobsPanel() {
 
   const handlePrintArtifact = async (jobId: string) => {
     if (printResolutionInFlightRef.current.has(jobId)) return;
-    const artifactsRoute = jobs.find(job => job.id === jobId)?.artifactsRoute;
+    const job = jobs.find(job => job.id === jobId);
+    const artifactsRoute = job?.artifactsRoute;
     if (!artifactsRoute) {
       toast.error('No G-code artifact is available for this job.');
       return;
@@ -243,7 +245,7 @@ export function SliceJobsPanel() {
       if (!artifact) {
         throw new Error('No G-code artifact is available for this job.');
       }
-      setPrintSelection({ jobId, artifactId: artifact.id });
+      setPrintSelection({ jobId, artifactId: artifact.id, printerId: job?.printerId });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to prepare G-code for printing.');
     } finally {
@@ -360,6 +362,7 @@ export function SliceJobsPanel() {
           onClose={() => setPrintSelection(null)}
           jobId={printSelection.jobId}
           artifactId={printSelection.artifactId}
+          defaultPrinterId={printSelection.printerId}
         />
       )}
 

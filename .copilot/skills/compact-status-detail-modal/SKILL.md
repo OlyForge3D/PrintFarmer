@@ -19,7 +19,6 @@ Use this when a dashboard card, preview overlay, or other dense UI surface needs
 
 ## Examples
 - `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringBadge.tsx`
-- `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringOverlay.tsx`
 - `src/Web/ReactApp/src/features/printers/components/FailureDetectionStatusModal.tsx`
 
 ## Anti-Patterns

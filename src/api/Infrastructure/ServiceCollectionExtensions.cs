@@ -229,6 +229,7 @@ public static class ServiceCollectionExtensions
 
         // Optional barcode scan diagnostics
         _ = services.AddScoped<IBarcodeScanLogService, Farm.Infrastructure.Services.Spoolman.BarcodeScanLogService>();
+        _ = services.AddScoped<IScanCodeAliasService, Farm.Infrastructure.Services.Spoolman.ScanCodeAliasService>();
 
         // Auto-dispatch trigger (singleton event bus between scoped services and background service)
         var autoDispatchTrigger = new Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchTrigger();
@@ -237,6 +238,7 @@ public static class ServiceCollectionExtensions
 
         _ = services.Configure<Farm.Infrastructure.Settings.BackendTimeoutSettings>(configuration.GetSection(Farm.Infrastructure.Settings.BackendTimeoutSettings.SectionName));
         _ = services.Configure<Farm.Infrastructure.Settings.ObicoSettings>(configuration.GetSection(Farm.Infrastructure.Settings.ObicoSettings.SectionName));
+        _ = services.Configure<Farm.Infrastructure.Settings.PrintGuardShadowSettings>(configuration.GetSection(Farm.Infrastructure.Settings.PrintGuardShadowSettings.SectionName));
         RegisterBackendClientPlugins(services, configuration);  // Register backend client plugins FIRST - they register HTTP clients
         RegisterHttpClients(services);
         RegisterPrinterServices(services);  // Then register printer services that depend on HTTP clients
@@ -483,8 +485,8 @@ public static class ServiceCollectionExtensions
 
         return new Fido2Configuration
         {
-            ServerDomain = relyingPartyId,
-            ServerName = GetConfigurationValueOrDefault(configuration, "WebAuthn:RelyingPartyName", "PrintFarmer"),
+            RPID = relyingPartyId,
+            RPName = GetConfigurationValueOrDefault(configuration, "WebAuthn:RelyingPartyName", "PrintFarmer"),
             Origins = new HashSet<string>
             {
                 origin,
@@ -659,6 +661,9 @@ public static class ServiceCollectionExtensions
 
         // Register the printer status cache (singleton in Infrastructure - shared across all layers)
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.PrinterStatusCache>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.PrinterMonitoringService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterMonitoringReader>(
+            sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterMonitoringService>());
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusSnapshotReader>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheWriter>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
@@ -709,14 +714,37 @@ public static class ServiceCollectionExtensions
 
         // Register camera snapshot service - captures snapshots on print events
         _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.ICameraSnapshotService, Farm.Infrastructure.Services.Cameras.CameraSnapshotService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.BedClearEvaluationProcessor>();
+        _ = services.AddSingleton<
+            Farm.Infrastructure.Services.Cameras.IBedClearImageHashService,
+            Farm.Web.Api.Services.Cameras.ImageSharpBedClearImageHashService>();
+        _ = services.AddHttpClient("BedClearSnapshot", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(5);
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        {
+            AllowAutoRedirect = false,
+        });
         _ = services.AddHttpClient("CameraSnapshot", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(10);
         });
 
         // Register Obico failure detection service - AI-powered print failure detection
+        _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.ICameraSnapshotCaptureService, Farm.Infrastructure.Services.Cameras.CameraSnapshotCaptureService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.IObicoConnectivityProbe, Farm.Infrastructure.Services.FailureDetection.ObicoConnectivityProbe>();
-        _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.IObicoFailureDetectionService, Farm.Infrastructure.Services.FailureDetection.ObicoFailureDetectionService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.ObicoFailureDetectionService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.IObicoFailureDetectionService>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.FailureDetection.ObicoFailureDetectionService>());
+        _ = services.AddKeyedScoped<Farm.Infrastructure.Services.FailureDetection.IFailureDetectionProvider>(
+            "Obico",
+            (sp, _) => sp.GetRequiredService<Farm.Infrastructure.Services.FailureDetection.ObicoFailureDetectionService>());
+        _ = services.AddHttpClient("PrintGuard", client => client.Timeout = Timeout.InfiniteTimeSpan)
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.PrintGuardFailureDetectionProvider>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.IPrintGuardFailureDetectionProvider>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.FailureDetection.PrintGuardFailureDetectionProvider>());
+        _ = services.AddKeyedScoped<Farm.Infrastructure.Services.FailureDetection.IFailureDetectionProvider>(
+            "PrintGuard",
+            (sp, _) => sp.GetRequiredService<Farm.Infrastructure.Services.FailureDetection.PrintGuardFailureDetectionProvider>());
         _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.IFailureDetectionIncidentHistoryService, Farm.Infrastructure.Services.FailureDetection.FailureDetectionIncidentHistoryService>();
         _ = services.AddSingleton<Farm.Infrastructure.Services.FailureDetection.IFailureDetectionMonitorStatus, Farm.Infrastructure.Services.FailureDetection.FailureDetectionMonitorStatusStore>();
         _ = services.AddSingleton<Farm.Infrastructure.Services.FailureDetection.FailureDetectionMetrics>();
@@ -920,6 +948,9 @@ public static class ServiceCollectionExtensions
             _ = services.AddSingleton<Farm.Infrastructure.Services.Queue.BedClearAcknowledgementExpiryMetrics>();
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.BedClearAcknowledgementExpiryService>();
 
+            // Shadow bed-clear analysis is durable and never part of the dispatch path.
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Cameras.BedClearEvaluationBackgroundService>();
+
             // Durable attempt-fenced cancel/abort hardware command consumer.
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.BackendControlCommandConsumerService>();
 
@@ -937,7 +968,7 @@ public static class ServiceCollectionExtensions
             _ = services.AddSingleton<Farm.Infrastructure.Services.Cameras.IPrinterCameraSyncTrigger>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Cameras.PrinterCameraSyncService>());
             _ = services.AddHostedService(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Cameras.PrinterCameraSyncService>());
 
-            // Print failure monitor - AI-powered failure detection using Obico ML API
+            // Print failure monitor evaluates each configured provider independently.
             _ = services.AddHostedService<Farm.Infrastructure.Services.FailureDetection.PrintFailureMonitorService>();
 
             // Slicer hosted services (WorkerHealthMonitor, JobDispatching,

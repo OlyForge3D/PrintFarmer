@@ -1,7 +1,9 @@
 import { type ReactNode, useEffect, useRef, useState, useCallback, useMemo, useContext } from 'react';
+import { QueryClientContext } from '@tanstack/react-query';
+import { getSettingsSectionPage } from '@/features/settings/subpage-groups';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
-import { isSettingsConflict } from '@/common/utils/apiErrors';
+import { isApiError, isSettingsConflict } from '@/common/utils/apiErrors';
 import { useSettingsFooterSlot } from '@/features/settings/components/settingsFooterSlotContext';
 import { useSearchParams } from 'react-router';
 import clsx from 'clsx';
@@ -73,6 +75,8 @@ interface NavItem {
 
 interface SettingsPageProps {
   allowedGroups?: readonly string[];
+  pageKey?: string;
+  onDirtyChange?: (dirty: boolean) => void;
   introText?: string;
   afterContent?: ReactNode;
 }
@@ -132,8 +136,11 @@ function extractFieldErrors(
   if (typeof err !== 'object' || err === null) return result;
   const maybeObj = err as Record<string, unknown>;
   const resp = maybeObj['response'];
-  if (!resp || typeof resp !== 'object') return result;
-  const data = (resp as Record<string, unknown>)['data'];
+  const data = isApiError(err)
+    ? err.data
+    : resp && typeof resp === 'object'
+      ? (resp as Record<string, unknown>)['data']
+      : undefined;
   if (!data || typeof data !== 'object') return result;
   const dataObj = data as Record<string, unknown>;
   const errorsObj = dataObj['errors'] as Record<string, unknown> | undefined;
@@ -342,6 +349,7 @@ function GroupSaveBlock({
   suppressExtensions,
   searchQuery,
 }: GroupSaveBlockProps) {
+  const queryClient = useContext(QueryClientContext);
   const state = useDirtyState<GroupValues>(initialValues);
   // Scoped to this mounted draft, never shared with another editor or refreshed GET.
   const revisions = useRef(Object.fromEntries(
@@ -453,6 +461,9 @@ function GroupSaveBlock({
           accepted[sectionKey] = { ...savedSection, rowVersion: state.values[sectionKey]?.rowVersion };
         }
         saved.push(sectionKey);
+        if (sectionKey === 'CostTracking' || sectionKey === 'SlicerSettings') {
+          void queryClient?.invalidateQueries({ queryKey: ['settings', 'farm'] });
+        }
       } catch (err) {
         failed.push(meta.displayName || meta.className);
         if (isSettingsConflict(err)) {
@@ -511,7 +522,7 @@ function GroupSaveBlock({
     setFieldErrors({});
     setSectionErrors({});
     return { ok: true, savedLabels: changedSectionKeys.map(labelFor) };
-  }, [metadataItems, state]);
+  }, [metadataItems, queryClient, state]);
 
   // Section display names, in the order the cards render — not in the arbitrary
   // order `changedKeys` happens to produce — so the save bar reads left-to-right
@@ -723,6 +734,7 @@ function GroupSaveBlock({
                     error={sectionErrors[meta.key]}
                     compact
                     searchQuery={query}
+                    fieldRenderers={renderer?.fieldRenderers}
                   />
                   {extensionRender && (
                     <div className="px-4 pt-2">
@@ -743,6 +755,8 @@ function GroupSaveBlock({
 
 export function SettingsPage({
   allowedGroups,
+  pageKey,
+  onDirtyChange,
   introText = 'Configure system-wide defaults for your print farm.',
   afterContent,
 }: SettingsPageProps = {}) {
@@ -1001,7 +1015,8 @@ export function SettingsPage({
 
   const { sortedGroups, metadataByGroup } = useMemo(() => {
     const visibleMetadata = metadata.filter(
-      (item) => !allowedGroupSet || allowedGroupSet.has(item.group || 'Other'),
+      (item) => (!allowedGroupSet || allowedGroupSet.has(item.group || 'Other'))
+        && (!pageKey || getSettingsSectionPage(item.key, item.group || 'Other') === pageKey),
     );
 
     const navItems: NavItem[] = visibleMetadata
@@ -1085,7 +1100,7 @@ export function SettingsPage({
       sortedGroups: sorted,
       metadataByGroup: metaByGroup,
     };
-  }, [allowedGroupSet, attentionGroups, effectiveMode, groupMetadata, isSlicerAvailable, metadata]);
+  }, [allowedGroupSet, attentionGroups, effectiveMode, groupMetadata, isSlicerAvailable, metadata, pageKey]);
 
   const getGroupDisplayName = useCallback((groupKey: string): string => {
     const group = groupMetadata.find((g) => g.key === groupKey);
@@ -1100,6 +1115,11 @@ export function SettingsPage({
     () => sortedGroups.filter((group) => group in dirtyByGroup),
     [sortedGroups, dirtyByGroup],
   );
+
+  useEffect(() => {
+    onDirtyChange?.(dirtyGroupKeys.length > 0);
+  }, [dirtyGroupKeys.length, onDirtyChange]);
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
   const totalChangeCount = useMemo(
     () => dirtyGroupKeys.reduce((sum, key) => sum + dirtyByGroup[key].changeCount, 0),

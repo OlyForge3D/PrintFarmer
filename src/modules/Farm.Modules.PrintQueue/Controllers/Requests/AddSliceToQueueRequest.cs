@@ -13,6 +13,9 @@ public sealed record AddSliceToQueueRequest
     /// </summary>
     public Guid? ArtifactId { get; init; }
 
+    /// <summary>Optional target printer. Null allows compatible-printer auto-assignment.</summary>
+    public Guid? AssignedPrinterId { get; init; }
+
     /// <summary>
     /// Optional job priority. Defaults to <see cref="PrintJobPriority.Normal"/> when null.
     /// </summary>

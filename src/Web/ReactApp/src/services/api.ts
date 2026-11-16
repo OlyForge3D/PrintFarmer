@@ -109,6 +109,7 @@ import {
   SpoolmanMaterial,
   SpoolmanBulkUpdateFilamentsRequest,
   SpoolmanBulkUpdateResult,
+  SpoolmanFilamentDeletePreview,
   SpoolmanUpdateFilamentRequest,
   SpoolmanUpdateSpoolRequest,
   SpoolmanBulkUpdateSpoolsRequest,
@@ -775,17 +776,6 @@ export class ApiClient {
       `/printer-file-index/delete-operations/${encodeURIComponent(id)}/reconcile`,
     );
     return response.data;
-  }
-
-  // Get hash for a G-code file (returns string)
-  async getGcodeFileHash(
-    path: string,
-    algorithm: "sha256" | "sha1" = "sha256"
-  ): Promise<string> {
-    const resp = await this.client.get<{ hash: string }>(`/gcode-files/hash`, {
-      params: { path, algorithm },
-    });
-    return resp.data.hash;
   }
 
   // ============ Printer API methods ============
@@ -3138,11 +3128,6 @@ export class ApiClient {
     return response.data;
   }
 
-  async getFeatureFlags(): Promise<Record<string, boolean>> {
-    const response = await this.client.get<Record<string, boolean>>('/system/feature-flags');
-    return response.data;
-  }
-
   // ============ Generic request method ============
 
   async request<T>(config: PfRequestConfig): Promise<T> {
@@ -3240,11 +3225,6 @@ export class ApiClient {
 
   async getLocationTree(): Promise<import("@/types/api").LocationTreeNode[]> {
     const response = await this.client.get<import("@/types/api").LocationTreeNode[]>('/locations/tree');
-    return response.data;
-  }
-
-  async getLocationAncestors(id: string): Promise<import("@/types/api").LocationBreadcrumbItem[]> {
-    const response = await this.client.get<import("@/types/api").LocationBreadcrumbItem[]>(`/locations/${id}/ancestors`);
     return response.data;
   }
 
@@ -3429,55 +3409,6 @@ export class ApiClient {
     }
     const response = await this.client.get('/tags/models/filter', { params });
     return response.data || [];
-  }
-
-  // ============ Prediction API methods ============
-  async getPrediction<T = Record<string, unknown>>(jobId: string): Promise<T> {
-    const response = await this.client.get<T>(`/predictions/jobs/${jobId}/completion`);
-    return response.data;
-  }
-
-  async getStatistics<T = Record<string, unknown>>(jobId: string): Promise<T | null> {
-    try {
-      const response = await this.client.get<T>(`/predictions/jobs/${jobId}/statistics`);
-      return response.data;
-    } catch (error: unknown) {
-      if ((error as Record<string, unknown>).statusCode === 404) {
-        return null;
-      }
-      throw error;
-    }
-  }
-
-  async getMaterialStats<T = Record<string, unknown>>(
-    material?: string,
-    printerId?: string,
-    minSampleSize?: number
-  ): Promise<Record<string, T>> {
-    const params: Record<string, string> = {};
-    if (material) params.material = material;
-    if (printerId) params.printerId = printerId;
-    if (minSampleSize) params.minSampleSize = minSampleSize.toString();
-    const response = await this.client.get<Record<string, T>>('/predictions/stats/by-material', { params });
-    return response.data || {};
-  }
-
-  async getModelStats<T = Record<string, unknown>>(modelId: string, material?: string): Promise<T | null> {
-    try {
-      const params: Record<string, string> = {};
-      if (material) params.material = material;
-      const response = await this.client.get<T>(`/predictions/stats/model/${modelId}`, { params });
-      return response.data;
-    } catch (error: unknown) {
-      if ((error as Record<string, unknown>).statusCode === 404) {
-        return null;
-      }
-      throw error;
-    }
-  }
-
-  async recordCompletion(jobId: string, request: object): Promise<void> {
-    await this.client.post(`/predictions/jobs/${jobId}/completion-record`, request);
   }
 
   // ============ System Logs API methods ============
@@ -3812,8 +3743,22 @@ export class ApiClient {
   /**
    * Delete a single filament from Spoolman by ID.
    */
-  async deleteFilament(id: number): Promise<void> {
-    await this.client.delete(`/spoolman/filaments/${id}`);
+  async deleteFilament(id: number, archivedSpoolIds?: number[]): Promise<void> {
+    if (archivedSpoolIds === undefined) {
+      await this.client.delete(`/spoolman/filaments/${id}`);
+    } else {
+      // Each server-side Spoolman request is bounded; a batch can legitimately
+      // exceed the shared client timeout. Keep its final/partial outcome visible.
+      await this.client.post(`/spoolman/filaments/${id}/delete-confirmed`, { archivedSpoolIds }, { timeout: 0 });
+    }
+  }
+
+  /** Includes archived spools, without deleting anything. Never use a cached display list. */
+  async previewFilamentDelete(id: number, signal?: AbortSignal): Promise<SpoolmanFilamentDeletePreview> {
+    const response = await this.client.get<SpoolmanFilamentDeletePreview>(
+      `/spoolman/filaments/${id}/delete-preview`, { signal },
+    );
+    return response.data;
   }
 
   /**
@@ -4077,7 +4022,6 @@ export class ApiClient {
   }
 
   // ============ 3D Models API methods ============
-
   /**
    * Get all 3D models
    */
@@ -4665,6 +4609,40 @@ export class ApiClient {
   async getCamerasByPrinter(printerId: string): Promise<import('@/types/api').CameraDto[]> {
     const response = await this.client.get(`/cameras/by-printer/${printerId}`);
     return response.data;
+  }
+
+  async getBedClearEvaluations(printerId: string): Promise<import('@/types/api').BedClearEvaluationDto[]> {
+    const response = await this.client.get(`/bed-clear-detector/printers/${printerId}/evaluations`);
+    return response.data;
+  }
+
+  async captureBedClearEvaluation(printerId: string): Promise<{ id: string }> {
+    const response = await this.client.post(`/bed-clear-detector/printers/${printerId}/evaluations`);
+    return response.data;
+  }
+
+  async getBedClearDetectorMetrics(printerId: string): Promise<import('@/types/api').BedClearDetectorMetricsDto> {
+    const response = await this.client.get(`/bed-clear-detector/printers/${printerId}/metrics`);
+    return response.data;
+  }
+
+  async getBedClearEvaluationImage(evaluationId: string): Promise<Blob> {
+    const response = await this.client.get<Blob>(
+      `/bed-clear-detector/evaluations/${evaluationId}/image`,
+      { responseType: 'blob' }
+    );
+    return response.data;
+  }
+
+  async labelBedClearEvaluation(
+    evaluationId: string,
+    groundTruth: import('@/types/api').BedClearGroundTruth
+  ): Promise<void> {
+    await this.client.put(`/bed-clear-detector/evaluations/${evaluationId}/label`, { groundTruth });
+  }
+
+  async deleteBedClearEvaluation(evaluationId: string): Promise<void> {
+    await this.client.delete(`/bed-clear-detector/evaluations/${evaluationId}`);
   }
 
   /**

@@ -3,7 +3,6 @@ import { locationService } from '../locationService';
 import type {
   CreateLocationRequest,
   Location,
-  LocationBreadcrumbItem,
   LocationTreeNode,
   MoveLocationRequest,
   UpdateLocationRequest,
@@ -16,7 +15,6 @@ vi.mock('../api', () => ({
     getAllLocations: vi.fn(),
     getLocationById: vi.fn(),
     getLocationTree: vi.fn(),
-    getLocationAncestors: vi.fn(),
     getLocationDescendants: vi.fn(),
     createLocation: vi.fn(),
     updateLocation: vi.fn(),
@@ -247,38 +245,6 @@ describe('locationService', () => {
       vi.mocked(apiClient.getLocationTree).mockRejectedValue(new Error('Server error'));
 
       await expect(locationService.getLocationTree()).rejects.toThrow('Server error');
-    });
-  });
-
-  describe('getLocationAncestors', () => {
-    it('should get ancestors for a location', async () => {
-      const mockAncestors: LocationBreadcrumbItem[] = [
-        { id: '1', name: 'Building A', depth: 0 },
-        { id: '2', name: 'Floor 1', depth: 1 },
-        { id: '3', name: 'Room 101', depth: 2 },
-      ];
-
-      vi.mocked(apiClient.getLocationAncestors).mockResolvedValue(mockAncestors);
-
-      const result = await locationService.getLocationAncestors('3');
-
-      expect(result).toEqual(mockAncestors);
-      expect(apiClient.getLocationAncestors).toHaveBeenCalledWith('3');
-    });
-
-    it('should return empty array for root location', async () => {
-      vi.mocked(apiClient.getLocationAncestors).mockResolvedValue([]);
-
-      const result = await locationService.getLocationAncestors('root-id');
-
-      expect(result).toEqual([]);
-      expect(apiClient.getLocationAncestors).toHaveBeenCalledWith('root-id');
-    });
-
-    it('should propagate errors from apiClient', async () => {
-      vi.mocked(apiClient.getLocationAncestors).mockRejectedValue(new Error('Not found'));
-
-      await expect(locationService.getLocationAncestors('missing-id')).rejects.toThrow('Not found');
     });
   });
 

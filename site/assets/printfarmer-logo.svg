@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">PrintFarmer Logo</title>
+  <desc id="desc">Stylized 3D printer in a barn/house outline with a cube print, green on dark background</desc>
+  <!-- Color system updated to blues: -->
+  <!-- Accent: #3b82f6 (blue-500), Mid: #1d4ed8 (blue-700), Dark BG: #071426 -->
+  <rect x="0" y="0" width="128" height="128" rx="22" fill="#071426" />
+
+  <!-- House / frame -->
+  <path d="M16 62V52.8c0-4.7 2.4-9.1 6.4-11.7l38.7-24.0a8 8 0 0 1 8.5 0l38.7 24A13.8 13.8 0 0 1 114 52.8V62" fill="none" stroke="#3b82f6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M22 120V63" stroke="#1d4ed8" stroke-width="6" stroke-linecap="round"/>
+  <path d="M106 120V63" stroke="#1d4ed8" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- Gantry / carriage -->
+  <path d="M36 54h56" stroke="#3b82f6" stroke-width="8" stroke-linecap="round"/>
+  <rect x="55" y="42" width="18" height="22" rx="2" fill="#1d4ed8" />
+  <circle cx="64" cy="68" r="5" fill="#3b82f6" />
+
+  <!-- Cube (print) -->
+  <g fill="#1d4ed8" stroke="#3b82f6" stroke-width="2" stroke-linejoin="round">
+    <path d="M64 80 48 72l16-8 16 8-16 8Z" />
+    <path d="M64 80v20l16-8V72" />
+    <path d="M64 80v20L48 92V72" />
+  </g>
+
+  <!-- Bed / base rail -->
+  <path d="M34 116h60l10 0c2.8 0 5-2.2 5-5v-8c0-2.8-2.2-5-5-5h-10l-8 0H42l-8 0H24c-2.8 0-5 2.2-5 5v8c0 2.8 2.2 5 5 5h10Z" fill="#0a1c2e" stroke="#1d4ed8" stroke-width="4" stroke-linejoin="round"/>
+  <circle cx="40" cy="106" r="5" fill="#1d4ed8" />
+  <circle cx="88" cy="106" r="5" fill="#1d4ed8" />
+
+  <!-- Subtle inner glow / highlight -->
+  <rect x="6" y="6" width="116" height="116" rx="18" fill="url(#glow)" fill-opacity="0.15" />
+  <defs>
+    <linearGradient id="glow" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="60%" stop-color="#1d4ed8" />
+      <stop offset="100%" stop-color="#071426" />
+    </linearGradient>
+  </defs>
+</svg>

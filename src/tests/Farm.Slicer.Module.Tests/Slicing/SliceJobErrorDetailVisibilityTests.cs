@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using Farm.Slicer.Module.Contracts;
+using Farm.Slicer.Module.Models;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -112,6 +113,46 @@ public sealed class SliceJobErrorDetailVisibilityTests : IAsyncLifetime, IDispos
         _ = nonAdminStatus.ErrorDetail.Should().BeNull("non-admins must never see worker-internal paths or filenames");
     }
 
+    [Fact(DisplayName = "The my-jobs projection preserves status mapping and admin-only failure detail")]
+    public async Task GetMyJobs_AsOwnerAndAdmin_PreservesStatusMappingAndRedactsErrorDetail()
+    {
+        const string adminUsername = "my-jobs-status-admin";
+        const string ownerUsername = "my-jobs-status-owner";
+        using HttpClient adminClient = await _factory.CreateAdminClientAsync(username: adminUsername);
+        using HttpClient ownerClient = await _factory.CreateOperatorClientAsync(
+            "queue",
+            "read",
+            username: ownerUsername);
+        Guid adminId = await GetUserIdAsync(adminUsername);
+        Guid ownerId = await GetUserIdAsync(ownerUsername);
+        Guid adminJobId = await SubmitJobAsync(adminId);
+        Guid ownerJobId = await SubmitJobAsync(ownerId);
+        Guid printerId = Guid.NewGuid();
+        DateTime startedAt = new(2026, 11, 1, 12, 30, 0, DateTimeKind.Utc);
+        DateTime completedAt = startedAt.AddMinutes(2);
+
+        await SetFailedStatusAsync(adminJobId, printerId, startedAt, completedAt);
+        await SetFailedStatusAsync(ownerJobId, printerId, startedAt, completedAt);
+
+        using HttpResponseMessage adminResponse = await adminClient.GetAsync("/api/slice/my-jobs");
+        _ = adminResponse.StatusCode.Should().Be(HttpStatusCode.OK, await adminResponse.Content.ReadAsStringAsync());
+        List<SliceJobStatusResponse> adminJobs =
+            await adminResponse.Content.ReadFromJsonAsync<List<SliceJobStatusResponse>>()
+            ?? throw new InvalidOperationException("Missing admin status response.");
+        SliceJobStatusResponse adminStatus = adminJobs.Should().ContainSingle().Which;
+        AssertStatusProjection(adminStatus, adminJobId, printerId, startedAt, completedAt);
+        _ = adminStatus.ErrorDetail.Should().Be(RealErrorDetail);
+
+        using HttpResponseMessage ownerResponse = await ownerClient.GetAsync("/api/slice/my-jobs");
+        _ = ownerResponse.StatusCode.Should().Be(HttpStatusCode.OK, await ownerResponse.Content.ReadAsStringAsync());
+        List<SliceJobStatusResponse> ownerJobs =
+            await ownerResponse.Content.ReadFromJsonAsync<List<SliceJobStatusResponse>>()
+            ?? throw new InvalidOperationException("Missing owner status response.");
+        SliceJobStatusResponse ownerStatus = ownerJobs.Should().ContainSingle().Which;
+        AssertStatusProjection(ownerStatus, ownerJobId, printerId, startedAt, completedAt);
+        _ = ownerStatus.ErrorDetail.Should().BeNull();
+    }
+
     private async Task<WorkerSliceJobResponse> ClaimSuccessfullyAsync(HttpClient worker, Guid jobId)
     {
         HttpResponseMessage response = await worker.PostAsJsonAsync(
@@ -155,7 +196,7 @@ public sealed class SliceJobErrorDetailVisibilityTests : IAsyncLifetime, IDispos
     private async Task<Guid> SubmitJobAsync(Guid ownerId)
     {
         // Submitted through a worker (farm_admin) client purely to reach the endpoint; the job's
-        // UserId is then reassigned directly to the non-admin owner below, mirroring the direct-DB
+        // UserId is then reassigned directly to the intended owner, mirroring the direct-DB
         // mutation pattern already used elsewhere in this test project for post-submission state
         // changes that have no dedicated API surface.
         using HttpClient submittingClient = await _factory.CreateWorkerClientAsync(
@@ -192,5 +233,51 @@ public sealed class SliceJobErrorDetailVisibilityTests : IAsyncLifetime, IDispos
         job.ErrorMessage = errorMessage;
         job.CompletedAt = DateTime.UtcNow;
         _ = await db.SaveChangesAsync();
+    }
+
+    private async Task SetFailedStatusAsync(Guid jobId, Guid printerId, DateTime startedAt, DateTime completedAt)
+    {
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        SliceJob job = await db.SliceJobs.SingleAsync(value => value.Id == jobId);
+        job.Status = SliceJobStatus.Failed;
+        job.PrinterId = printerId;
+        job.ProgressPercent = 100;
+        job.StartedAt = startedAt;
+        job.CompletedAt = completedAt;
+        job.ErrorMessage = RealErrorDetail;
+        job.LayoutDegradationReason = LayoutDegradationReason.SourcePlacementFallback.ToString();
+        job.FailureReason = SliceFailureReason.ModelOutsideBuildVolume.ToString();
+        job.EstimatedPrintTimeSeconds = 120;
+        job.FilamentUsedGrams = 3.25m;
+        job.ModelFileName = "../../worker/internal-path/part.3mf";
+        job.SlicerEngineName = null;
+        await db.SaveChangesAsync();
+    }
+
+    private static void AssertStatusProjection(
+        SliceJobStatusResponse status,
+        Guid jobId,
+        Guid printerId,
+        DateTime startedAt,
+        DateTime completedAt)
+    {
+        _ = status.Id.Should().Be(jobId);
+        _ = status.Status.Should().Be(SliceJobStatus.Failed);
+        _ = status.PrinterId.Should().Be(printerId);
+        _ = status.ProgressPercent.Should().Be(100);
+        _ = status.StartedAt.Should().Be(startedAt);
+        _ = status.CompletedAt.Should().Be(completedAt);
+        _ = status.ErrorMessage.Should().Be("Slicing failed.");
+        _ = status.LayoutDegradation.Should().Be(LayoutDegradationReason.SourcePlacementFallback);
+        _ = status.FailureReason.Should().Be(SliceFailureReason.ModelOutsideBuildVolume);
+        _ = status.FailureHint.Should().Be(SliceFailureHints.For(SliceFailureReason.ModelOutsideBuildVolume));
+        _ = status.EstimatedPrintTimeSeconds.Should().Be(120);
+        _ = status.FilamentUsedGrams.Should().Be(3.25m);
+        _ = status.ModelFileName.Should().Be("part.3mf");
+        _ = status.SlicerEngine.Should().Be(SlicerEngineType.OrcaSlicer);
+        _ = status.ProgressMessage.Should().BeNull();
+        _ = status.WorkerId.Should().BeNull();
+        _ = status.ArtifactsRoute.Should().Be($"/api/artifacts/job/{jobId}");
     }
 }

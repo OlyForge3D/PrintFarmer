@@ -2,6 +2,19 @@
 
 ### Features
 
+- Regroup admin settings into Failure Detection, Costs & Energy, Planning,
+  Operator Features and a single System page (#3745). Move browser slicer modes
+  into Slicing, auto-tagging/custom fields into Data, and global maintenance
+  policy into Maintenance Settings. Combine NFC readers and bindings on one
+  Hardware page. Remove duplicate farm-rate editors while retaining per-record
+  overrides, persisted setting keys/API contracts and bounded legacy-link/pin migration.
+
+- Route Obico monitoring per print instead of permanently pinning printers
+  (#3693). Reserve healthy pool capacity through warmup, pauses, and API
+  restarts; release it when prints end. Unavailable monitoring never blocks
+  printing or automatically pauses printers. Apply `AddObicoPrintRouting`;
+  configured pools no longer silently overflow to the legacy global URL.
+
 - Add rich printer-file settings and durable thumbnails through one bounded,
   confirmed-idle background pipeline for Moonraker, OctoPrint, and PrusaLink
   (#3570, #3571). Native metadata takes precedence over bounded G-code/BGCode
@@ -69,6 +82,18 @@
   genesis before its four general slots become operational.
 
 ### Fixes
+
+- Gate web jog and coordinate entry on affirmative per-axis homing telemetry.
+  Discover PrusaLink motion support per printer without sending motion, disable
+  unsupported CORE One L/Buddy Home and jog controls, and distinguish explicit
+  endpoint rejection from unknown outcomes without duplicating safety warnings
+  (#3566). Preserve API-key-only authentication for supported legacy movement.
+
+- Reject passkey login for inactive accounts without issuing access or refresh
+  tokens. Main-API bearer authentication now checks current account status so
+  previously issued tokens stop working after deactivation (#3652). Recognized
+  account-store failures are logged and fail closed without masking cancellation
+  or unrelated programming errors.
 
 - Preserve native filament setting types when saving editor changes, including
   boolean vectors, percent suffixes and unedited extruder entries (#3643).

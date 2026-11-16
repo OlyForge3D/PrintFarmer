@@ -2,6 +2,78 @@
 
 This document captures common patterns and best practices discovered during test development for PrintFarmer.
 
+## Real-app filament deletion evidence
+
+The `monolith-smoke.yml` workflow boots the actual API and Vite application
+against isolated SQLite and a digest-pinned disposable Spoolman. Its filament
+journey exercises hidden archived references, cancellation, non-cascading single
+and bulk requests, explicit deletion, active-spool protection and empty filaments.
+It attaches desktop (1440x1000) and mobile-viewport (390x844) screenshots plus JSON
+provenance to the Playwright report. Only synthetic inventory is created.
+
+Dispatch the workflow on the feature branch with optional
+`evidence_baseline_sha=<full pre-change SHA>` to also capture the actual baseline
+application. The baseline job copies only the current Playwright test driver;
+product sources and exact dependency locks remain those of the baseline commit.
+The before journey expects the original 403-derived API error and generic toast;
+the after journey expects successful guarded deletion. Each attachment identifies
+the application SHA, separate driver SHA, route, viewport, appearance and state.
+Reports are named `monolith-smoke-playwright-report-before` and
+`monolith-smoke-playwright-report-after`. Mobile viewport evidence is not a native
+device test. No browser route or API replacement is used.
+
+## UI visual and accessibility coverage
+
+`src/Web/ReactApp/e2e/ui-coverage/catalog.json` reconciles inventory rows to
+executable candidate scenarios, explicit unverified coverage, or platform
+blockers. The original transferred Layer 1 inventory note is unavailable, so
+the catalog's historical snapshot and SHA-256 are retained as unverified
+provenance metadata; they are not independently recomputed or bound to an
+available artifact. The catalog check instead validates current coverage
+against routes, settings, static pages, and curated surfaces in the source via
+`e2e/ui-coverage/inventory-contract.mjs`. The row count is not a count of every
+route alias, modal caller, or state/theme/viewport combination.
+
+```bash
+npm run test:ui-coverage:catalog
+npm run test:ui-coverage:candidate
+```
+
+The frontend CI job validates the catalog; the separate
+`UI coverage candidates (Windows Chromium)` job runs the candidate suite.
+Candidate screenshots are attached to Playwright results and uploaded as a
+short-retention CI artifact for inspection; they are not committed baselines
+and do not gate changes through pixel comparisons.
+
+The catalog test checks stable IDs and explicit dispositions, and verifies
+source-derived inventory coverage. Candidate tests capture full-page screenshots
+under Playwright's `test-results` directory, use synthetic read-only app
+responses, load the pinned local theme fonts, and run axe WCAG 2.2 A/AA rules.
+They also retain the 320px and 200%-equivalent horizontal-overflow checks and
+explicit light/dark, high-contrast, and system-contrast scenes. These are
+machine-detected checks, not WCAG conformance or runtime-completeness
+certification.
+
+Pixel-diff regression detection against committed PNG baselines is intentionally
+not provided. Screenshot artifacts are evidence for inspection only; their
+presence does not prove visual correctness, exercise every interaction, or
+approve a change. The historical catalog hash is not independently verified
+because its original source note is unavailable; current inventory coverage is
+instead checked against source-derived inputs.
+
+The inventory contains 141 rows: 101 web, 3 public-site, and 37 native iOS.
+Executable candidates currently cover 100 web rows and all 3 public-site rows;
+the remaining web row, OrcaImportWizard, is blocked. The candidate catalog
+contains 169 executable scenes. Settings candidates use the canonical category
+URLs, including failure detection, costs, planning, operator features, and
+auto-tagging; NFC devices and bindings share the hardware NFC leaf. These are
+sampled candidates, not every route
+alias or state/theme/viewport combination; unrepresented web states and overlays
+remain explicitly unverified. Native entries remain unverified until the
+approved Xcode 26.6 / iOS 26.5 runner is available. Tests use no production
+accounts, secrets, printer commands, profile mutations, or real hardware. This
+is a first executable slice, not a completed full-coverage gate.
+
 ## TestEmulator sensor fixtures
 
 The in-process TestEmulator backend exposes seven stable sensor IDs through the
@@ -187,11 +259,11 @@ HTTP responses.
 
 **NFC read time.** `src/infra/Services/NfcDevices/NfcTagService.cs`,
 `ProcessTagReadAsync`, emits `readAt`; `LinkNfcTagRequest.ReadAt` in
-`src/infra/Dtos/NfcDeviceDtos.cs` is optional for manual linking. Both NFC
-binding/pairing modals forward the scan timestamp; `LinkTagAsync` uses it for
-spool last-seen state. Event `readAt` remains required, request `readAt` optional.
-`src/Web/ReactApp/src/features/nfc/components/__tests__/NfcBindingModal.test.tsx`
-checks timestamp forwarding and an omitted spool ID.
+`src/infra/Dtos/NfcDeviceDtos.cs` is optional for manual linking. The active
+`NfcPairingModal` forwards the scan timestamp; `LinkTagAsync` uses it for spool
+last-seen state. Event `readAt` remains required, request `readAt` optional.
+`src/Web/ReactApp/src/features/nfc/components/__tests__/NfcPairingModal.test.tsx`
+checks timestamp forwarding.
 
 **File size.** `src/infra/Dtos/GcodeFileDtos.cs` exposes required `long FileSize`,
 serialized as numeric `fileSize`. `GcodeFileCard` and `GcodeFileBrowser` consume
@@ -207,8 +279,9 @@ invent required count fields. `SlicerServiceResponse` in
 Worker management's separate `WorkerResponse.ActiveJobs` in
 `src/slicer/Farm.Slicer.Module/Contracts/WorkerDtos.cs` is real and retained.
 `src/Web/ReactApp/src/services/__tests__/slicerRegistry.test.ts`
-checks the exact mapped discovery shape; `workersService.test.ts` in that
-directory covers worker-management counts.
+checks the exact mapped discovery shape. The worker service's canonical
+collection route and pagination are covered by
+`src/Web/ReactApp/src/services/__tests__/workerService.test.ts`.
 
 Controller and SignalR serialization use camelCase names and string enums
 (`ControllerStartup.cs:28-36`, `SignalRStartup.cs:35-45`). These conclusions do

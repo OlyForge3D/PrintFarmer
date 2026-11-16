@@ -94,7 +94,7 @@ public sealed class RefreshTokenService(
                 _context.RevokedTokens.Add(new RevokedToken
                 {
                     Id = Guid.NewGuid(),
-                    TokenHash = $"ALL_TOKENS_{refreshToken.UserId}_{now.Ticks}",
+                    TokenHash = TokenRevocationMarker.CreateTokenHash(refreshToken.UserId),
                     UserId = refreshToken.UserId,
                     RevokedAt = now,
                     RevokedByUserId = refreshToken.UserId,

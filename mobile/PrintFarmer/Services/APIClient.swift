@@ -1522,6 +1522,13 @@ actor APIClient {
         case 400...499:
             let apiError = try? decoder.decode(APIError.self, from: data)
             throw NetworkError.clientError(http.statusCode, apiError)
+        case 503:
+            if let apiError = try? decoder.decode(APIError.self, from: data),
+               let message = apiError.message,
+               !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                throw NetworkError.serverErrorMessage(http.statusCode, message)
+            }
+            throw NetworkError.serverError(http.statusCode)
         case 500...599:
             throw NetworkError.serverError(http.statusCode)
         default:
@@ -1617,6 +1624,7 @@ enum NetworkError: LocalizedError, Sendable {
     case serverUnreachable
     case clientError(Int, APIError?)
     case serverError(Int)
+    case serverErrorMessage(Int, String)
     case unexpectedStatus(Int)
     case decodingFailed(ResponseDecodingFailure)
     case transportError(URLError)
@@ -1652,6 +1660,7 @@ enum NetworkError: LocalizedError, Sendable {
         case .clientError(let code, let apiError):
             return apiError?.detail ?? apiError?.message ?? apiError?.title ?? "Client error (\(code))"
         case .serverError(let code): return "Server error (\(code))"
+        case .serverErrorMessage(_, let message): return message
         case .unexpectedStatus(let code): return "Unexpected status (\(code))"
         case .decodingFailed(let failure): return failure.userMessage
         case .transportError(let error):

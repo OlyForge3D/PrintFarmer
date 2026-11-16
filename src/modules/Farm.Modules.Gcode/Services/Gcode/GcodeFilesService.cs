@@ -490,7 +490,23 @@ public partial class GcodeFilesService(
                 FileSize: existingFile.FileSizeBytes,
                 UploadedAt: existingFile.UpdatedAt,
                 IsDirectory: false,
-                Id: existingFile.Id.ToString());
+                Id: existingFile.Id.ToString(),
+                FileType: existingFile.FileType,
+                TargetModelName: existingFile.ExtractedPrinterModelName,
+                RequiredMaterial: existingFile.RequiredMaterial,
+                ExtractedSlicerName: existingFile.SlicerName,
+                ExtractedSlicerVersion: existingFile.SlicerVersion,
+                ExtractedPrintTime: existingFile.EstimatedPrintTimeMinutes,
+                ExtractedFilamentLength: existingFile.EstimatedFilamentLengthMm,
+                ExtractedNozzleDiameter: existingFile.RequiredNozzleDiameter,
+                ExtractedMaterial: existingFile.RequiredMaterial,
+                ExtractedPrinterModel: existingFile.ExtractedPrinterModelName,
+                ExtractedPrinterModelName: existingFile.ExtractedPrinterModelName,
+                ExtractedLayerHeight: existingFile.LayerHeight,
+                ExtractedInfill: existingFile.InfillPercentage,
+                ExtractedPerimeters: existingFile.Perimeters,
+                ExtractedHotendTemp: existingFile.PrintTemperature,
+                ExtractedBedTemp: existingFile.BedTemperature);
         }
 
         // No duplicate - create database record with metadata and thumbnail extraction
@@ -567,14 +583,14 @@ public partial class GcodeFilesService(
     /// <param name="originalFileName">Original filename as provided by the uploader.</param>
     /// <param name="thumbnailPath">Optional path to extracted thumbnail image.</param>
     /// <param name="virtualDirectory">Virtual directory path for file organization.</param>
-    /// <param name="chunkedUploadService">Service for handling chunked uploads and metadata extraction.</param>
+    /// <param name="metadata">Metadata extracted while finalizing the chunked upload.</param>
     /// <param name="ct">Cancellation token for async operation.</param>
     public async Task<GcodeFile?> FinalizeChunkedUploadAsync(
         string filePath,
         string? originalFileName,
         string? thumbnailPath,
         string? virtualDirectory,
-        IChunkedUploadService chunkedUploadService,
+        GcodeMetadataExtracted? metadata,
         CancellationToken ct)
     {
         try
@@ -587,9 +603,7 @@ public partial class GcodeFilesService(
                 return null;
             }
 
-            // Extract metadata from the uploaded file
-            GcodeMetadataExtracted? metadata = await chunkedUploadService.ExtractMetadataFromFileAsync(filePath, ct);
-            _logger.LogInformation("FinalizeChunkedUploadAsync: Metadata extracted for {FileName}", originalFileName);
+            _logger.LogInformation("FinalizeChunkedUploadAsync: Using upload metadata for {FileName}", originalFileName);
 
             // Get file info
             FileInfo fileInfo = new(filePath);

@@ -94,7 +94,8 @@ public class TestEmulatorClient(TestEmulatorStateManager stateManager)
             CurrentLayer: status.CurrentLayer,
             TotalLayers: status.TotalLayers,
             FanSpeedPercent: status.FanSpeedPercent,
-            LiveZOffsetMm: status.LiveZOffsetMm);
+            LiveZOffsetMm: status.LiveZOffsetMm,
+            PrintGuardEnabled: printer.PrintGuardEnabled);
     }
 
     public Task<string?> GetCameraStreamUrlAsync(Printer printer, CancellationToken ct)

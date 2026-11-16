@@ -6,6 +6,7 @@ export interface CompactPrinterCardMemoProps {
   backendCapabilities?: PrinterBackendCapabilitiesDto;
   onExpand?: (printerId: string) => void;
   onEdit?: (printer: Printer) => void;
+  onToggleEnabled?: (printer: Printer) => void | Promise<void>;
 }
 
 function shallowEqualPrinter(previous: Printer | PrinterDisplay, next: Printer | PrinterDisplay): boolean {
@@ -34,6 +35,7 @@ export function areCompactPrinterCardPropsEqual(
     shallowEqualPrinter(previous.printer, next.printer) &&
     previous.backendCapabilities === next.backendCapabilities &&
     previous.onExpand === next.onExpand &&
-    previous.onEdit === next.onEdit
+    previous.onEdit === next.onEdit &&
+    previous.onToggleEnabled === next.onToggleEnabled
   );
 }

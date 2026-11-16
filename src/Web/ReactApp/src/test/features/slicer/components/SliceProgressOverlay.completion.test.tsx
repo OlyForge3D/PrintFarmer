@@ -38,12 +38,14 @@ vi.mock('@/features/slicer/components/SendToPrinterModal', () => ({
     isOpen,
     jobId,
     artifactId,
+    defaultPrinterId,
   }: {
     isOpen: boolean;
     jobId: string;
     artifactId: string;
+    defaultPrinterId?: string | null;
   }) => isOpen
-    ? <div data-testid="print-modal">{jobId}:{artifactId}</div>
+    ? <div data-testid="print-modal" data-printer-id={defaultPrinterId}>{jobId}:{artifactId}</div>
     : null,
 }));
 
@@ -342,6 +344,7 @@ describe('SliceProgressOverlay completion actions', () => {
     renderOverlay(
       <SliceProgressOverlay
         jobId="job-1"
+        defaultPrinterId="sliced-for-printer"
         progress={completedProgress}
         onNewJob={vi.fn()}
         onRetry={vi.fn()}
@@ -357,5 +360,6 @@ describe('SliceProgressOverlay completion actions', () => {
       '/api/artifacts/job/job-1',
     );
     expect(screen.getByTestId('print-modal')).not.toHaveTextContent('newest-artifact');
+    expect(screen.getByTestId('print-modal')).toHaveAttribute('data-printer-id', 'sliced-for-printer');
   });
 });

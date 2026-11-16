@@ -59,7 +59,7 @@ describe('printerDisplaySort (#1146 item 5)', () => {
     expect(result.map(p => p.name)).toEqual(['Alpha', 'Bravo', 'Charlie']);
   });
 
-  it('sorts "state" mode with printing first, then paused, then idle, then offline', () => {
+  it('groups printing and paused together before idle and offline, then sorts by name', () => {
     const printing = makePrinter({ id: 'p-1', name: 'Printing1', state: 'Printing', isOnline: true });
     const paused = makePrinter({ id: 'p-2', name: 'Paused1', state: 'Paused', isOnline: true });
     const idle = makePrinter({ id: 'p-3', name: 'Idle1', state: 'Idle', isOnline: true });
@@ -67,10 +67,10 @@ describe('printerDisplaySort (#1146 item 5)', () => {
 
     const result = sortPrintersForDisplay([offline, idle, paused, printing], 'state', new Set());
 
-    expect(result.map(p => p.id)).toEqual(['p-1', 'p-2', 'p-3', 'p-4']);
+    expect(result.map(p => p.id)).toEqual(['p-2', 'p-1', 'p-3', 'p-4']);
   });
 
-  it('puts printers in pendingPrinterIds first in "state" mode regardless of their own status', () => {
+  it('keeps offline pending printers in the offline group', () => {
     const printing = makePrinter({ id: 'p-1', name: 'Printing1', state: 'Printing', isOnline: true });
     const pendingOffline = makePrinter({ id: 'p-2', name: 'PendingButOffline', state: 'Idle', isOnline: false });
 
@@ -80,7 +80,22 @@ describe('printerDisplaySort (#1146 item 5)', () => {
       new Set(['p-2']),
     );
 
-    expect(result.map(p => p.id)).toEqual(['p-2', 'p-1']);
+    expect(result.map(p => p.id)).toEqual(['p-1', 'p-2']);
+  });
+
+  it('matches mobile farm state groups, including overlap precedence, without hiding disabled printers', () => {
+    const printers = [
+      makePrinter({ id: 'offline', name: 'Zulu', isOnline: false }),
+      makePrinter({ id: 'disabled', name: 'Alpha', isOnline: false, isEnabled: false }),
+      makePrinter({ id: 'maintenance', state: 'Error', inMaintenance: true }),
+      makePrinter({ id: 'idle' }),
+      makePrinter({ id: 'error', state: 'Error' }),
+      makePrinter({ id: 'pending', state: 'Printing', inMaintenance: true }),
+      makePrinter({ id: 'printing', name: 'Bravo', state: 'Printing', inMaintenance: true }),
+      makePrinter({ id: 'paused', name: 'alpha', state: 'Paused' }),
+    ];
+    expect(sortPrintersForDisplay(printers, 'state', new Set(['pending', 'disabled'])).map(p => p.id))
+      .toEqual(['paused', 'printing', 'pending', 'error', 'idle', 'maintenance', 'disabled', 'offline']);
   });
 
   it('sorts "backend" mode by backend name, then by printer name within a backend', () => {
@@ -95,14 +110,14 @@ describe('printerDisplaySort (#1146 item 5)', () => {
     expect(result.map(p => p.id)).toEqual(['p-3', 'p-1', 'p-2']);
   });
 
-  it('produces a stable order for exact ties, preserving original relative order', () => {
+  it('breaks case-insensitive name ties by id for deterministic default ordering', () => {
     const printers = [
-      makePrinter({ id: 'p-1', name: 'Same', state: 'Idle' }),
+      makePrinter({ id: 'p-3', name: 'same', state: 'Idle' }),
       makePrinter({ id: 'p-2', name: 'Same', state: 'Idle' }),
-      makePrinter({ id: 'p-3', name: 'Same', state: 'Idle' }),
+      makePrinter({ id: 'p-1', name: 'SAME', state: 'Idle' }),
     ];
 
-    const result = sortPrintersForDisplay(printers, 'name', new Set());
+    const result = sortPrintersForDisplay(printers, 'state', new Set());
 
     expect(result.map(p => p.id)).toEqual(['p-1', 'p-2', 'p-3']);
   });
@@ -138,13 +153,13 @@ describe('printerDisplaySort (#1146 item 5)', () => {
     expect(printers).toEqual(snapshot);
   });
 
-  it('restores the established attention-first state/name default when sort is cleared', () => {
+  it('restores the mobile-style state/name default when sort is cleared', () => {
     const printers = [
       makePrinter({ id: 'idle', name: 'Alpha' }),
       makePrinter({ id: 'pending', name: 'Zulu', isOnline: false }),
       makePrinter({ id: 'printing', name: 'Bravo', state: 'Printing' }),
     ];
     expect(sortPrintersForDisplay(printers, 'name', new Set(['pending']), null).map(p => p.id))
-      .toEqual(['pending', 'printing', 'idle']);
+      .toEqual(['printing', 'idle', 'pending']);
   });
 });

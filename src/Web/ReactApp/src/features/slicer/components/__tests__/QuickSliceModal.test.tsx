@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { QuickSliceModal } from '@/features/slicer/components/QuickSliceModal';
 import type { Model } from '@/types/models';
 import type { SubmitSliceJobRequest, SubmitSliceJobResponse } from '@/services/sliceJobService';
+import { slicerProfilesService } from '@/services/slicerProfilesService';
 
 // Mock navigation
 const mockNavigate = vi.fn();
@@ -267,6 +268,30 @@ describe('QuickSliceModal', () => {
   });
 
   describe('bed type override', () => {
+    it('displays the inherited textured temperatures and submits only an explicit surface override', async () => {
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValueOnce([
+        { name: 'Micron representative', manufacturer: 'Voron', settings: {
+          curr_bed_type: 'Textured PEI Plate', support_multi_bed_types: '0',
+        } },
+      ]);
+      vi.mocked(slicerProfilesService.getFilamentProfilesForMachines).mockResolvedValueOnce([
+        { name: 'PLA', material: 'PLA', nozzleTemperature: 210, bedTemperature: 0, printSpeed: 60, settings: {
+          hot_plate_temp_initial_layer: ['0'], hot_plate_temp: ['0'],
+          textured_plate_temp_initial_layer: ['65'], textured_plate_temp: ['60'],
+        } },
+      ]);
+      renderModal();
+      await screen.findByText('Bed first layer: 65°C; other layers: 60°C');
+      expect(screen.getByLabelText('Bed Type')).toHaveValue('');
+      fireEvent.change(screen.getByLabelText('Bed Type'), { target: { value: 'High Temp Plate' } });
+      expect(screen.getByText('Bed first layer: 0°C; other layers: 0°C')).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByRole('button', { name: /^Slice$/ })).toBeEnabled());
+      fireEvent.click(screen.getByRole('button', { name: /^Slice$/ }));
+      await waitFor(() => expect(mockSubmitJob).toHaveBeenCalledOnce());
+      expect(JSON.parse(mockSubmitJob.mock.calls[0][0].slicerProfileJson).overrides)
+        .toEqual({ curr_bed_type: 'High Temp Plate' });
+    });
+
     it('defaults to "Inherit from profile"', async () => {
       renderModal();
       await waitFor(() => {
@@ -318,6 +343,11 @@ describe('QuickSliceModal', () => {
         const submittedRequest = mockSubmitJob.mock.calls.at(-1)?.[0];
         expect(submittedRequest?.slicerProfileJson).toEqual(expect.any(String));
         expect(submittedRequest?.slicerProfileJson).not.toContain('curr_bed_type');
+        expect(submittedRequest?.profileSelections).toEqual({
+          machine: { source: 'system', name: 'Machine A' },
+          process: { source: 'system', name: '0.20mm Standard' },
+          filaments: [{ source: 'system', name: 'PLA Generic' }],
+        });
       });
     });
   });

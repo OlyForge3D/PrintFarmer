@@ -40,6 +40,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using IPrinterMonitoringReader = Farm.Infrastructure.Services.Printers.IPrinterMonitoringReader;
 using IPrinterVersionCache = Farm.Infrastructure.Services.Printers.IPrinterVersionCache;
 using MmuControlAction = Farm.Infrastructure.Services.Printers.MmuControlAction;
 using MmuControlProtocol = Farm.Infrastructure.Services.Printers.MmuControlProtocol;
@@ -47,6 +49,7 @@ using MmuControlRequest = Farm.Infrastructure.Services.Printers.MmuControlReques
 using MoonrakerEndpointResolution = Farm.Infrastructure.Services.Printers.MoonrakerEndpointResolution;
 using MoonrakerOnboardingResolver = Farm.Infrastructure.Services.Printers.MoonrakerOnboardingResolver;
 using PerToolAttributionCapability = Farm.Infrastructure.Services.Printers.PerToolAttributionCapability;
+using PrinterBackendUnsupportedException = Farm.Infrastructure.Services.Printers.PrinterBackendUnsupportedException;
 using PrinterControlException = Farm.Infrastructure.Services.Printers.PrinterControlException;
 using PrinterControlOutcome = Farm.Infrastructure.Services.Printers.PrinterControlOutcome;
 using PrinterDirectControl = Farm.Infrastructure.Services.Printers.PrinterDirectControl;
@@ -76,8 +79,6 @@ public partial class PrintersController(
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
     IHttpClientFactory httpClientFactory,
     IEgressGuard egressGuard,
-    Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService obicoServerAssignment,
-    ISettingsService settingsService,
     IPrintFarmerTelemetryService telemetryService,
     Farm.Infrastructure.Services.BedTypes.IBedTypeService bedTypeService,
     Farm.Infrastructure.Services.IProfileImportService? profileImportService = null,
@@ -88,7 +89,8 @@ public partial class PrintersController(
     AppDbContext? appDbContext = null,
     Farm.Infrastructure.Services.Printers.IPrinterCacheInvalidator? printerCacheInvalidator = null,
     Farm.Infrastructure.Services.Printers.IPrinterSafetyGuard? printerSafetyGuard = null,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    IOptionsMonitor<PrintGuardShadowSettings>? printGuardSettings = null)
     : ControllerBase
 {
     private const int MaxHistoryQueryEntries = 2000;
@@ -99,6 +101,7 @@ public partial class PrintersController(
     private readonly AppDbContext? _appDbContext = appDbContext;
     private readonly Farm.Infrastructure.Services.Printers.IPrinterCacheInvalidator? _printerCacheInvalidator = printerCacheInvalidator;
     private readonly Farm.Infrastructure.Services.Printers.IPrinterSafetyGuard? _printerSafetyGuard = printerSafetyGuard;
+    private readonly IOptionsMonitor<PrintGuardShadowSettings>? _printGuardSettings = printGuardSettings;
     private readonly ILogger<PrintersController> _logger = logger;
     private readonly Farm.Infrastructure.Services.Printers.IPrintersService _printersService = printersService;
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
@@ -111,8 +114,6 @@ public partial class PrintersController(
     private readonly Farm.Infrastructure.Services.IProfileImportService? _profileImportService = profileImportService;
     private readonly IPrinterVersionCache _printerVersionCache = printerVersionCache;
     private readonly Farm.Infrastructure.Services.Printers.IBackendClientFactory _backendClientFactory = backendClientFactory;
-    private readonly Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService _obicoServerAssignment = obicoServerAssignment;
-    private readonly ISettingsService _settingsService = settingsService;
     private readonly IPrintFarmerTelemetryService _telemetryService = telemetryService;
     private readonly Farm.Infrastructure.Services.BedTypes.IBedTypeService _bedTypeService = bedTypeService;
 
@@ -1363,7 +1364,8 @@ public partial class PrintersController(
             false,
             false,
             rowVersion,
-            p.ShowExternalSpool);
+            p.ShowExternalSpool,
+            p.PrintGuardEnabled);
     }
 
     /// <summary>
@@ -1859,6 +1861,19 @@ public partial class PrintersController(
             return precondition;
         }
 
+        if (dto.IsEnabled == false && p.IsEnabled)
+        {
+            IPrinterMonitoringReader monitoring = HttpContext.RequestServices.GetRequiredService<IPrinterMonitoringReader>();
+            if (await monitoring.HasActiveWorkAsync(id, ct).ConfigureAwait(false))
+            {
+                return Conflict(new
+                {
+                    error = "printer_has_active_work",
+                    detail = "This printer has active or assigned work. Review and resolve the job before marking the printer Out of Service.",
+                });
+            }
+        }
+
         // Validate toolhead metrology bounds up front so a rejected write never partially
         // mutates the printer (see CalibrationPrinterUpdateMapper.ValidateToolheadMetrology).
         if (dto.Toolheads?.Length > 0)
@@ -1877,6 +1892,26 @@ public partial class PrintersController(
         if (Farm.Modules.Calibration.Services.Calibration.CalibrationPrinterUpdateMapper.ValidatePrinterMetrology(dto) is { } metrologyProblem)
         {
             return BadRequest(metrologyProblem);
+        }
+
+        // Validate provider opt-in before mutating tracked printer preferences.
+        if (dto.PrintGuardEnabled == true && !p.PrintGuardEnabled)
+        {
+            PrintGuardShadowSettings? settings = _printGuardSettings?.CurrentValue;
+            if (settings is null
+                || !settings.Enabled
+                || !settings.TryGetClassificationEndpoint(out _))
+            {
+                return BadRequest(new
+                {
+                    error = "PrintGuard is not enabled with valid deployment configuration. Configure PFARM__PrintGuardShadow__Enabled and PFARM__PrintGuardShadow__ApiUrl before opting in a printer."
+                });
+            }
+
+            if (p.Cameras == null || p.Cameras.Count == 0)
+            {
+                return BadRequest(new { error = "PrintGuard monitoring requires at least one camera configured on the printer." });
+            }
         }
 
         // Capture decrypted credentials BEFORE any modifications to avoid phantom changes
@@ -2027,7 +2062,7 @@ public partial class PrintersController(
             p.IsEnabled = dto.IsEnabled.Value;
         }
 
-        // Update Obico monitoring opt-in (requires camera, auto-assigns server)
+        // Opt-in is independent of current monitoring capacity. Routes belong to prints.
         if (dto.ObicoEnabled.HasValue && dto.ObicoEnabled.Value != p.ObicoEnabled)
         {
             if (dto.ObicoEnabled.Value)
@@ -2040,31 +2075,16 @@ public partial class PrintersController(
                 }
 
                 p.ObicoEnabled = true;
-
-                // Auto-assign to best available server
-                ObicoServer? assigned = await _obicoServerAssignment.AssignServerAsync(p.Id, ct);
-                if (assigned is null)
-                {
-                    ObicoSettings currentObicoSettings = _settingsService.Get<ObicoSettings>();
-                    if (!currentObicoSettings.Enabled || string.IsNullOrWhiteSpace(currentObicoSettings.ObicoApiUrl))
-                    {
-                        return BadRequest(new
-                        {
-                            error = "No available Obico ML configuration. Open Settings > Obico Failure Detection to add a pooled Obico ML server or configure the global fallback."
-                        });
-                    }
-
-                    _logger.LogInformation(
-                        "[PRINTERS] No pooled Obico server available for printer {PrinterName}; using global Obico Failure Detection settings fallback",
-                        LogSanitizer.Sanitize(p.Name));
-                }
             }
             else
             {
-                // Disabling: unassign server
                 p.ObicoEnabled = false;
-                await _obicoServerAssignment.UnassignServerAsync(p.Id, ct);
             }
+        }
+
+        if (dto.PrintGuardEnabled.HasValue && dto.PrintGuardEnabled.Value != p.PrintGuardEnabled)
+        {
+            p.PrintGuardEnabled = dto.PrintGuardEnabled.Value;
         }
 
         // Track if any capability field changed to conditionally update LastCapabilityUpdate
@@ -2400,7 +2420,8 @@ public partial class PrintersController(
             UseModelDispatchDefaults: p.UseModelDispatchDefaults,
             RowVersion: EncodeRowVersion(p.RowVersion),
             ConfigurationRevision: p.ConfigurationRevision,
-            ShowExternalSpool: p.ShowExternalSpool);
+            ShowExternalSpool: p.ShowExternalSpool,
+            PrintGuardEnabled: p.PrintGuardEnabled);
 
         return Ok(dtoResponse);
     }
@@ -2577,12 +2598,14 @@ public partial class PrintersController(
     /// <response code="200">Returns the command execution result.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
     /// <response code="409">If the printer is currently busy (e.g., printing).</response>
+    /// <response code="502">If the backend explicitly rejects unsupported homing.</response>
     /// <response code="500">If there was an error executing the homing command.</response>
     [HttpPost("{id:guid}/home")]
     [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(409)]
+    [ProducesResponseType(502)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> HomeAsync(Guid id, CancellationToken ct)
     {
@@ -2603,12 +2626,14 @@ public partial class PrintersController(
     /// <response code="200">Returns the command execution result.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
     /// <response code="409">If the printer is currently busy (e.g., printing).</response>
+    /// <response code="502">If the backend explicitly rejects unsupported homing.</response>
     /// <response code="500">If there was an error executing the homing command.</response>
     [HttpPost("{id:guid}/homexy")]
     [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(409)]
+    [ProducesResponseType(502)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> HomeXYAsync(Guid id, CancellationToken ct)
     {
@@ -2629,12 +2654,14 @@ public partial class PrintersController(
     /// <response code="200">Returns the command execution result.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
     /// <response code="409">If the printer is currently busy (e.g., printing).</response>
+    /// <response code="502">If the backend explicitly rejects unsupported homing.</response>
     /// <response code="500">If there was an error executing the homing command.</response>
     [HttpPost("{id:guid}/homez")]
     [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(409)]
+    [ProducesResponseType(502)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> HomeZAsync(Guid id, CancellationToken ct)
     {
@@ -2804,6 +2831,16 @@ public partial class PrintersController(
             return StatusCode(
                 StatusCodes.Status503ServiceUnavailable,
                 new CommandResult(false, message));
+        }
+        catch (PrinterBackendUnsupportedException exception)
+        {
+            await _physicalActuationService!.CompleteDirectAsync(
+                begin.Lease,
+                accepted: false,
+                "backend_control_unsupported",
+                CancellationToken.None);
+            _logger.LogInformation("Printer {PrinterId} rejected unsupported operation {Operation}", printerId, LogSanitizer.Sanitize(operation));
+            return StatusCode(StatusCodes.Status502BadGateway, new CommandResult(false, exception.Message));
         }
         catch (OperationCanceledException)
         {

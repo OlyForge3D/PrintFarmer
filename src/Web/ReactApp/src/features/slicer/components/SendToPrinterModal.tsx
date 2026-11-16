@@ -23,13 +23,14 @@ interface SendToPrinterModalProps {
   onClose: () => void;
   jobId: string;
   artifactId: string;
+  defaultPrinterId?: string | null;
   selectedSpoolId?: number | null;
   requiredPrinterModel?: string;
   requiredMaterialType?: string;
   requiredNozzleDiameter?: number;
 }
 
-export function SendToPrinterModal({ isOpen, onClose, jobId, artifactId, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter }: SendToPrinterModalProps) {
+export function SendToPrinterModal({ isOpen, onClose, jobId, artifactId, defaultPrinterId, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter }: SendToPrinterModalProps) {
   return (
     <Modal
       isOpen={isOpen}
@@ -40,8 +41,10 @@ export function SendToPrinterModal({ isOpen, onClose, jobId, artifactId, selecte
     >
       {isOpen && (
         <SendToPrinterForm
+          key={`${jobId}:${artifactId}`}
           jobId={jobId}
           artifactId={artifactId}
+          defaultPrinterId={defaultPrinterId}
           onClose={onClose}
           selectedSpoolId={selectedSpoolId}
           requiredPrinterModel={requiredPrinterModel}
@@ -56,6 +59,7 @@ export function SendToPrinterModal({ isOpen, onClose, jobId, artifactId, selecte
 interface SendToPrinterFormProps {
   jobId: string;
   artifactId: string;
+  defaultPrinterId?: string | null;
   onClose: () => void;
   selectedSpoolId?: number | null;
   requiredPrinterModel?: string;
@@ -63,14 +67,20 @@ interface SendToPrinterFormProps {
   requiredNozzleDiameter?: number;
 }
 
-function SendToPrinterForm({ jobId, artifactId, onClose, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter }: SendToPrinterFormProps) {
-  const [sendMode, setSendMode] = useState<SendMode>('direct');
+function SendToPrinterForm({ jobId, artifactId, defaultPrinterId, onClose, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter }: SendToPrinterFormProps) {
+  const [sendMode, setSendMode] = useState<SendMode>('queue');
+  const [selectedPrinterId, setSelectedPrinterId] = useState(defaultPrinterId ?? '');
+  const { data: printers = [], isLoading, isError } = usePrintersFast();
+  const onlinePrinters = sortPrintersByAvailability(printers.filter(p => p.isOnline));
+  const selectedPrinter = printers.find(p => p.id === selectedPrinterId);
+  const unavailable = !!selectedPrinterId && !onlinePrinters.some(p => p.id === selectedPrinterId);
+  const canSubmit = !isLoading && !isError && !unavailable && (sendMode === 'queue' || !!selectedPrinterId);
 
   return (
     <div className="space-y-4">
       {/* Segmented mode chooser */}
       <div className="flex rounded-md border border-pf-border overflow-hidden">
-        {(['direct', 'queue'] as const).map((mode) => {
+        {(['queue', 'direct'] as const).map((mode) => {
           const active = sendMode === mode;
           return (
             <Button
@@ -86,19 +96,43 @@ function SendToPrinterForm({ jobId, artifactId, onClose, selectedSpoolId, requir
                   : 'text-pf-text-secondary hover:text-pf-text-primary bg-pf-bg-0'
               }`}
             >
-              {mode === 'direct' ? 'Send to Printer' : 'Add to Queue'}
+              {mode === 'direct' ? 'Upload file only' : 'Add to Queue'}
             </Button>
           );
         })}
       </div>
 
+      <FormField label="Printer" htmlFor="send-printer-select" required={sendMode === 'direct'}>
+        <Select
+          id="send-printer-select"
+          value={selectedPrinterId}
+          onChange={(e) => setSelectedPrinterId(e.target.value)}
+          aria-label="Select printer"
+        >
+          <option value="">{sendMode === 'queue' ? 'Any compatible printer (auto-assign)' : 'Select a printer…'}</option>
+          {unavailable && (
+            <option value={selectedPrinterId} disabled>
+              {isLoading ? 'Loading selected printer…' : `${selectedPrinter?.name ?? 'Selected printer'} (${selectedPrinter ? 'offline' : 'unavailable'})`}
+            </option>
+          )}
+          {onlinePrinters.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </Select>
+      </FormField>
+      {isError && <p role="alert" className="text-sm text-pf-text-secondary">Unable to load printers. Try again before submitting.</p>}
+      {!isLoading && !isError && unavailable && (
+        <p role="alert" className="text-sm text-pf-text-secondary">
+          The selected printer is offline or unavailable. Choose another printer{sendMode === 'queue' ? ' or explicitly choose auto-assign' : ''}.
+        </p>
+      )}
       {sendMode === 'direct' ? (
-        <DirectSendForm jobId={jobId} artifactId={artifactId} onClose={onClose} />
+        <DirectSendForm jobId={jobId} artifactId={artifactId} onClose={onClose} selectedPrinterId={selectedPrinterId} printerName={selectedPrinter?.name} canSubmit={canSubmit} />
       ) : (
         <QueueForm
           jobId={jobId}
           artifactId={artifactId}
           onClose={onClose}
+          selectedPrinterId={selectedPrinterId}
+          canSubmit={canSubmit}
           selectedSpoolId={selectedSpoolId}
           requiredPrinterModel={requiredPrinterModel}
           requiredMaterialType={requiredMaterialType}
@@ -109,19 +143,14 @@ function SendToPrinterForm({ jobId, artifactId, onClose, selectedSpoolId, requir
   );
 }
 
-function DirectSendForm({ jobId, artifactId, onClose }: { jobId: string; artifactId: string; onClose: () => void }) {
-  const [selectedPrinterId, setSelectedPrinterId] = useState('');
+function DirectSendForm({ jobId, artifactId, onClose, selectedPrinterId, printerName, canSubmit }: { jobId: string; artifactId: string; onClose: () => void; selectedPrinterId: string; printerName?: string; canSubmit: boolean }) {
   const [startPrint, setStartPrint] = useState(false);
-
-  const { data: printers = [] } = usePrintersFast();
-  const onlinePrinters = sortPrintersByAvailability(printers.filter(p => p.isOnline));
 
   const sendMutation = useMutation({
     mutationFn: () =>
       sliceJobService.sendToPrinter(jobId, artifactId, selectedPrinterId, startPrint),
     onSuccess: (data: SendToPrinterResponse) => {
-      const printerName = onlinePrinters.find(p => p.id === selectedPrinterId)?.name ?? 'printer';
-      toast.success(`Sent ${data.fileName} to ${printerName}`);
+      toast.success(`Sent ${data.fileName} to ${printerName ?? 'printer'}`);
       onClose();
     },
     onError: (err: Error) => {
@@ -131,27 +160,9 @@ function DirectSendForm({ jobId, artifactId, onClose }: { jobId: string; artifac
 
   return (
     <>
-      <FormField label="Printer" htmlFor="send-printer-select" required>
-        <Select
-          id="send-printer-select"
-          value={selectedPrinterId}
-          onChange={(e) => setSelectedPrinterId(e.target.value)}
-          aria-label="Select printer"
-        >
-          <option value="">Select a printer…</option>
-          {onlinePrinters.map(p => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </Select>
-      </FormField>
-
-      {onlinePrinters.length === 0 && (
-        <p className="text-sm text-pf-text-secondary">
-          No online printers available. Ensure at least one printer is connected.
-        </p>
-      )}
+      <p className="text-sm text-pf-text-secondary">
+        Uploads the file to the printer without creating a PrintFarmer job.
+      </p>
 
       <Checkbox
         label="Start printing immediately"
@@ -165,12 +176,12 @@ function DirectSendForm({ jobId, artifactId, onClose }: { jobId: string; artifac
         </Button>
         <Button
           variant="primary"
-          onClick={() => sendMutation.mutate()}
+          onClick={() => { if (canSubmit) sendMutation.mutate(); }}
           loading={sendMutation.isPending}
-          disabled={!selectedPrinterId || sendMutation.isPending}
+          disabled={!canSubmit || sendMutation.isPending}
           iconLeft={<PrinterIcon className="w-4 h-4" />}
         >
-          Send to Printer
+          Upload file only
         </Button>
       </div>
     </>
@@ -181,13 +192,15 @@ interface QueueFormProps {
   jobId: string;
   artifactId: string;
   onClose: () => void;
+  selectedPrinterId: string;
+  canSubmit: boolean;
   selectedSpoolId?: number | null;
   requiredPrinterModel?: string;
   requiredMaterialType?: string;
   requiredNozzleDiameter?: number;
 }
 
-function QueueForm({ jobId, artifactId, onClose, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter }: QueueFormProps) {
+function QueueForm({ jobId, artifactId, onClose, selectedPrinterId, canSubmit, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter }: QueueFormProps) {
   const queryClient = useQueryClient();
   const [priority, setPriority] = useState('Normal');
   const [copies, setCopies] = useState(1);
@@ -196,6 +209,7 @@ function QueueForm({ jobId, artifactId, onClose, selectedSpoolId, requiredPrinte
     mutationFn: () =>
       sliceJobService.addSliceToQueue(jobId, {
         artifactId,
+        assignedPrinterId: selectedPrinterId || null,
         priority,
         copies,
         spoolId: selectedSpoolId ?? undefined,
@@ -249,7 +263,7 @@ function QueueForm({ jobId, artifactId, onClose, selectedSpoolId, requiredPrinte
 
       {hasRequirements && (
         <div className="space-y-1">
-          <p className="text-xs font-medium text-pf-text-secondary">Auto-assigned requirements</p>
+          <p className="text-xs font-medium text-pf-text-secondary">Printer requirements</p>
           <div className="flex flex-wrap gap-1.5">
             {requiredPrinterModel && (
               <span className="inline-flex items-center px-2 py-0.5 rounded-xs bg-pf-accent-bg/15 text-xs text-pf-accent font-medium">
@@ -267,12 +281,12 @@ function QueueForm({ jobId, artifactId, onClose, selectedSpoolId, requiredPrinte
               </span>
             )}
           </div>
-          <p className="text-xs text-pf-text-muted">A compatible printer will be auto-assigned.</p>
+          <p className="text-xs text-pf-text-muted">{selectedPrinterId ? 'The job will be queued for the selected printer.' : 'A compatible printer will be auto-assigned.'}</p>
         </div>
       )}
 
       {!hasRequirements && (
-        <p className="text-xs text-pf-text-muted">A compatible printer will be auto-assigned from the queue.</p>
+        <p className="text-xs text-pf-text-muted">{selectedPrinterId ? 'The job will be queued for the selected printer.' : 'A compatible printer will be auto-assigned from the queue.'}</p>
       )}
 
       <div className="flex items-center justify-end gap-2 mt-6">
@@ -281,9 +295,9 @@ function QueueForm({ jobId, artifactId, onClose, selectedSpoolId, requiredPrinte
         </Button>
         <Button
           variant="primary"
-          onClick={() => queueMutation.mutate()}
+          onClick={() => { if (canSubmit) queueMutation.mutate(); }}
           loading={queueMutation.isPending}
-          disabled={queueMutation.isPending}
+          disabled={!canSubmit || queueMutation.isPending}
         >
           Add to Queue
         </Button>

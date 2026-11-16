@@ -4,7 +4,35 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Remembered scan codes (#3754)** — Scanning a non-GTIN code such as an
+  Amazon FNSKU sticker (e.g. `X0022Z40I1`) now opens barcode intake instead of
+  dead-ending. The first scan lets you pick an existing filament or create a
+  new one; PrintFarmer remembers the exact code for that filament and adds a
+  spool. Later scans of the same code offer to add another spool of that
+  filament. Remembered codes are stored in PrintFarmer, separately from the
+  Spoolman GTIN mapping, and digit-only codes are never remembered.
+
 ### Fixed
+
+- **Unknown scan filament selection (#3783)** — Choose an existing filament
+  through alphabetically sorted material, matching vendor, and matching
+  filament name, rather than a flat list. Changing an earlier selection clears
+  later selections; the exact filament ID is retained.
+
+- **Scan / Add Spool saving (#3768)** — Choose an exact existing filament or
+  create one from confirmed required data before saving a spool. Save no longer
+  sends a missing filament ID or silently picks the first material/vendor match.
+  Successful creation IDs survive retry; uncertain writes require checking
+  inventory rather than blindly creating duplicates.
+
+- **Live queue and camera updates (#3684)** — Reordering the queue no longer
+  breaks live queue updates: `jobqueueupdate` now decodes the reorder payload
+  (`queuedAtUtc` timestamps, null `printerId` for unassigned jobs) as well as
+  the legacy shape. The queue list also refreshes on `queueevent`, and printer
+  detail reloads camera metadata on `camerasupdated` for that printer.
+  Undecodable queue events still trigger a refresh instead of being dropped.
 
 - **Disabled Scan spool pill (#3561, N3552-02)** — A disabled "Scan spool" pill
   now uses the same dimmed, striped disabled chrome as other printer controls,

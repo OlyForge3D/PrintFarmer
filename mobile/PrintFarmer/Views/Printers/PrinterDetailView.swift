@@ -167,6 +167,15 @@ struct PrinterDetailView: View {
                         }
                 }
             }
+            .sheet(item: $viewModel.pendingNFCTagLink) { tag in
+                NFCTagLinkView(
+                        uid: tag.uid,
+                        scannedData: viewModel.nfcTagLinkData,
+                        spoolService: services.spoolService
+                ) { spool in
+                        viewModel.completeNFCTagLink(to: spool)
+                }
+            }
             .alert("Scan Error", isPresented: .constant(viewModel.nfcScanError != nil)) {
                 Button("OK") { viewModel.nfcScanError = nil }
             } message: {
@@ -416,7 +425,10 @@ struct PrinterDetailView: View {
         controlsComposition = composition
         viewModel.isViewActive = true
         viewModel.setSnapshotPollingAllowed(isStatusPageForeground)
-        viewModel.configure(printerService: composition?.printerService ?? services.printerService)
+        viewModel.configure(
+            printerService: composition?.printerService ?? services.printerService,
+            spoolService: services.spoolService
+        )
         #if canImport(UIKit)
         if let nfc = services.nfcService {
             viewModel.configureNFCScanner(nfc)

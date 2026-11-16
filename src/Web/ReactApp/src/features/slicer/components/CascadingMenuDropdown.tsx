@@ -23,8 +23,9 @@ interface FilamentDropdownProps {
   customProfiles: CustomFilamentItem[];
   /** Currently selected profile name */
   selectedProfileName: string;
+  selectedCustomProfileId?: string;
   /** Called when a profile is selected */
-  onSelect: (profileName: string, source: 'system' | 'custom') => void;
+  onSelect: (profileName: string, source: 'system' | 'custom', customProfileId?: string) => void;
   /** Whether the dropdown is disabled */
   disabled?: boolean;
   /** Additional className for the trigger */
@@ -47,6 +48,7 @@ export function FilamentProfileDropdown({
   profiles,
   customProfiles,
   selectedProfileName,
+  selectedCustomProfileId,
   onSelect,
   disabled = false,
   className = '',
@@ -185,8 +187,9 @@ export function FilamentProfileDropdown({
     });
   };
 
-  const handleProfileClick = (name: string, source: 'system' | 'custom') => {
-    onSelect(name, source);
+  const handleProfileClick = (name: string, source: 'system' | 'custom', customProfileId?: string) => {
+    if (customProfileId) onSelect(name, source, customProfileId);
+    else onSelect(name, source);
     setIsOpen(false);
   };
 
@@ -210,7 +213,7 @@ export function FilamentProfileDropdown({
     return expandedMfrs;
   }, [searchQuery, filteredTree, expandedMfrs]);
 
-  const selectedProfile = profiles.find(p => p.name === selectedProfileName);
+  const selectedProfile = selectedCustomProfileId ? undefined : profiles.find(p => p.name === selectedProfileName);
   const displayLabel = selectedProfile?.name || customProfiles.find(p => p.name === selectedProfileName)?.name || '';
   // Material/type of the selected filament (system profiles expose it; custom
   // profiles only carry a name). Shown as a compact badge in the trigger.
@@ -359,12 +362,12 @@ export function FilamentProfileDropdown({
                   <button
                     key={p.id}
                     type="button"
-                    aria-current={selectedProfileName === p.name ? 'true' : undefined}
-                    onClick={() => handleProfileClick(p.name, 'custom')}
+                    aria-current={selectedCustomProfileId === p.id ? 'true' : undefined}
+                    onClick={() => handleProfileClick(p.name, 'custom', p.id)}
                     className={`w-full text-left px-4 py-1.5 text-sm flex items-center gap-2 transition-colors
-                      ${selectedProfileName === p.name ? 'text-pf-accent-2 bg-pf-accent-2/10' : 'text-pf-text-primary hover:bg-pf-bg-2'}`}
+                      ${selectedCustomProfileId === p.id ? 'text-pf-accent-2 bg-pf-accent-2/10' : 'text-pf-text-primary hover:bg-pf-bg-2'}`}
                   >
-                    {selectedProfileName === p.name && checkmark}
+                    {selectedCustomProfileId === p.id && checkmark}
                     <span className="truncate">★ {p.name}</span>
                   </button>
                 ))}
@@ -412,7 +415,7 @@ export function FilamentProfileDropdown({
                           {mat}
                         </div>
                         {matProfiles.map(prof => {
-                          const isSelected = prof.name === selectedProfileName;
+                          const isSelected = !selectedCustomProfileId && prof.name === selectedProfileName;
                           return (
                             <button
                               key={`${mfr}:${mat}:${prof.name}`}

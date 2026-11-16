@@ -57,7 +57,7 @@ public class ProfilesServiceListCustomProfilesTests
     private static Mock<IProcessProfileRepository> MockProcessRepo(Guid userId, params ProcessProfile[] profiles)
     {
         Mock<IProcessProfileRepository> mock = new(MockBehavior.Loose);
-        _ = mock.Setup(r => r.GetByUserAsync(userId, It.IsAny<CancellationToken>()))
+        _ = mock.Setup(r => r.GetOwnedNonSystemAsync(userId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(profiles.ToList());
         return mock;
     }
@@ -65,7 +65,7 @@ public class ProfilesServiceListCustomProfilesTests
     private static Mock<IFilamentProfileRepository> MockFilamentRepo(Guid userId, params FilamentProfile[] profiles)
     {
         Mock<IFilamentProfileRepository> mock = new(MockBehavior.Loose);
-        _ = mock.Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, false, userId, It.IsAny<CancellationToken>()))
+        _ = mock.Setup(r => r.GetOwnedNonSystemAsync(SlicerType.OrcaSlicer, userId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(profiles.ToList());
         return mock;
     }
@@ -73,7 +73,7 @@ public class ProfilesServiceListCustomProfilesTests
     private static Mock<IMachineProfileRepository> MockMachineRepo(Guid userId, params MachineProfile[] profiles)
     {
         Mock<IMachineProfileRepository> mock = new(MockBehavior.Loose);
-        _ = mock.Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, false, userId, It.IsAny<CancellationToken>()))
+        _ = mock.Setup(r => r.GetOwnedNonSystemAsync(SlicerType.OrcaSlicer, userId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(profiles.ToList());
         return mock;
     }
@@ -125,6 +125,136 @@ public class ProfilesServiceListCustomProfilesTests
         Assert.Equal(2, result.ProcessProfileCount);
         Assert.Equal(1, result.FilamentProfileCount);
         Assert.Equal(1, result.MachineProfileCount);
+    }
+
+    [Fact]
+    public async Task ListCustomProfilesAsync_ReturnsOwnedPublicNonSystemProfiles_AndExcludesOwnedSystemProfiles()
+    {
+        Guid userId = Guid.NewGuid();
+        ProcessProfile publicProcess = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Owned Public Process",
+            IsPublic = true,
+            IsSystem = false,
+            CreatedByUserId = userId,
+            SlicerType = SlicerType.PrusaSlicer
+        };
+        ProcessProfile systemProcess = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Owned System Process",
+            IsPublic = true,
+            IsSystem = true,
+            CreatedByUserId = userId
+        };
+        FilamentProfile publicFilament = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Owned Public Filament",
+            IsPublic = true,
+            IsSystem = false,
+            CreatedByUserId = userId
+        };
+        FilamentProfile systemFilament = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Owned System Filament",
+            IsPublic = true,
+            IsSystem = true,
+            CreatedByUserId = userId
+        };
+        MachineProfile publicMachine = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Owned Public Machine",
+            IsPublic = true,
+            IsSystem = false,
+            CreatedByUserId = userId
+        };
+        MachineProfile systemMachine = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Owned System Machine",
+            IsPublic = true,
+            IsSystem = true,
+            CreatedByUserId = userId
+        };
+
+        ProfilesService svc = CreateService(
+            MockProcessRepo(userId, publicProcess, systemProcess).Object,
+            MockFilamentRepo(userId, publicFilament, systemFilament).Object,
+            MockMachineRepo(userId, publicMachine, systemMachine).Object);
+
+        CustomProfilesListResponseDto result = await svc.ListCustomProfilesAsync(userId, CancellationToken.None);
+
+        Assert.Equal(3, result.TotalCount);
+        Assert.Equal(1, result.ProcessProfileCount);
+        Assert.Equal(1, result.FilamentProfileCount);
+        Assert.Equal(1, result.MachineProfileCount);
+        Assert.Equal(
+            new[] { publicProcess.Id, publicFilament.Id, publicMachine.Id },
+            result.Profiles.Select(profile => profile.Id));
+        Assert.DoesNotContain(result.Profiles, profile =>
+            profile.Id == systemProcess.Id || profile.Id == systemFilament.Id || profile.Id == systemMachine.Id);
+    }
+
+    [Fact]
+    public async Task ListCustomProfilesAsync_PreservesOwnedRawJsonAndCompatibilityFields()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid printerModelId = Guid.NewGuid();
+        ProcessProfile process = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Process",
+            IsSystem = false,
+            CreatedByUserId = userId,
+            PrinterModelId = printerModelId,
+            RawJson = "{\"process\":\"owned\"}",
+            CompatiblePrinters = "Prusa MK4, Bambu X1C"
+        };
+        FilamentProfile filament = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Filament",
+            IsSystem = false,
+            CreatedByUserId = userId,
+            RawJson = "{\"filament\":\"owned\"}",
+            CompatiblePrinters = "Prusa MK4"
+        };
+        MachineProfile machine = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Machine",
+            IsSystem = false,
+            CreatedByUserId = userId,
+            PrinterModelId = printerModelId,
+            RawJson = "{\"machine\":\"owned\"}"
+        };
+
+        ProfilesService svc = CreateService(
+            MockProcessRepo(userId, process).Object,
+            MockFilamentRepo(userId, filament).Object,
+            MockMachineRepo(userId, machine).Object);
+
+        CustomProfilesListResponseDto result = await svc.ListCustomProfilesAsync(userId, CancellationToken.None);
+
+        Assert.Equal(3, result.TotalCount);
+        Assert.Equal(1, result.ProcessProfileCount);
+        Assert.Equal(1, result.FilamentProfileCount);
+        Assert.Equal(1, result.MachineProfileCount);
+
+        CustomProfileDto[] profiles = result.Profiles.ToArray();
+        Assert.Equal(new[] { "process", "filament", "machine" }, profiles.Select(profile => profile.ProfileType));
+        Assert.Equal(process.RawJson, profiles[0].RawJson);
+        Assert.Equal(new[] { "Prusa MK4", "Bambu X1C" }, profiles[0].CompatiblePrinters);
+        Assert.Equal(printerModelId, profiles[0].PrinterModelId);
+        Assert.Equal(filament.RawJson, profiles[1].RawJson);
+        Assert.Equal(new[] { "Prusa MK4" }, profiles[1].CompatiblePrinters);
+        Assert.Equal(machine.RawJson, profiles[2].RawJson);
+        Assert.Equal(printerModelId, profiles[2].PrinterModelId);
+        Assert.Null(profiles[2].CompatiblePrinters);
     }
 
     [Fact]

@@ -90,12 +90,36 @@ public interface ISpoolmanService
     Task<SpoolmanFilamentDto?> GetFilamentByIdAsync(int filamentId, CancellationToken ct);
 
     /// <summary>
+    /// Gets a filament by ID, distinguishing a missing filament from a failure.
+    /// </summary>
+    /// <returns>The filament, or null only when Spoolman answers 404 Not Found.</returns>
+    /// <exception cref="Farm.Infrastructure.Exceptions.SpoolmanApiException">
+    /// When Spoolman is not configured, unreachable, or returns any other non-success status.
+    /// </exception>
+    Task<SpoolmanFilamentDto?> FindFilamentByIdAsync(int filamentId, CancellationToken ct);
+
+    /// <summary>
     /// Gets detailed information about a specific filament spool by its ID.
     /// </summary>
     /// <param name="spoolId">The unique identifier of the spool to retrieve</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the spool information, or null if the spool doesn't exist</returns>
     Task<SpoolmanSpoolDto?> GetSpoolByIdAsync(int spoolId, CancellationToken ct);
+
+    /// <summary>
+    /// Resolves an NFC tag UID through Spoolman's persistent tag mapping.
+    /// </summary>
+    Task<SpoolmanTagScanResultDto> ScanTagAsync(SpoolmanTagScanRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// Associates an NFC tag UID with a Spoolman spool.
+    /// </summary>
+    Task LinkTagToSpoolAsync(int spoolId, string uid, CancellationToken ct);
+
+    /// <summary>
+    /// Removes an NFC tag UID association from a Spoolman spool.
+    /// </summary>
+    Task UnlinkTagFromSpoolAsync(int spoolId, string uid, CancellationToken ct);
 
     /// <summary>
     /// Creates a new spool in Spoolman. Returns the created spool with its ID.
@@ -187,6 +211,12 @@ public interface ISpoolmanService
     /// Deletes a filament from Spoolman by its ID.
     /// </summary>
     Task DeleteFilamentFromSpoolmanAsync(int filamentId, CancellationToken ct);
+
+    /// <summary>Reads all referencing spools, including archived spools, without deleting anything.</summary>
+    Task<SpoolmanFilamentDeletePreview> PreviewFilamentDeleteAsync(int filamentId, CancellationToken ct);
+
+    /// <summary>Deletes only explicitly confirmed archived spools, then the filament, after fresh checks.</summary>
+    Task DeleteFilamentWithArchivedSpoolsAsync(int filamentId, int[] archivedSpoolIds, CancellationToken ct);
 
     /// <summary>
     /// Bulk-deletes multiple filaments from Spoolman. Returns success/error counts.

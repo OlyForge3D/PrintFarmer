@@ -289,10 +289,17 @@ interface ProjectCardProps {
  onDelete: (e: React.MouseEvent) => void;
 }
 
-const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onDelete }) => {
+export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onDelete }) => {
  return (
- <Card hoverable onClick={onClick} className="cursor-pointer">
- <Card.Body className="p-4">
+ <Card hoverable className="relative">
+ <Button
+ type="button"
+ variant="unstyled"
+ aria-label={`Open project ${project.name}`}
+ onClick={onClick}
+ className="absolute inset-0 z-0 cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-pf-accent"
+ />
+ <Card.Body className="relative z-10 p-4 pointer-events-none">
  <div className="flex items-start justify-between gap-2 mb-3">
  <h3 className="font-semibold text-pf-text-primary truncate flex-1">
  {project.name}
@@ -343,11 +350,13 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onDelete })
  )}
 
  <Button
+ type="button"
  variant="subtle"
  size="sm"
  onClick={onDelete}
- className="!p-1 opacity-50 hover:opacity-100 hover:text-pf-error-text"
+ className="relative z-10 !p-1 opacity-50 hover:opacity-100 hover:text-pf-error-text pointer-events-auto"
  title="Delete project"
+ aria-label={`Delete project ${project.name}`}
  >
  <DeleteIcon className="w-4 h-4" />
  </Button>

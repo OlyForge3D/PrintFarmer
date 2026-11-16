@@ -24,6 +24,7 @@ public interface IFailureDetectionIncidentHistoryService
         decimal confidence,
         DateTime detectedAt,
         string? snapshotUrl,
+        string provider,
         bool autoPaused,
         CancellationToken ct = default);
 
@@ -94,6 +95,7 @@ public sealed class FailureDetectionIncidentHistoryService : IFailureDetectionIn
     /// <param name="confidence">The model confidence that triggered the incident.</param>
     /// <param name="detectedAt">When the incident was detected.</param>
     /// <param name="snapshotUrl">The snapshot URL used for analysis, if known.</param>
+    /// <param name="provider">The provider that detected the possible failure.</param>
     /// <param name="autoPaused">Whether the active print was auto-paused.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<FailureDetectionIncident> RecordFailureAsync(
@@ -104,6 +106,7 @@ public sealed class FailureDetectionIncidentHistoryService : IFailureDetectionIn
         decimal confidence,
         DateTime detectedAt,
         string? snapshotUrl,
+        string provider,
         bool autoPaused,
         CancellationToken ct = default)
     {
@@ -111,6 +114,7 @@ public sealed class FailureDetectionIncidentHistoryService : IFailureDetectionIn
         {
             Id = Guid.NewGuid(),
             PrinterId = printerId,
+            Provider = provider,
             JobId = jobId,
             JobName = jobName,
             FileName = fileName,
@@ -196,6 +200,7 @@ public sealed class FailureDetectionIncidentHistoryService : IFailureDetectionIn
             {
                 Id = incident.Id,
                 PrinterId = incident.PrinterId,
+                Provider = incident.Provider,
                 PrinterName = incident.Printer!.Name,
                 JobId = incident.JobId,
                 JobName = incident.JobName,

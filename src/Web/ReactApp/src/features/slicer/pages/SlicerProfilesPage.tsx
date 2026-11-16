@@ -796,7 +796,7 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
           <div className="p-4 border-b border-pf-border">
             <div className="flex items-center gap-4 mb-4">
               <div className="flex-1 relative">
-                <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pf-text-muted" />
+                <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pf-text-secondary" />
                 <Input
                   type="text"
                   placeholder="Search profiles by name, material, or manufacturer..."
@@ -898,11 +898,11 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
             {/* Active Filter Summary and Tabs */}
             <div className="flex items-center justify-between mt-3">
               <div className="flex items-center gap-4">
-                <p className="text-sm text-pf-text-muted">
+                <p className="text-sm text-pf-text-secondary">
                   Showing {getFilteredCount()} profile(s)
                 </p>
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-pf-text-muted">Rows</span>
+                  <span className="text-sm text-pf-text-secondary">Rows</span>
                   <Select
                     value={String(pageSize)}
                     onChange={(e) => setPageSize(Number(e.target.value))}
@@ -963,7 +963,13 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
           </div>
 
           {/* Profiles Table */}
-          <div className="p-4">
+          <div
+            className="p-4"
+            role="tabpanel"
+            id={`panel-${activeTab}`}
+            aria-labelledby={`tab-${activeTab}`}
+            tabIndex={0}
+          >
             {libraryUnavailable && (
               <Alert type="warning" title="Profile library unavailable" className="mb-4">
                 OrcaSlicer worker unavailable; the profile library cannot be listed. My Profiles is still available.
@@ -976,28 +982,28 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
             )}
             {isLoading && activeTab !== 'custom' && <div>Loading profiles...</div>}
             {!isLoading && !libraryUnavailable && !libraryRequestFailed && getFilteredCount() === 0 && activeTab === 'machines' && (
-              <div className="text-pf-text-muted text-sm">No profiles match your filters.</div>
+              <div className="text-pf-text-secondary text-sm">No profiles match your filters.</div>
             )}
             {!isLoading && activeTab === 'processes' && !selectedMachineModelId && (
-              <div className="text-pf-text-muted text-sm">Select a printer model to see compatible processes.</div>
+              <div className="text-pf-text-secondary text-sm">Select a printer model to see compatible processes.</div>
             )}
             {!isLoading && activeTab === 'filaments' && !selectedMachineModelId && (
-              <div className="text-pf-text-muted text-sm">Select a printer model to see compatible filaments.</div>
+              <div className="text-pf-text-secondary text-sm">Select a printer model to see compatible filaments.</div>
             )}
             {activeTab === 'processes' && selectedMachineModelId && processProfilesQuery.isLoading && (
-              <div className="text-pf-text-muted text-sm">Loading compatible processes...</div>
+              <div className="text-pf-text-secondary text-sm">Loading compatible processes...</div>
             )}
             {activeTab === 'filaments' && selectedMachineModelId && filamentProfilesQuery.isLoading && (
-              <div className="text-pf-text-muted text-sm">Loading compatible filaments...</div>
+              <div className="text-pf-text-secondary text-sm">Loading compatible filaments...</div>
             )}
             {activeTab === 'processes' && selectedMachineModelId && !processProfilesQuery.isLoading && !libraryUnavailable && !libraryRequestFailed && filteredProcessProfiles.length === 0 && (
-              <div className="text-pf-text-muted text-sm">No compatible process profiles found for the selected machines.</div>
+              <div className="text-pf-text-secondary text-sm">No compatible process profiles found for the selected machines.</div>
             )}
             {activeTab === 'filaments' && selectedMachineModelId && !filamentProfilesQuery.isLoading && !libraryUnavailable && !libraryRequestFailed && filteredFilamentProfiles.length === 0 && (
-              <div className="text-pf-text-muted text-sm">No compatible filament profiles found for the selected machines.</div>
+              <div className="text-pf-text-secondary text-sm">No compatible filament profiles found for the selected machines.</div>
             )}
             {activeTab === 'filaments' && selectedMachineModelId && !libraryUnavailable && !libraryRequestFailed && (
-              <p className="text-pf-text-muted text-sm mb-3">Includes universal library filaments.</p>
+              <p className="text-pf-text-secondary text-sm mb-3">Includes universal library filaments.</p>
             )}
             
             {/* Custom Profiles Tab Content */}
@@ -1006,7 +1012,7 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
                 {customProfilesLoading && <div>Loading custom profiles...</div>}
                 {!customProfilesLoading && filteredCustomProfiles.length === 0 && (
                   <div className="text-center py-8">
-                    <p className="text-pf-text-muted mb-4">No custom profiles yet.</p>
+                    <p className="text-pf-text-secondary mb-4">No custom profiles yet.</p>
                     <p className="text-sm text-pf-text-secondary mb-4">
                       Create custom profiles by cloning system profiles or uploading your own.
                     </p>
@@ -1099,7 +1105,7 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
                   </tbody>
                 </table>
                 <div className="flex items-center justify-between mt-3">
-                  <p className="text-sm text-pf-text-muted">
+                  <p className="text-sm text-pf-text-secondary">
                     Page {safePageNumber} of {totalPages}
                   </p>
                   <div className="flex items-center gap-2">
@@ -1162,33 +1168,42 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
             Paste raw slicer profile JSON exported from your slicer application. This is for advanced users only.
           </p>
 
-          <FormField label="Raw Profile JSON" required helper="Paste raw slicer profile JSON exported from your slicer.">
+          <FormField
+            label="Raw Profile JSON"
+            htmlFor="import-profile-raw-json"
+            required
+            helper="Paste raw slicer profile JSON exported from your slicer."
+          >
             <Textarea
+              id="import-profile-raw-json"
               placeholder={'{\n  "layer_height": 0.2, ...\n}'}
               value={rawJson}
               onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setRawJson(e.target.value)}
+              aria-required="true"
               rows={12}
             />
           </FormField>
-          <FormField label="Name" helper="Optional; derived automatically if left blank.">
+          <FormField label="Name" htmlFor="import-profile-name" helper="Optional; derived automatically if left blank.">
             <Input
+              id="import-profile-name"
               type="text"
               placeholder="Profile name"
               value={name}
               onChange={e => setName(e.target.value)}
             />
           </FormField>
-          <FormField label="Description">
+          <FormField label="Description" htmlFor="import-profile-description">
             <Input
+              id="import-profile-description"
               type="text"
               placeholder="Description"
               value={description}
               onChange={e => setDescription(e.target.value)}
             />
           </FormField>
-          <FormField label="Slicer Engine" required>
+          <FormField label="Slicer Engine" htmlFor="import-profile-slicer-engine" required>
             <Select
-              aria-label="Slicer engine"
+              id="import-profile-slicer-engine"
               value={slicerType}
               onChange={e => setSlicerType(e.target.value)}
             >
