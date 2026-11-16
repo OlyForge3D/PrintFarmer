@@ -1214,7 +1214,11 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             onMove={handleMove}
             onMoveTo={backendCapabilities?.supportsAbsoluteMovement === true ? handleMoveTo : undefined}
           />
-          <PrinterMotionHelp movementUnavailable={backendCapabilities?.supportsRelativeMovement === false} />
+          <PrinterMotionHelp
+            movementSupportStatus={backendCapabilities?.movementSupportStatus}
+            movementUnavailable={backendCapabilities?.supportsRelativeMovement === false}
+            backend={backendCapabilities?.backend}
+          />
         </CollapsibleSection>
 
         {/* Temperatures Section */}

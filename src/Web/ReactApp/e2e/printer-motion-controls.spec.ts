@@ -61,4 +61,30 @@ test.describe('Printer motion feedback without physical commands', () => {
     }
     expect(await page.evaluate(() => localStorage.getItem('pf.printer-controls.mode'))).toBeNull();
   });
+
+  for (const state of [
+    {
+      name: 'unknown',
+      message: "PrintFarmer could not confirm remote Home and jog support. Check the printer connection and credentials, then reload this page to check again. Use the printer's physical controls while remote motion is unavailable.",
+    },
+    {
+      name: 'unsupported',
+      message: "Remote Home and jog controls are not supported by this printer's API. Use the printer's physical controls.",
+    },
+  ]) {
+    for (const viewportWidth of [1280, 390]) {
+      test(`shows ${state.name} support with disabled controls at ${viewportWidth}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width: viewportWidth, height: 900 });
+        await page.goto(`/src/test/fixtures/printer-motion.html?support=${state.name}`);
+        const region = page.getByRole('region', { name: `Motion support ${state.name === 'unknown' ? 'Unknown' : 'Unsupported'}` });
+        await expect(region.getByText(state.message, { exact: true })).toBeVisible();
+        for (const control of await region.getByRole('button', { name: /Home all axes|Home X\/Y|Home Z|Jog [XYZ]/ }).all()) {
+          await expect(control).toBeDisabled();
+        }
+        const screenshot = testInfo.outputPath(`${state.name}-${viewportWidth}.png`);
+        await page.screenshot({ path: screenshot, fullPage: true });
+        await testInfo.attach(`${state.name}-${viewportWidth}`, { path: screenshot, contentType: 'image/png' });
+      });
+    }
+  }
 });

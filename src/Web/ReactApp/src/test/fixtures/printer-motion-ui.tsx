@@ -4,7 +4,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Button } from '@/common/components/ui';
 import { AuthContext } from '@/common/contexts/auth-context';
 import { PrinterCoordinateRow } from '@/features/printers/components/PrinterCoordinateRow';
+import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
 import { PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
+import { PrinterBackend } from '@/types/api';
 import '@/index.css';
 
 export function mountCoordinates(element: HTMLElement) {
@@ -43,15 +45,53 @@ export function mountCoordinates(element: HTMLElement) {
     userId: 'fixture-user', theme: 'dark', locale: 'en', itemsPerPage: 25,
     defaultSlicerPreset: null, printablesUsername: null, printerControlMode: 'Guided', rowVersion: 'v1',
   });
+  const supportState = new URLSearchParams(window.location.search).get('support');
+  const motionSupportStatus = supportState === 'unknown'
+    ? 'Unknown'
+    : supportState === 'unsupported' ? 'Unsupported' : undefined;
   createRoot(element).render(
     <QueryClientProvider client={queryClient}>
       <AuthContext value={{ user: null, isAuthenticated: true, isLoading: false, hasPermission: () => true,
         hasRole: () => false, error: null, login: async () => false, loginWithPasskey: async () => false,
         register: async () => false, logout: async () => {} }}>
-      <div className="grid gap-6 p-3">
-        <CoordinateControls name="Detail coordinates" width={420} />
-        <CoordinateControls name="Sidebar coordinates" width={280} />
-      </div>
+      {motionSupportStatus
+        ? <section aria-label={`Motion support ${motionSupportStatus}`} className="max-w-[420px] p-3">
+            <MovementControlSection
+              moveX=""
+              moveY=""
+              moveZ=""
+              step={1}
+              extrudeStep={5}
+              extrudeSpeed={5}
+              homedAxes="xyz"
+              movementActionPending={false}
+              movementUnavailable={motionSupportStatus !== 'Supported'}
+              movementSupportStatus={motionSupportStatus}
+              backend={PrinterBackend.PrusaLink}
+              canMove={motionSupportStatus === 'Supported'}
+              canHomeAll={motionSupportStatus === 'Supported'}
+              canHomeXY={motionSupportStatus === 'Supported'}
+              canHomeZ={motionSupportStatus === 'Supported'}
+              canDisableMotors={false}
+              canSetStep={motionSupportStatus === 'Supported'}
+              canManualMove={motionSupportStatus === 'Supported'}
+              canExtrude={false}
+              onMoveXChange={() => {}}
+              onMoveYChange={() => {}}
+              onMoveZChange={() => {}}
+              onStepChange={() => {}}
+              onExtrudeStepChange={() => {}}
+              onExtrudeSpeedChange={() => {}}
+              onMove={() => {}}
+              onHome={() => {}}
+              onDisableMotors={() => {}}
+              onExtrude={() => {}}
+            />
+          </section>
+        : <div className="grid gap-6 p-3">
+            <CoordinateControls name="Detail coordinates" width={420} />
+            <CoordinateControls name="Sidebar coordinates" width={280} />
+          </div>}
       </AuthContext>
     </QueryClientProvider>,
   );

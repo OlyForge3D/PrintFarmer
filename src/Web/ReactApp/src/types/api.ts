@@ -750,6 +750,8 @@ export interface PrinterVersionInfo {
   recordedFirmwareIdentity?: CalibrationFirmwareIdentityDto | null;
 }
 
+export type PrinterMovementSupportStatus = 'Supported' | 'Unsupported' | 'Unknown';
+
 export interface PrinterBackendCapabilitiesDto {
   printerId: string;
   printerName: string;
@@ -762,6 +764,7 @@ export interface PrinterBackendCapabilitiesDto {
   supportsControlOperations: boolean;
   supportsFileMetadata: boolean;
   supportsMovement: boolean;
+  movementSupportStatus?: PrinterMovementSupportStatus;
   supportsRelativeMovement?: boolean;
   supportsAbsoluteMovement?: boolean;
   supportsHoming?: boolean;
