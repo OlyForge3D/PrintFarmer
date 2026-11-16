@@ -159,6 +159,19 @@ describe('TasksWidget', () => {
 
     // Badge total (3)
     expect(screen.getByTestId('tasks-widget-badge')).toHaveTextContent('3');
+    expect(screen.queryByText(/Profile import tasks mean/)).not.toBeInTheDocument();
+  });
+
+  it('explains that profile import tasks are missing imports rather than updates', async () => {
+    vi.mocked(tasksApi.getShiftPlan).mockResolvedValue({
+      mode: 'flat',
+      tasks: [baseTask({ taskType: TaskType.ProfileImport, title: 'Import slicer profiles for Prusa MK4S' })],
+    });
+    renderWidget();
+    expect(await screen.findByText('Profile import tasks mean missing imported profiles, not profile updates.')).toBeInTheDocument();
+    expect(screen.getByText('Dismissing an import task hides it farm-wide for this model/printer group, not just for you.')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Dismiss Import slicer profiles for Prusa MK4S' }))
+      .toHaveAccessibleDescription('Dismissing an import task hides it farm-wide for this model/printer group, not just for you.');
   });
 
   it('deep-links each source kind to the correct existing route', async () => {

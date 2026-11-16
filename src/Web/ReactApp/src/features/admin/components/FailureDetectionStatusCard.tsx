@@ -182,6 +182,22 @@ export function FailureDetectionStatusCard() {
             </div>
           </div>
         )}
+        {data.printers.some(printer => printer.providers?.length) && (
+          <section className="space-y-2" aria-label="Detection provider status">
+            <h3 className="text-sm font-semibold text-pf-text-primary">Detection providers</h3>
+            {data.printers.map(printer => (
+              <div key={printer.printerId} className="rounded-lg border border-pf-border bg-pf-bg-1 px-4 py-3">
+                <div className="font-medium text-pf-text-primary">{printer.printerName}</div>
+                {printer.providers?.length ? printer.providers.map(provider => (
+                  <div key={provider.provider} className="mt-1 text-sm text-pf-text-secondary">
+                    <span className="font-medium">{provider.provider}</span>
+                    {' - '}{provider.state} ({provider.analysisMode}): {provider.reason}
+                  </div>
+                )) : <p className="text-sm text-pf-text-secondary">No provider status reported</p>}
+              </div>
+            ))}
+          </section>
+        )}
       </Card.Body>
     </Card>
   );

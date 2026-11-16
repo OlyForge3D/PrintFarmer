@@ -38,7 +38,7 @@ function mergePrinterDisplay(printer: Printer, signalRStatus: PrinterStatusUpdat
     thumbnailUrl: signalRStatus?.thumbnailUrl !== undefined ? signalRStatus.thumbnailUrl : printer.thumbnailUrl,
     cameraStreamUrl: signalRStatus?.cameraStreamUrl !== undefined ? signalRStatus.cameraStreamUrl : printer.cameraStreamUrl,
     cameraSnapshotUrl: signalRStatus?.cameraSnapshotUrl !== undefined ? signalRStatus.cameraSnapshotUrl : printer.cameraSnapshotUrl,
-    homedAxes: signalRStatus?.homedAxes !== undefined ? signalRStatus.homedAxes : printer.homedAxes,
+    homedAxes: hasMoonrakerSnapshot || signalRStatus?.homedAxes !== undefined ? signalRStatus?.homedAxes : printer.homedAxes,
     x: signalRStatus?.x !== undefined ? signalRStatus.x : printer.x,
     y: signalRStatus?.y !== undefined ? signalRStatus.y : printer.y,
     z: signalRStatus?.z !== undefined ? signalRStatus.z : printer.z,

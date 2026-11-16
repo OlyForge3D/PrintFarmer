@@ -131,7 +131,12 @@ test.describe('Printer Status — Moonraker', () => {
     await expect(card.getByRole('button', { name: 'View print history' })).toBeDisabled();
 
     // Offline-specific troubleshooting guidance must render for an unreachable printer.
-    await expect(card.getByRole('button', { name: 'Toggle offline troubleshooting guide' })).toBeVisible();
+    await card.getByRole('button', { name: `Open troubleshooting for ${MOONRAKER_PRINTERS.offline}` }).click();
+    const troubleshooting = page.getByRole('dialog', { name: 'Troubleshooting', exact: true });
+    await expect(troubleshooting).toBeVisible();
+    await expect(troubleshooting).toContainText(MOONRAKER_PRINTERS.offline);
+    await troubleshooting.getByRole('button', { name: 'Close troubleshooting' }).click();
+    await expect(troubleshooting).toBeHidden();
   });
 
   test('printers page shows a loading state before printer data resolves', async ({ page }) => {

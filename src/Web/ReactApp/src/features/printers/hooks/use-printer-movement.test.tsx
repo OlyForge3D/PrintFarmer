@@ -77,6 +77,22 @@ describe('direct printer movement', () => {
     ));
   });
 
+  it('preserves backend uncertainty guidance without duplicating it or adding a second period', async () => {
+    const message = 'The motion outcome is unknown; check the printer before requesting another move.';
+    vi.mocked(apiClient.homePrinter).mockRejectedValue(new Error(message));
+    const { result } = setup();
+    await act(async () => expect(result.current.execute({ kind: 'HomeAll' })).rejects.toThrow(new Error(message)));
+    expect(apiClient.homePrinter).toHaveBeenCalledOnce();
+  });
+
+  it('does not describe definitive unsupported-command rejection as uncertain motion', async () => {
+    const message = 'This PrusaLink firmware does not expose remote Home or jog controls. Use the printer\'s physical controls.';
+    vi.mocked(apiClient.homePrinter).mockRejectedValue({ message, statusCode: 502 });
+    const { result } = setup();
+    await act(async () => expect(result.current.execute({ kind: 'HomeAll' })).rejects.toThrow(new Error(message)));
+    expect(apiClient.homePrinter).toHaveBeenCalledOnce();
+  });
+
   it('returns a rejected command without invalidating or retrying', async () => {
     vi.mocked(apiClient.homePrinter).mockResolvedValue({ success: false, error: 'Safety check failed' });
     const { result, client } = setup();

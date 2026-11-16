@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useId } from 'react';
 import { 
   Button, 
   Input, 
@@ -550,6 +550,7 @@ function NozzleForm({
   isSubmitting,
   submitLabel,
 }: NozzleFormProps) {
+  const fieldId = useId();
   const [customDiameter, setCustomDiameter] = useState('');
   const [showCustomDiameter, setShowCustomDiameter] = useState(false);
 
@@ -601,10 +602,11 @@ function NozzleForm({
       </FormField>
 
       <div className="grid grid-cols-3 gap-4">
-        <FormField label="Diameter (mm)" required error={formErrors.diameter}>
+        <FormField label="Diameter (mm)" htmlFor={`${fieldId}-diameter`} required error={formErrors.diameter}>
           {showCustomDiameter ? (
             <div className="flex gap-2">
               <Input
+                id={`${fieldId}-diameter`}
                 type="number"
                 step="0.01"
                 min="0.1"
@@ -635,6 +637,7 @@ function NozzleForm({
             </div>
           ) : (
             <Select
+              id={`${fieldId}-diameter`}
               value={formState.diameter}
               onChange={(e) => handleDiameterChange(e.target.value)}
             >
@@ -648,8 +651,9 @@ function NozzleForm({
           )}
         </FormField>
 
-        <FormField label="Material" required error={formErrors.nozzleMaterialId}>
+        <FormField label="Material" htmlFor={`${fieldId}-material`} required error={formErrors.nozzleMaterialId}>
           <Select
+            id={`${fieldId}-material`}
             value={formState.nozzleMaterialId}
             onChange={(e) => onMaterialChange(e.target.value)}
           >
@@ -679,6 +683,7 @@ function NozzleForm({
 
       <FormField
         label="Hardness"
+        htmlFor={`${fieldId}-hardness`}
         helper={
           formState.hardnessOverride === 'Auto'
             ? (() => {
@@ -691,6 +696,7 @@ function NozzleForm({
         }
       >
         <Select
+          id={`${fieldId}-hardness`}
           value={formState.hardnessOverride}
           onChange={(e) => onFieldChange('hardnessOverride', e.target.value)}
         >

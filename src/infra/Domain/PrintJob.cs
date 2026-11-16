@@ -36,6 +36,9 @@ public class PrintJob : IRevisionedEntity
 
     public PrintJobStatus Status { get; set; }
 
+    /// <summary>Whether this active job needs explicit operator review before service-status changes.</summary>
+    public bool RequiresOperatorReview { get; set; }
+
     public int Priority { get; set; } = (int)PrintJobPriority.Normal; // Higher = more important
 
     public int QueuePosition { get; set; }

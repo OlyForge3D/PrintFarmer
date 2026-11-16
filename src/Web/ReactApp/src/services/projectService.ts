@@ -82,12 +82,13 @@ export const projectService = {
    * Add multiple files to a project at once.
    */
   async addFilesToProject(projectId: string, requests: AddFileToProjectRequest[]): Promise<PrintProjectFileDto[]> {
-    const results: PrintProjectFileDto[] = [];
-    for (const request of requests) {
-      const file = await projectService.addFileToProject(projectId, request);
-      results.push(file);
-    }
-    return results;
+    if (requests.length === 0) return [];
+
+    const response = await apiClient.post<PrintProjectFileDto[]>(
+      `/projects/${projectId}/files`,
+      requests
+    );
+    return response.data;
   },
 
   /**

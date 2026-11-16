@@ -1467,13 +1467,18 @@ export function CubeIcon({ className = 'w-4 h-4', ariaLabel = '3D Model' }: Omit
  * <ChevronDownIcon className="w-5 h-5" ariaLabel="Expand" />
  * @see — https://materialdesignicons.com - Material Design Icons Library
  */
-export function ChevronDownIcon({ className = 'w-4 h-4', ariaLabel = 'Chevron down' }: Omit<IconProps, 'isOn'>) {
+export function ChevronDownIcon({
+  className = 'w-4 h-4',
+  ariaLabel = 'Chevron down',
+  decorative = false,
+}: Omit<IconProps, 'isOn'> & { decorative?: boolean }) {
   return (
     <svg
       className={className}
       viewBox="0 0 24 24"
-      aria-label={ariaLabel}
-      role="img"
+      aria-hidden={decorative || undefined}
+      aria-label={decorative ? undefined : ariaLabel}
+      role={decorative ? undefined : 'img'}
     >
       <path fill="currentColor" d={mdiChevronDown} />
     </svg>

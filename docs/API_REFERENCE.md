@@ -35,11 +35,25 @@ that session. A previously rotated token revokes its active descendant in the sa
 session family; unrelated sessions and other users' sessions are not affected.
 Reusing a rotated token at the refresh endpoint revokes all of the user's refresh
 sessions and access tokens issued at or before the revocation marker's second.
-Access tokens issued in a later second remain valid. Successful password changes
-and password resets revoke all refresh sessions, but do not revoke existing JWT
-access tokens. The React client refreshes access tokens proactively and retries one
-authenticated request after a 401; refresh tokens are stored separately from
-access tokens in local storage.
+Access tokens issued in a later second remain valid. Successful self-service or
+administrator password changes and password resets revoke all refresh sessions
+and access tokens issued at or before the revocation marker's second. Subsequent
+API requests using those JWTs and new or reconnecting SignalR handshakes are
+rejected. Already-established SignalR WebSocket connections are not force-closed
+and remain connected until they disconnect; long-polling transport requests
+revalidate the JWT and subsequent polls are rejected after revocation. The React
+client refreshes access tokens proactively and retries one authenticated request
+after a 401; refresh tokens are stored separately from access tokens in local
+storage.
+
+Both the main API and standalone slicer host check persisted account eligibility
+on authenticated requests and new SignalR handshakes. Deactivating an account
+therefore rejects its existing JWT on future requests and reconnects without
+waiting for the slicer host's five-second revocation cache. The user-management
+deactivation workflow also revokes access and refresh sessions; deleting a user
+removes its refresh sessions and its missing account invalidates existing JWTs.
+Account-store or revocation-store failures deny authentication and are logged;
+established WebSockets are not force-closed.
 
 ### BarcodeScanLogDto
 Admin-facing diagnostic entry for optional Spoolman barcode scan logging. Fields include
@@ -47,6 +61,19 @@ Admin-facing diagnostic entry for optional Spoolman barcode scan logging. Fields
 `matchedFilamentId`, `createdSpoolId`, `userId`, and `message`.
 
 (Extend with additional DTO details as needed.)
+
+## Printer service status
+
+`PUT /api/printers/{id}` accepts `isEnabled` in the `UpdatePrinterDto` body.
+`true` means In Service; `false` means Out of Service. The update requires the
+printer's current revision in `If-Match`; missing preconditions return 428 and
+stale revisions return 412.
+
+Out of Service uses the existing disabled-printer behavior: the printer is
+hidden from normal listings and excluded from monitoring and dispatch. It does
+not issue a power command or change maintenance state. A request to disable a
+printer with active or assigned work returns 409; the job is preserved for
+operator review.
 
 ## Spoolman Barcode Resolution
 
@@ -89,6 +116,68 @@ Admin-facing diagnostic entry for optional Spoolman barcode scan logging. Fields
 > python3 scripts/backfill-spoolman-gtin.py --spoolman-url http://localhost:7912
 > python3 scripts/backfill-spoolman-gtin.py --spoolman-url http://localhost:7912 --apply
 > ```
+
+## Remembered Scan Codes
+
+Non-GTIN scan codes (for example an Amazon FNSKU such as `X0022Z40I1`, or other
+Code 128/39 text) can be remembered against a Spoolman filament. Aliases are
+stored in PrintFarmer's own database, not in Spoolman, and are kept separate
+from the filament `gtin` mapping: a code is matched exactly and
+case-sensitively, never through GTIN digit normalization, so `X0022Z40I1` can
+never match GTIN `00224`.
+
+- `GET /api/spoolman/code-aliases/filament?code=` (any authenticated user)
+  always returns `200` with `{ code, state, alias }`, where `state` is `Found`,
+  `NotRemembered` or `FilamentMissing` (the alias points at a filament that no
+  longer exists in Spoolman). Returns `400` for an invalid code and `502` when
+  Spoolman cannot be reached. Clients must treat any non-`200` response as an
+  error, never as "not remembered".
+- `POST /api/spoolman/code-aliases` with `{ code, filamentId }` (requires the
+  `spoolman:admin` permission) returns `201` when the alias is created or
+  re-pointed from a deleted filament, `200` when it already maps to that
+  filament (idempotent retries), `409` with the existing alias when the code
+  is linked to a different filament, `404` when the filament does not exist,
+  `400` for an invalid request, and `502` when Spoolman fails.
+
+Validation rejects empty codes, codes over 128 UTF-16 code units, control or
+format characters, valid GTINs (use the GTIN mapping instead), and any value
+made only of digits, spaces and dashes (spool IDs and malformed GTINs).
+
+## Spoolman Filament Deletion
+
+All deletion and preview routes require `spoolman:admin`.
+
+- `GET /api/spoolman/filaments/{id}/delete-preview` reads fresh references,
+  including archived spools, and returns
+  `{ "activeSpoolCount": 0, "archivedSpoolIds": [12, 14] }`. It deletes nothing.
+- `POST /api/spoolman/filaments/{id}/delete-confirmed` accepts
+  `{ "archivedSpoolIds": [12, 14] }` as explicit consent to permanently delete
+  exactly those archived spools, then the filament. An empty array confirms
+  that no spool deletion is authorized; a missing array is rejected.
+- Active spools always block deletion, with their count. A changed spool set
+  requires a fresh preview and confirmation. Remaining references are checked
+  before every delete; newly discovered spools are never added to consent.
+- After each acknowledged spool deletion, fresh reference reads wait up to
+  five seconds for that deletion to become visible in older Spoolman versions.
+  Only stale references to acknowledged deletions are retried, with bounded
+  backoff; active, new or missing remaining spools stop the operation immediately.
+  Non-convergence reports the acknowledged partial outcome instead of continuing.
+- `DELETE /api/spoolman/filaments/{id}` and
+  `DELETE /api/spoolman/filaments/bulk` never cascade to spools. Bulk results
+  contain per-filament reasons for skipped/failed items. Delete archived-only
+  filaments individually to review the permanent-deletion confirmation.
+
+Archived spools can be absent from the normal inventory view while still
+preventing Spoolman from deleting their filament. The web confirmation shows
+the archived count and warns that their NFC tag bindings are removed too;
+Spoolman owns this cascade. Filament NFC bindings are also removed.
+
+Spoolman's individual REST deletes are **not a transaction**. Other clients can
+still change a spool between a check and its delete. Do not edit the same
+inventory concurrently during deletion. If an operation fails after deleting
+some spools, the error lists the confirmed deleted spool IDs and warns that the
+filament's deletion was not confirmed. Refresh before retrying: a timed-out
+upstream request may have completed even without an acknowledgement.
 
 ## Spoolman Barcode Diagnostics
 

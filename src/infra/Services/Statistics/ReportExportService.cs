@@ -1,5 +1,4 @@
-﻿using System.Globalization;
-using CsvHelper;
+﻿using CsvHelper;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
@@ -95,11 +94,13 @@ public class ReportExportService(
     private static byte[] WriteCsv<T>(IEnumerable<T> records)
     {
         using var memoryStream = new MemoryStream();
-        using var writer = new StreamWriter(memoryStream);
-        using var csv = new CsvWriter(writer, CultureInfo.InvariantCulture);
+        using var csv = CsvWriter.Create(memoryStream, new CsvWriterOptions
+        {
+            ShouldQuote = (field, _, _, _) => !field.IsEmpty && (field[0] == ' ' || field[^1] == ' '),
+        }, leaveOpen: true);
 
         csv.WriteRecords(records);
-        writer.Flush();
+        csv.Flush();
         return memoryStream.ToArray();
     }
 

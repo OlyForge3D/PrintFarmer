@@ -17,7 +17,7 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Triage issue via deterministic keyword routing
         uses: actions/github-script@v9

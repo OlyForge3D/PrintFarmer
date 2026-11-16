@@ -972,9 +972,9 @@ public partial class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     /// </summary>
     public async Task<bool> HomeAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
-        if (credential?.HasDigestAuth != true)
+        if (credential?.HasDigestAuth != true && credential?.HasApiKey != true)
         {
-            _logger?.LogWarning("[PrusaLink] Home requires digest auth credentials at {BaseUrl}", baseUrl);
+            _logger?.LogWarning("[PrusaLink] Home requires an API key or digest auth credentials at {BaseUrl}", baseUrl);
             return false;
         }
 
@@ -991,9 +991,9 @@ public partial class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     public async Task<bool> HomeXYAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         // Use PrinterCredential directly
-        if (credential?.HasDigestAuth != true)
+        if (credential?.HasDigestAuth != true && credential?.HasApiKey != true)
         {
-            _logger?.LogWarning("[PrusaLink] HomeXY requires digest auth credentials at {BaseUrl}", baseUrl);
+            _logger?.LogWarning("[PrusaLink] HomeXY requires an API key or digest auth credentials at {BaseUrl}", baseUrl);
             return false;
         }
 
@@ -1003,9 +1003,9 @@ public partial class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     public async Task<bool> HomeZAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         // Use PrinterCredential directly
-        if (credential?.HasDigestAuth != true)
+        if (credential?.HasDigestAuth != true && credential?.HasApiKey != true)
         {
-            _logger?.LogWarning("[PrusaLink] HomeZ requires digest auth credentials at {BaseUrl}", baseUrl);
+            _logger?.LogWarning("[PrusaLink] HomeZ requires an API key or digest auth credentials at {BaseUrl}", baseUrl);
             return false;
         }
 
@@ -1015,9 +1015,9 @@ public partial class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     public async Task<bool> MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         // Use PrinterCredential directly
-        if (credential?.HasDigestAuth != true)
+        if (credential?.HasDigestAuth != true && credential?.HasApiKey != true)
         {
-            _logger?.LogWarning("[PrusaLink] Move requires digest auth credentials at {BaseUrl}", baseUrl);
+            _logger?.LogWarning("[PrusaLink] Move requires an API key or digest auth credentials at {BaseUrl}", baseUrl);
             return false;
         }
 

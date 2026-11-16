@@ -17,10 +17,22 @@ final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
     var vendorsToReturn: [SpoolmanVendor] = []
     var materialsToReturn: [SpoolmanMaterial] = []
     var availableMaterialsToReturn: [String] = []
+    var tagScanToReturn = SpoolmanTagScanResponse(
+        matchedSpoolId: nil,
+        matchedFilamentId: nil,
+        spool: nil,
+        filament: nil,
+        created: false
+    )
     var errorToThrow: Error?
+    var createSpoolError: Error?
+    var createFilamentError: Error?
+    var createSpoolCallCount = 0
+    var createFilamentCallCount = 0
 
     // Call tracking
     var listSpoolsCalled = false
+    var onListSpools: (() -> Void)?
     // swiftlint:disable:next large_tuple
     var listSpoolsArgs: (limit: Int, offset: Int, search: String?, material: String?, vendor: String?)?
     /// Every `listSpools` call's arguments, in order — needed to assert
@@ -37,9 +49,13 @@ final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
     var listVendorsCalled = false
     var listMaterialsCalled = false
     var listAvailableMaterialsCalled = false
+    var tagScanCalledWith: SpoolmanTagScanRequest?
+    var linkedTag: (uid: String, spoolID: Int)?
+    var unlinkedTag: (uid: String, spoolID: Int)?
 
     func listSpools(limit: Int, offset: Int, search: String?, material: String?, vendor: String?) async throws -> SpoolmanPagedResult<SpoolmanSpool> {
         listSpoolsCalled = true
+        onListSpools?()
         listSpoolsArgs = (limit, offset, search, material, vendor)
         listSpoolsCallHistory.append((limit, offset, search, material, vendor))
         if let error = errorToThrow { throw error }
@@ -54,7 +70,9 @@ final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
     }
 
     func createSpool(_ request: SpoolmanSpoolRequest) async throws -> SpoolmanSpool {
+        createSpoolCallCount += 1
         createSpoolCalledWith = request
+        if let error = createSpoolError { throw error }
         if let error = errorToThrow { throw error }
         guard let spool = spoolToReturn else { throw NetworkError.notFound }
         return spool
@@ -79,7 +97,9 @@ final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
     }
 
     func createFilament(_ request: SpoolmanFilamentRequest) async throws -> SpoolmanFilament {
+        createFilamentCallCount += 1
         createFilamentCalledWith = request
+        if let error = createFilamentError { throw error }
         if let error = errorToThrow { throw error }
         guard let filament = filamentToReturn else { throw NetworkError.notFound }
         return filament
@@ -103,6 +123,22 @@ final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
         return availableMaterialsToReturn
     }
 
+    func scanTag(uid: String, format: String?, payloadB64: String?) async throws -> SpoolmanTagScanResponse {
+        tagScanCalledWith = SpoolmanTagScanRequest(uid: uid, format: format, payloadB64: payloadB64)
+        if let error = errorToThrow { throw error }
+        return tagScanToReturn
+    }
+
+    func linkTag(uid: String, toSpoolID spoolID: Int) async throws {
+        linkedTag = (uid, spoolID)
+        if let error = errorToThrow { throw error }
+    }
+
+    func unlinkTag(uid: String, fromSpoolID spoolID: Int) async throws {
+        unlinkedTag = (uid, spoolID)
+        if let error = errorToThrow { throw error }
+    }
+
     func reset() {
         spoolsPageToReturn = SpoolmanPagedResult<SpoolmanSpool>(items: [], totalCount: 0)
         spoolsPagesToReturn = nil
@@ -112,8 +148,20 @@ final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
         vendorsToReturn = []
         materialsToReturn = []
         availableMaterialsToReturn = []
+        tagScanToReturn = SpoolmanTagScanResponse(
+            matchedSpoolId: nil,
+            matchedFilamentId: nil,
+            spool: nil,
+            filament: nil,
+            created: false
+        )
         errorToThrow = nil
+        createSpoolError = nil
+        createFilamentError = nil
+        createSpoolCallCount = 0
+        createFilamentCallCount = 0
         listSpoolsCalled = false
+        onListSpools = nil
         listSpoolsArgs = nil
         listSpoolsCallHistory = []
         createSpoolCalledWith = nil
@@ -124,5 +172,8 @@ final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
         listVendorsCalled = false
         listMaterialsCalled = false
         listAvailableMaterialsCalled = false
+        tagScanCalledWith = nil
+        linkedTag = nil
+        unlinkedTag = nil
     }
 }

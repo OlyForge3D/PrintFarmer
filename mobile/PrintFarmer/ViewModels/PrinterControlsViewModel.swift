@@ -2089,6 +2089,7 @@ final class PrinterControlsViewModel: ObservableObject {
             case .serverUnreachable: return ("Couldn't reach the server for this command.", true)
             case .transportError: return ("Network error.", true)
             case .serverError: return ("Printer reported a server error.", true)
+            case .serverErrorMessage(_, let message): return (message, true)
             case .conflict(let api): return (api?.displayMessage ?? "Printer is busy.", false)
             case .partsInventoryConflict(let conflict): return (conflict.detail ?? conflict.title ?? "Printed-parts conflict.", false)
             case .unauthorized: return ("Authentication required.", false)

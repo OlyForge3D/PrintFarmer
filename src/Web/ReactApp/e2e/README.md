@@ -188,6 +188,66 @@ CI runs the same suite in `.github/workflows/monolith-smoke.yml` (a new,
 standalone workflow — not a change to `ci.yml` or `deployment-tests.yml`,
 per the epic's file-ownership matrix).
 
+## Deployed slicer coverage (emulator phase B)
+
+These `e2e/emulator/` specs run against the deployed stack and its real
+OrcaSlicer worker during daily phase B.
+
+| Route / page | Feature area | Spec coverage |
+|---|---|---|
+| `/slicer` — `NewSliceJobPage` and job selectors | Printer selection | `slicer-workflows.spec.ts` identifies the printer selected by the UI as its default, switches to a different seeded printer, and verifies the sidebar and machine-profile control respond within 15 seconds. |
+| `/files` → `/slicer` — model upload and `SlicerWorkspace` | Model upload, loading, and machine/filament/process selection | `slicer-workflows.spec.ts` uploads a unique generated STL, loads it into the slicer, and selects compatible profiles exposed by the deployed worker; it removes the model afterward. |
+| `/slicer` — `SliceProgressOverlay`, `GcodePreviewModal` | Real slicing and results | `slicer-workflows.spec.ts` submits a slice, waits for worker completion, opens G-code Preview, and confirms the completed job in Jobs. It never sends a print to a printer. |
+| `/profiles/import?modelId=…` → `/admin/settings?scope=system&tab=slicing&sub=profiles` — `SlicerProfilesPage` | Profile import and library tabs | `slicer-profiles.spec.ts` selects a compatible machine and filament; it verifies a new model link when unlinked or an explicit duplicate skip when already linked, then visits all four library tabs. |
+| `/admin/workers` → `/admin/workers?workerTab=jobs` — `WorkerManagementPage` | Worker and job management | `slicer-workers.spec.ts` checks the worker list, status filter, and new-job affordance, then the workflow spec confirms its completed job in the Jobs view. Worker state is not changed. |
+
+### Explicit exclusions
+
+- Per-setting edits, custom-profile saves, and proof that each value changes
+  generated G-code are not part of phase B, per the user decision. The separate
+  isolated `e2e/slicer-settings/` suite covers that contract.
+- Advanced `SlicerWorkspace` tools (painting, text, cut planes, clearance zones,
+  sequential printing, and model transforms), multi-plate editing, profile
+  compare/detail/family workflows, and profile-library edit/delete/export/upload
+  are not exercised. They are separate stateful workflows; the deployed-stack
+  suite focuses on the normal upload → configure → slice → inspect journey and
+  profile import/read-only management.
+- `QuickSliceModal` is not exercised because the suite covers the full slice-job
+  flow instead. `SendToPrinterModal` is excluded because it can dispatch a job
+  to physical hardware.
+- Worker registration/configuration and job retry/cancel/recovery mutations
+  are excluded; the worker/jobs spec is deliberately read-only.
+- Alternate slicer engines are excluded because phase B deploys one OrcaSlicer
+  worker. Sending a print to a physical printer is always excluded.
+- The WebGL fallback remains covered by the separate #3828 work and is not
+  duplicated here.
+- The deferred advanced workflow coverage is tracked in #3839.
+- The worker filament library is already seeded in the deployed stack, so the
+  profile-import spec verifies compatible filament selection and availability,
+  not creation of a new filament profile. It prefers a compatible worker
+  machine profile missing from the managed library and removes that newly
+  created row; when the deployed profiles are preloaded, it instead verifies
+  model linking or duplicate handling. Broader resettable creation fixtures
+  and per-profile import skip reasons are tracked in #3839.
+
+Run the same selection used by daily phase B from
+`src/Web/ReactApp/`:
+
+```bash
+npm run test:e2e:emulator -- --project=chromium --workers=1 --grep-invert Moonraker
+```
+
+The printer switch assertion is intentionally not skipped or marked
+expected-failure: it is the regression check for issue #3833. The seeded
+Moonraker printer records are used only as slicer targets; these tests do not
+dispatch prints or operate physical printer hardware.
+
+The profile-import test removes newly created profile rows, but importing can
+also link an existing machine profile to the selected printer model. Real
+slices leave completed jobs and artifacts. These effects persist until daily
+phase B tears down its disposable validation stack; do not run this selection
+against a shared or production database.
+
 ## Running E2E Tests with the Moonraker Emulator
 
 Printer-facing emulator specs live in `e2e/emulator/` (the `printer-*.spec.ts`,
@@ -349,10 +409,25 @@ npm run test:e2e:list      # Playwright test discovery dry-run (no server requir
 npm run test:run -- e2e/fixtures/emulator-setup.unit.test.ts  # Vitest unit coverage for fixture logic (no server required)
 ```
 
-`tsconfig.e2e.json` excludes `e2e/emulator/queue-realtime-auth.spec.ts` — a
-pre-existing, unrelated auth/queue spec with type errors that predate this
-change and are out of scope for the Moonraker printer-facing contract (see
-"Out of scope" below).
+The daily suites run against a production frontend, not Vite. Observe live
+SignalR frames, authenticated REST requests and rendered UI; do not import
+`/src` modules or depend on unpublished window service instances.
+
+Printer metadata (Statistics and Version) lives in the details sidebar.
+Detailed cards keep live telemetry inline, including temperature tables.
+Remote deletion must use the authoritative **Files > On printers** catalog
+with exact-source review and explicit irreversible-delete consent; the legacy
+printer-files dialog intentionally disables deletion.
+
+MMU fixtures must configure both the emulator's live protocol and the saved
+printer's `multiMaterial` topology through the real concurrency-checked API.
+Changing only the emulator leaves the single physical T0 seed unchanged and
+correctly blocks spool assignment with a hardware-layout warning. Restore the
+saved single-feed configuration and reset the emulator after each test.
+
+Camera decoding coverage explicitly selects Stream mode and supplies a supported
+JPEG response to the authenticated stream route, then checks the rendered blob
+image's decoded dimensions. A loaded snapshot is not proof of a working stream.
 
 ## Fixtures
 

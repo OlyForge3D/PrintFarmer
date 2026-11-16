@@ -230,6 +230,33 @@ public class EfUserTaskRepositoryTests : IDisposable
 
     #endregion
 
+    [Fact]
+    public async Task GetDismissedByEntityAsync_MixedHistory_ReturnsAllMatchingDismissalsNewestFirst()
+    {
+        Guid modelId = Guid.NewGuid();
+        UserTask older = CreateUserTask("Older", UserTaskType.ProfileImport, UserTaskStatus.Dismissed);
+        older.DismissedAt = DateTime.UtcNow.AddDays(-2);
+        UserTask newer = CreateUserTask("Newer", UserTaskType.ProfileImport, UserTaskStatus.Dismissed);
+        newer.DismissedAt = DateTime.UtcNow.AddDays(-1);
+        UserTask completed = CreateUserTask("Completed", UserTaskType.ProfileImport, UserTaskStatus.Completed);
+        UserTask differentType = CreateUserTask("Maintenance", UserTaskType.MaintenanceDue, UserTaskStatus.Dismissed);
+        UserTask differentEntity = CreateUserTask("Printer", UserTaskType.ProfileImport, UserTaskStatus.Dismissed);
+        foreach (UserTask task in new[] { older, newer, completed, differentType, differentEntity })
+        {
+            task.EntityType = task == differentEntity ? "Printer" : "PrinterModel";
+            task.EntityId = modelId;
+            _ = _context.UserTasks.Add(task);
+        }
+
+        _ = await _context.SaveChangesAsync();
+
+        IReadOnlyList<UserTask> result = await _repository.GetDismissedByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", modelId);
+        IReadOnlyList<UserTask> none = await _repository.GetDismissedByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", Guid.NewGuid());
+
+        result.Select(task => task.Id).Should().Equal(newer.Id, older.Id);
+        none.Should().BeEmpty();
+    }
+
     #region GetPendingCountAsync Tests
 
     [Fact]

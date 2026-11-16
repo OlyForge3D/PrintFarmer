@@ -1,34 +1,50 @@
 import Foundation
 import os
 
-/// Drives the unified F9 scan station (#714): a single generic camera scan
-/// type-dispatches to a printer deep-link, an enabled printed-parts destination,
-/// or (falling back) the existing spool-barcode intake flow.
-///
-/// When printed-parts inventory is enabled, dispatch order matches the frozen
-/// mobile scope posted on #714: printer → bin → part → spool. Not-found and
-/// feature-disabled part resolvers fall through; other failures remain visible.
-/// Disabling the capability skips or fences those resolvers without blocking
-/// printer and spool routing.
+/// Drives the shared spool scanner. The mobile app only manages spools, so a
+/// scan resolves exclusively to a spool: a structured spool QR/deep link or a
+/// bare spool ID opens that spool, and a filament product barcode (GTIN) is
+/// handed to the existing Barcode Intake flow. Known product barcodes import a
+/// spool; unknown valid GTINs open the same intake flow so the operator can map
+/// the barcode to a filament (persisted server-side) before a spool is created.
+/// Any other code reaches the Unrecognized result, which still offers manual
+/// spool creation, so a scan never dead-ends. Nothing is created merely by
+/// scanning.
 @MainActor @Observable
 final class ScanViewModel {
-    /// A resolved scan outcome that the view presents as a sheet. Printer
-    /// matches are handled separately via `pendingPrinterId` since those
-    /// navigate (push onto the Farm tab stack) rather than present a sheet.
+    /// A resolved scan outcome that the view presents as a sheet. Existing
+    /// spools navigate via `pendingDeepLinkDestination` instead.
     enum ScanOutcome: Identifiable {
-        case bin(BinResponse)
-        case part(PartInventoryResponse)
         case unknownCode(String)
         case newSpool(ScannedSpoolData)
+        /// Manual spool creation offered from an unrecognized non-GTIN code.
+        /// The code is never persisted: only valid GTINs can be mapped.
+        case addSpoolManually(String)
+        /// A structured spool link or ID whose spool is absent from the
+        /// active server. It offers manual creation only, never GTIN intake.
+        case missingSpool(id: Int, code: String)
+        case unknownNFCTag(ScannedNFCTag, ScannedSpoolData?)
+        /// An NFC tag that points to a spool absent from the active server.
+        /// It offers relinking or creating a spool, never barcode intake.
+        case staleNFCLink(ScannedNFCTag, spoolID: Int)
 
         var id: String {
             switch self {
-            case .bin(let bin): "bin-\(bin.id.uuidString)"
-            case .part(let part): "part-\(part.id.uuidString)"
             case .unknownCode(let code): "unknown-\(code)"
+            case .missingSpool(let id, _): "missing-spool-\(id)"
             case .newSpool: "new-spool"
+            case .addSpoolManually(let code): "manual-\(code)"
+            case .unknownNFCTag(let tag, _): "nfc-\(tag.uid)"
+            case .staleNFCLink(let tag, let spoolID): "nfc-stale-\(tag.uid)-\(spoolID)"
             }
         }
+    }
+
+    /// A follow-up chosen from the Unrecognized result. It is applied only
+    /// after that sheet finishes dismissing, so two sheets never swap in place.
+    private enum DeferredAddSpool {
+        case intake(String)
+        case manual(String)
     }
 
     /// A session-local (non-persisted) recent-scan entry. #714's frozen
@@ -42,7 +58,6 @@ final class ScanViewModel {
         let title: String
         let subtitle: String
         let scannedAt: Date
-        let requiresPrintedPartsInventory: Bool
 
         static func == (lhs: RecentScan, rhs: RecentScan) -> Bool {
             lhs.id == rhs.id
@@ -51,26 +66,20 @@ final class ScanViewModel {
 
     private static let maxRecentScans = 20
 
-    private enum PrintedPartsDispatchResult {
-        case stop
-        case continueToSpool
-    }
-
     var isScanning = false
     var errorMessage: String?
     var pendingOutcome: ScanOutcome?
-    /// Set when a scanned code parses as a `printfarmer://printer/...` or
-    /// `printfarmer://spool/...`-style deep link (including a structured
-    /// spool URL/JSON QR payload resolved via `QRCodeParser`). The view
-    /// observes this and forwards it to `AppRouter.navigate(to:)` (the same
-    /// entry point used for NFC/URL deep links) then clears it — printers
-    /// and spools are never presented as a sheet from this view-model.
+    /// Set when a scanned code identifies an existing spool (a
+    /// `printfarmer://spool/...` deep link, a structured spool URL/JSON QR
+    /// payload, or a bare spool ID) confirmed on the active server. The view
+    /// forwards it to `AppRouter.navigate(to:)` then clears it.
     var pendingDeepLinkDestination: DeepLinkDestination?
-    /// Set when a scanned code resolves to a known filament barcode so the
-    /// view can forward it into the existing `BarcodeIntakeView` flow
-    /// (reused as-is per #714's frozen scope) instead of re-implementing
-    /// spool import here.
+    /// Set when a scanned code is a filament product barcode — either one
+    /// already mapped to a filament or an unknown valid GTIN — so the view
+    /// can forward it into the existing `BarcodeIntakeView` flow, which
+    /// imports known barcodes and asks the operator to map unknown ones.
     var pendingSpoolBarcode: String?
+    private var deferredAddSpool: DeferredAddSpool?
     var recentScans: [RecentScan] = []
     private(set) var hasFinishedNavigation = false
     var isViewActive = true {
@@ -83,11 +92,8 @@ final class ScanViewModel {
     private var scanner: (any BarcodeScannerProtocol)?
     private var nfcScanner: (any SpoolScannerProtocol)?
     private var waitForScannerPresentation: @MainActor () async -> Bool = { true }
-    private var partsInventoryService: (any PartsInventoryServiceProtocol)?
     private var barcodeIntakeService: (any BarcodeIntakeServiceProtocol)?
     private var spoolService: (any SpoolServiceProtocol)?
-    private var printedPartsInventoryEnabled = true
-    private var printedPartsCapabilityGeneration = 0
     private var handledExternalScanRequestID: UUID?
     private var isResultPresentationActive = false
     // Overlapping requests coalesce into one retry through the existing scanner pipeline.
@@ -95,35 +101,14 @@ final class ScanViewModel {
 
     func configure(
         scanner: (any BarcodeScannerProtocol)?,
-        partsInventoryService: any PartsInventoryServiceProtocol,
         barcodeIntakeService: any BarcodeIntakeServiceProtocol,
         spoolService: any SpoolServiceProtocol,
-        printedPartsInventoryEnabled: Bool = true,
         waitForScannerPresentation: @escaping @MainActor () async -> Bool = { true }
     ) {
         self.scanner = scanner
         self.waitForScannerPresentation = waitForScannerPresentation
-        self.partsInventoryService = partsInventoryService
         self.barcodeIntakeService = barcodeIntakeService
         self.spoolService = spoolService
-        setPrintedPartsInventoryEnabled(printedPartsInventoryEnabled)
-    }
-
-    func setPrintedPartsInventoryEnabled(_ isEnabled: Bool) {
-        guard printedPartsInventoryEnabled != isEnabled else { return }
-
-        printedPartsInventoryEnabled = isEnabled
-        printedPartsCapabilityGeneration &+= 1
-        guard !isEnabled else { return }
-
-        switch pendingOutcome {
-        case .some(.bin), .some(.part):
-            pendingOutcome = nil
-        case .some(.unknownCode), .some(.newSpool), .none:
-            break
-        }
-        recentScans.removeAll(where: \.requiresPrintedPartsInventory)
-        startQueuedExternalScanIfNeeded()
     }
 
     var isScannerAvailable: Bool {
@@ -150,12 +135,18 @@ final class ScanViewModel {
             let result = await nfcScanner.scan()
             guard isViewActive else { return }
             switch result {
-            case .printerId(let id):
-                pendingDeepLinkDestination = .printerDetail(id: id)
+            case .printerId:
+                errorMessage = Self.notSpoolTagMessage
             case .spoolId(let id):
-                await routeToSpoolIfExists(id: id, subtitle: "Spool #\(id)")
+                await routeToSpoolIfExists(
+                    id: id,
+                    subtitle: "Spool #\(id)",
+                    ifMissing: .missingSpool(id: id, code: "Spool #\(id)")
+                )
             case .newSpoolData(let data):
                 pendingOutcome = .newSpool(data)
+            case .nfcTag(let tag):
+                await resolveNFCTag(tag)
             case .cancelled:
                 break
             case .error(let error):
@@ -164,10 +155,93 @@ final class ScanViewModel {
         }
     }
 
+    private func resolveNFCTag(_ tag: ScannedNFCTag) async {
+        guard let spoolService else {
+            errorMessage = "Spool service not available"
+            return
+        }
+        do {
+            let response = try await spoolService.scanTag(
+                uid: tag.uid,
+                format: tag.openPrintTagPayload == nil ? nil : "openprinttag",
+                payloadB64: tag.openPrintTagPayload?.base64EncodedString()
+            )
+            guard isViewActive else { return }
+            if let spoolID = response.matchedSpoolId {
+                await routeToSpoolIfExists(
+                    id: spoolID,
+                    subtitle: "NFC-linked spool #\(spoolID)",
+                    ifMissing: .staleNFCLink(tag, spoolID: spoolID)
+                )
+                return
+            }
+            if let responseFilament = response.filament {
+                let data = ScannedSpoolData(
+                    material: responseFilament.material,
+                    colorHex: responseFilament.colorHex,
+                    vendor: responseFilament.vendor,
+                    weight: responseFilament.weight,
+                    diameter: responseFilament.diameter,
+                    temperature: responseFilament.settingsExtruderTemp,
+                    spoolmanId: nil,
+                    filamentId: response.matchedFilamentId ?? responseFilament.id
+                )
+                recordRecentScan(icon: "wave.3.right", title: "Filament NFC tag", subtitle: tag.uid)
+                pendingOutcome = .newSpool(data)
+                return
+            }
+            if response.matchedFilamentId != nil {
+                errorMessage = "Spoolman matched this tag to a filament but returned no filament details."
+                return
+            }
+            if let data = tag.openPrintTagPayload.flatMap(NFCTagParser.parseOpenPrintTag) {
+                recordRecentScan(icon: "wave.3.right", title: "Unlinked NFC tag", subtitle: tag.uid)
+                pendingOutcome = .unknownNFCTag(tag, data)
+                return
+            }
+            if let legacy = tag.legacyContent {
+                switch legacy {
+                case .spoolId(let id):
+                    await routeToSpoolIfExists(
+                        id: id,
+                        subtitle: "NFC spool #\(id)",
+                        ifMissing: .staleNFCLink(tag, spoolID: id)
+                    )
+                case .printerId:
+                    errorMessage = Self.notSpoolTagMessage
+                case .newSpoolData(let data):
+                    pendingOutcome = .unknownNFCTag(tag, data)
+                }
+                return
+            }
+            recordRecentScan(icon: "wave.3.right", title: "Unlinked NFC tag", subtitle: tag.uid)
+            pendingOutcome = .unknownNFCTag(tag, nil)
+        } catch {
+            guard isViewActive else { return }
+            logger.warning("NFC tag lookup failed: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Accepts a link only while that tag's result is still presented, so a
+    /// completion arriving after Cancel never navigates or replaces a newer
+    /// result.
+    func completeNFCTagLink(uid: String, to spool: SpoolmanSpool) {
+        guard isViewActive, !hasFinishedNavigation else { return }
+        switch pendingOutcome {
+        case .unknownNFCTag(let tag, _) where tag.uid == uid: break
+        case .staleNFCLink(let tag, _) where tag.uid == uid: break
+        default: return
+        }
+        recordRecentScan(icon: "wave.3.right", title: "NFC tag linked", subtitle: "Spool #\(spool.id)")
+        pendingOutcome = nil
+        pendingDeepLinkDestination = .spoolDetail(id: spool.id)
+    }
+
     private var isAwaitingResultAcknowledgment: Bool {
         pendingOutcome != nil || pendingSpoolBarcode != nil
             || pendingDeepLinkDestination != nil || errorMessage != nil
-            || isResultPresentationActive
+            || isResultPresentationActive || deferredAddSpool != nil
     }
 
     func scan() {
@@ -233,66 +307,71 @@ final class ScanViewModel {
         return requestID
     }
 
-    /// Type-dispatches a single scanned code. Exposed directly (in addition
-    /// to `scan()`) so tests and previews can drive dispatch without a real
-    /// camera session.
+    static let notSpoolTagMessage = "This NFC tag isn't a spool tag. Scan a spool tag instead."
+
+    /// Dispatches a single scanned code to spool handling. Exposed directly
+    /// (in addition to `scan()`) so tests and previews can drive dispatch
+    /// without a real camera session.
     func dispatch(_ rawCode: String) async {
         let trimmed = rawCode.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         errorMessage = nil
 
-        // A spool deep link's ID is captured but deliberately NOT routed
-        // yet — preserving the frozen printer → bin → part → spool
-        // dispatch precedence (#714 Item C) means a spool candidate,
-        // however it was recognized, never skips ahead of bin/part
-        // resolution attempts. It is only ever routed (after those
-        // attempts miss) once `routeToSpoolIfExists` confirms the ID
-        // against the active server.
-        var deferredSpoolId: Int?
-
+        // Structured spool payloads (deep link, URL or JSON forms — e.g.
+        // `printfarmer://spool/42`, `https://host/spools/42`,
+        // `{"spoolId": 42}`) are unambiguous and must never be registered
+        // as a raw barcode. A bare positive-integer code is deliberately NOT
+        // treated as structured (see `QRCodeParser.parseStructured`) since
+        // genuine EAN/UPC barcodes are also numeric.
         if let url = URL(string: trimmed), let destination = DeepLinkHandler.parse(url: url) {
-            switch destination {
-            case .printerDetail, .printerReady:
-                recordRecentScan(icon: "printer", title: "Printer", subtitle: trimmed)
-                pendingDeepLinkDestination = destination
-                return
-            case .spoolDetail(let id):
-                deferredSpoolId = id
-            case .scan, .attentionItem, .filamentSwap, .farm:
-                break
+            if case .spoolDetail(let id) = destination {
+                await routeToSpoolIfExists(
+                    id: id,
+                    subtitle: "Spool #\(id)",
+                    ifMissing: .missingSpool(id: id, code: trimmed)
+                )
+            } else {
+                // Recognized non-spool links (e.g. printer UUIDs) must never
+                // reach barcode resolution: the server's GTIN normalizer
+                // strips non-digits, so their digits could match a product.
+                recordRecentScan(icon: "questionmark.circle", title: "Unrecognized", subtitle: trimmed)
+                pendingOutcome = .unknownCode(trimmed)
             }
+            return
         }
-
-        if printedPartsInventoryEnabled {
-            switch await dispatchPrintedParts(trimmed) {
-            case .stop:
-                return
-            case .continueToSpool:
-                break
-            }
-        }
-
-        guard isViewActive else { return }
-
-        // A spool deep link (captured above) reaches this stage only
-        // after enabled bin/part resolution missed — an unambiguous format,
-        // so it takes priority over re-parsing the same code as a
-        // structured URL/JSON payload below.
-        if let deferredSpoolId {
-            await routeToSpoolIfExists(id: deferredSpoolId, subtitle: "Spool #\(deferredSpoolId)")
+        if let spoolId = QRCodeParser.parseStructured(trimmed) {
+            await routeToSpoolIfExists(
+                id: spoolId,
+                subtitle: "Spool #\(spoolId)",
+                ifMissing: .missingSpool(id: spoolId, code: trimmed)
+            )
             return
         }
 
-        // Structured spool payloads (URL or JSON forms — e.g.
-        // `https://host/spools/42`, `{"spoolId": 42}`) are unambiguous and
-        // must never be registered as a raw barcode, even if Barcode
-        // Intake is unavailable. A bare positive-integer code is
-        // deliberately NOT treated as structured here (see
-        // `QRCodeParser.parseStructured`) since genuine EAN/UPC barcodes
-        // are also numeric — those get first crack via Barcode Intake
-        // below, falling back to a spool ID only on a definitive miss.
-        if let spoolId = QRCodeParser.parseStructured(trimmed) {
-            await routeToSpoolIfExists(id: spoolId, subtitle: "Spool #\(spoolId)")
+        // A code that is not a GTIN (Code 128/39 text, a non-spool QR, a
+        // short number) is never sent for filament resolution: the server's
+        // GTIN normalizer strips non-digits and could match the wrong
+        // product. A bare number may still be an existing spool ID. Other
+        // codes (e.g. an Amazon FNSKU) go to Barcode Intake, which looks up
+        // the exact-match remembered-code alias stored separately from GTINs.
+        // Only codes that can't be remembered reach the Unrecognized result.
+        guard Self.isSupportedProductBarcode(trimmed) else {
+            if let spoolId = QRCodeParser.parse(trimmed) {
+                guard let exists = await existingSpoolLookup(id: spoolId) else { return }
+                if exists {
+                    recordRecentScan(icon: "cylinder", title: "Spool", subtitle: "Spool #\(spoolId)")
+                    pendingDeepLinkDestination = .spoolDetail(id: spoolId)
+                    return
+                }
+            }
+            if barcodeIntakeService != nil, BarcodeIntakeViewModel.isRememberableScan(trimmed) {
+                guard isViewActive else { return }
+                recordRecentScan(icon: "plus.circle", title: "Spool code", subtitle: trimmed)
+                pendingSpoolBarcode = trimmed
+                return
+            }
+            recordRecentScan(icon: "questionmark.circle", title: "Unrecognized", subtitle: trimmed)
+            pendingOutcome = .unknownCode(trimmed)
             return
         }
 
@@ -301,127 +380,92 @@ final class ScanViewModel {
             return
         }
 
+        // A numeric spool QR can also be a valid GTIN. An existing spool with
+        // that ID keeps precedence over Barcode Intake, mapped or not, so it
+        // is checked before filament resolution.
+        if let spoolId = QRCodeParser.parse(trimmed) {
+            guard let exists = await existingSpoolLookup(id: spoolId) else { return }
+            if exists {
+                recordRecentScan(icon: "cylinder", title: "Spool", subtitle: "Spool #\(spoolId)")
+                pendingDeepLinkDestination = .spoolDetail(id: spoolId)
+                return
+            }
+        }
+
         do {
-            if let filament = try await barcodeIntakeService.resolveFilament(barcode: trimmed) {
-                guard isViewActive else { return }
+            let filament = try await barcodeIntakeService.resolveFilament(barcode: trimmed)
+            guard isViewActive else { return }
+            if let filament {
                 recordRecentScan(icon: "cylinder", title: filament.name ?? filament.material ?? "Spool", subtitle: "Spool barcode")
                 pendingSpoolBarcode = trimmed
-            } else {
-                guard isViewActive else { return }
-                // Known raw barcodes retain Barcode Intake (handled above);
-                // an unresolved bare positive-integer code that Barcode
-                // Intake doesn't recognize falls back to being treated as
-                // an (unresolved) spool ID rather than an unknown code.
-                if let spoolId = QRCodeParser.parse(trimmed) {
-                    await routeToSpoolIfExists(id: spoolId, subtitle: "Spool #\(spoolId)")
-                } else {
-                    recordRecentScan(icon: "questionmark.circle", title: "Unrecognized", subtitle: trimmed)
-                    pendingOutcome = .unknownCode(trimmed)
-                }
+                return
             }
+            // An unknown product barcode reuses Barcode Intake, which
+            // asks the operator to map it to a filament (persisting the
+            // GTIN server-side) before importing a spool.
+            recordRecentScan(icon: "plus.circle", title: "New spool barcode", subtitle: trimmed)
+            pendingSpoolBarcode = trimmed
         } catch {
             logger.warning("Spool resolution failed: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
         }
     }
 
-    private func dispatchPrintedParts(_ code: String) async -> PrintedPartsDispatchResult {
-        guard let partsInventoryService else {
-            errorMessage = "Parts inventory service not available"
-            return .stop
+    /// A stricter subset of the server's `GtinNormalizer`: digits with only
+    /// optional space/dash separators forming a GTIN-8/12/13/14 with a valid
+    /// GS1 mod-10 check digit. The server strips any non-digit, so this
+    /// narrower shape keeps arbitrary text from being treated as a product
+    /// barcode. Only such values are offered for persistence through
+    /// `POST /api/spoolman/barcodes`.
+    nonisolated static func isSupportedProductBarcode(_ code: String) -> Bool {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= 64,
+              trimmed.allSatisfy({ $0.isASCII && ($0.isNumber || $0 == " " || $0 == "-") }) else {
+            return false
         }
-        let generation = printedPartsCapabilityGeneration
-
-        do {
-            let bin = try await partsInventoryService.resolveBinByBarcode(code)
-            if let interrupted = interruptedPrintedPartsResult(for: generation) {
-                return interrupted
-            }
-            recordRecentScan(
-                icon: "shippingbox",
-                title: bin.name,
-                subtitle: "Bin \(bin.code)",
-                requiresPrintedPartsInventory: true
-            )
-            pendingOutcome = .bin(bin)
-            return .stop
-        } catch NetworkError.notFound, NetworkError.featureDisabled {
-            if let interrupted = interruptedPrintedPartsResult(for: generation) {
-                return interrupted
-            }
-        } catch {
-            if let interrupted = interruptedPrintedPartsResult(for: generation) {
-                return interrupted
-            }
-            logger.warning("Bin resolution failed: \(error.localizedDescription)")
-            errorMessage = error.localizedDescription
-            return .stop
+        let digits = trimmed.compactMap { $0.wholeNumberValue }
+        guard [8, 12, 13, 14].contains(digits.count), let checkDigit = digits.last else { return false }
+        var sum = 0
+        for (offset, digit) in digits.dropLast().reversed().enumerated() {
+            sum += offset.isMultiple(of: 2) ? digit * 3 : digit
         }
+        return (10 - sum % 10) % 10 == checkDigit
+    }
 
-        do {
-            let part = try await partsInventoryService.resolvePartByBarcode(code)
-            if let interrupted = interruptedPrintedPartsResult(for: generation) {
-                return interrupted
-            }
-            recordRecentScan(
-                icon: "cube.box",
-                title: part.name,
-                subtitle: "SKU \(part.sku)",
-                requiresPrintedPartsInventory: true
-            )
-            pendingOutcome = .part(part)
-            return .stop
-        } catch NetworkError.notFound, NetworkError.featureDisabled {
-            if let interrupted = interruptedPrintedPartsResult(for: generation) {
-                return interrupted
-            }
-            return .continueToSpool
-        } catch {
-            if let interrupted = interruptedPrintedPartsResult(for: generation) {
-                return interrupted
-            }
-            logger.warning("Part resolution failed: \(error.localizedDescription)")
-            errorMessage = error.localizedDescription
-            return .stop
+    /// Confirms a candidate spool ID from a deep link or a structured
+    /// URL/JSON payload actually exists on the currently-connected (active)
+    /// server before routing to `.spoolDetail` — such a payload NEVER falls
+    /// back to raw barcode registration; it either routes or surfaces an
+    /// explicit error.
+    /// A missing spool always yields a recovery outcome: barcode callers
+    /// offer manual creation and NFC callers offer relinking the tag UID.
+    private func routeToSpoolIfExists(id: Int, subtitle: String, ifMissing missing: ScanOutcome) async {
+        guard let exists = await existingSpoolLookup(id: id) else { return }
+        if exists {
+            recordRecentScan(icon: "cylinder", title: "Spool", subtitle: subtitle)
+            pendingDeepLinkDestination = .spoolDetail(id: id)
+        } else {
+            recordRecentScan(icon: "questionmark.circle", title: "Spool not found", subtitle: subtitle)
+            pendingOutcome = missing
         }
     }
 
-    private func interruptedPrintedPartsResult(
-        for generation: Int
-    ) -> PrintedPartsDispatchResult? {
-        guard isViewActive else { return .stop }
-        guard generation != printedPartsCapabilityGeneration || !printedPartsInventoryEnabled else {
-            return nil
-        }
-        return .continueToSpool
-    }
-
-    /// Confirms a candidate spool ID (from a deep link, a structured
-    /// URL/JSON payload, or an unresolved bare-numeric fallback) actually
-    /// exists on the currently-connected (active) server before routing
-    /// to `.spoolDetail` (#714 Item C) — a structured/deep-link/numeric
-    /// payload NEVER falls back to raw barcode registration regardless of
-    /// the lookup's outcome; it either routes or surfaces an explicit
-    /// error.
-    private func routeToSpoolIfExists(id: Int, subtitle: String) async {
+    /// Returns whether spool `id` exists on the active server, or nil after
+    /// surfacing an error (or when the view retired) so callers fail closed.
+    private func existingSpoolLookup(id: Int) async -> Bool? {
         guard let spoolService else {
             errorMessage = "Spool service not available"
-            return
+            return nil
         }
-
         do {
             let exists = try await spoolService.spoolExists(id: id)
-            guard isViewActive else { return }
-            if exists {
-                recordRecentScan(icon: "cylinder", title: "Spool", subtitle: subtitle)
-                pendingDeepLinkDestination = .spoolDetail(id: id)
-            } else {
-                errorMessage = "Spool #\(id) was not found on this server."
-            }
+            guard isViewActive else { return nil }
+            return exists
         } catch {
-            guard isViewActive else { return }
+            guard isViewActive else { return nil }
             logger.warning("Spool existence lookup failed: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
+            return nil
         }
     }
 
@@ -436,22 +480,44 @@ final class ScanViewModel {
 
     func resultPresentationDidDismiss() {
         isResultPresentationActive = false
+        if let deferred = deferredAddSpool {
+            deferredAddSpool = nil
+            guard isViewActive, !hasFinishedNavigation else { return }
+            switch deferred {
+            case .intake(let barcode): pendingSpoolBarcode = barcode
+            case .manual(let code): pendingOutcome = .addSpoolManually(code)
+            }
+            return
+        }
         startQueuedExternalScanIfNeeded()
     }
 
-    private func recordRecentScan(
-        icon: String,
-        title: String,
-        subtitle: String,
-        requiresPrintedPartsInventory: Bool = false
-    ) {
-        let entry = RecentScan(
-            icon: icon,
-            title: title,
-            subtitle: subtitle,
-            scannedAt: .now,
-            requiresPrintedPartsInventory: requiresPrintedPartsInventory
-        )
+    /// Called from the Unrecognized result so a scan never dead-ends. A
+    /// valid GTIN (e.g. a normalized UPC-E) uses Barcode Intake, which can
+    /// map it; any other code opens manual creation and is never written
+    /// to the GTIN mapping. Nothing is created until the user saves.
+    func addSpool(fromUnrecognized code: String) {
+        switch pendingOutcome {
+        case .unknownCode(let pending) where pending == code:
+            // Recognized non-spool links (e.g. printer links) are never
+            // remembered as filament codes; they use manual Add Spool.
+            let isAppLink = URL(string: code).flatMap(DeepLinkHandler.parse(url:)) != nil
+            let usesIntake = Self.isSupportedProductBarcode(code)
+                || (!isAppLink && BarcodeIntakeViewModel.isRememberableCode(code))
+            deferredAddSpool = usesIntake && barcodeIntakeService != nil
+                ? .intake(code)
+                : .manual(code)
+        case .missingSpool(_, let pending) where pending == code:
+            // A structured spool payload is never a product barcode.
+            deferredAddSpool = .manual(code)
+        default:
+            return
+        }
+        pendingOutcome = nil
+    }
+
+    private func recordRecentScan(icon: String, title: String, subtitle: String) {
+        let entry = RecentScan(icon: icon, title: title, subtitle: subtitle, scannedAt: .now)
         recentScans.insert(entry, at: 0)
         if recentScans.count > Self.maxRecentScans {
             recentScans.removeLast(recentScans.count - Self.maxRecentScans)

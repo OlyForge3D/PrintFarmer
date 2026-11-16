@@ -31,8 +31,30 @@ The mobile app is not a second web console.
   printed-part stock and quantity adjustments remain a secondary toolbar entry,
   not a fourth tab.
 - **Scan**: a floating button above the tab bar on every tab. The shared
-  scanner reads barcode/QR and NFC printer and spool tags. Existing barcode
-  intake and tagged-spool creation flows are reused.
+  scanner handles spools only: spool QR/NFC tags and labels for an existing
+  spool open it, NFC tags carrying new-spool data start spool creation, and
+  valid GTIN-8/12/13/14 product barcodes open barcode intake. An unknown
+  product barcode is mapped to a filament (persisted as that filament's
+  Spoolman GTIN) before a spool is imported. UPC-E is expanded to its UPC-A
+  GTIN first. A non-GTIN code such as an Amazon FNSKU sticker (Code 128/39
+  text or a non-link QR payload) opens barcode intake in **Remember Code**
+  mode: the first scan asks the user to choose an existing filament by
+  alphabetically ordered material, matching vendor, and matching filament name,
+  or create a new filament. It saves the exact code against the chosen filament ID in PrintFarmer (a
+  case-sensitive alias, kept separate from the Spoolman GTIN and NFC
+  mappings), then adds a spool of it. A later scan of the same code shows the
+  remembered filament and adds another spool once the user confirms. Lookup or
+  save failures show Retry and never create anything. Codes made only of
+  digits, spaces and dashes are never remembered: they are spool IDs or GTINs.
+  A number that is neither a GTIN nor an existing spool ID, an app link that is
+  not a spool, or a code longer than 128 characters is reported as
+  unrecognized with an **Add Spool** action that opens manual spool creation.
+  A spool link or ID for a spool that is not on the server shows **Spool Not
+  Found** with the same **Add Spool** action (manual creation only). An NFC
+  tag pointing to a missing spool opens **Link NFC Tag** to relink it to an
+  existing spool or create one; it never enters Barcode Intake. An existing
+  spool ID wins over a GTIN
+  mapping with the same digits. A scan never dead-ends.
 - **Account avatar**: notifications, Settings, Servers and offline activity.
 
 iPhone has exactly three tabs: Farm, Queue and Filament. Regular-width iPad

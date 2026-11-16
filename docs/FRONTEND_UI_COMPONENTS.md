@@ -54,7 +54,7 @@ See `/src/Web/ReactApp/COLOR_SYSTEM_GUIDE.md` for complete color token reference
 ### Printer card grid
 
 Printer cards fill the available content width using flexible columns with
-minimum widths of `24rem` (detailed) and `17rem` (compact), with `1rem` gaps.
+minimum widths of `24rem` (detailed) and `20rem` (compact), with `1rem` gaps.
 Below the `640px` breakpoint they use one full-width column. A narrower content
 area can also shrink a single column without horizontal overflow.
 The virtualized grid (60 or more printers) uses the same sizing rules.

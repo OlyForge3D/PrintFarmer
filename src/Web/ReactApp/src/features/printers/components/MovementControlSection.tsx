@@ -6,14 +6,20 @@ import type { MoveRequest } from '@/types/api';
 import {
   HomeIcon,
   DisableMotorsIcon,
+  ArrowUpIcon,
+  ArrowDownIcon,
+  ArrowLeftIcon,
+  ArrowRightIcon,
 } from '@/common/components/icons/MdiIcons';
 import { getHomeButtonStyle } from '@/features/printers/utils/homeButtonStyle';
+import { knownHomedAxes } from '@/features/printers/utils/homedAxes';
 import {
   EXTRUDE_DISTANCE_OPTIONS,
   EXTRUDE_SPEED_OPTIONS,
 } from '@/features/printers/constants/temperaturePresets';
 
 interface MovementControlSectionProps {
+  layout?: 'card' | 'sidebar';
   // Position state
   moveX: number | string;
   moveY: number | string;
@@ -23,14 +29,15 @@ interface MovementControlSectionProps {
   extrudeSpeed: number;
   
   // Printer state
-  printerX?: number;
-  printerY?: number;
-  printerZ?: number;
+  printerX?: number | null;
+  printerY?: number | null;
+  printerZ?: number | null;
   homedAxes?: string;
   hotendTemp?: number;
   
   // Flags
   movementActionPending: boolean;
+  movementUnavailable?: boolean;
   canMove: boolean;
   canHomeAll?: boolean;
   canHomeXY?: boolean;
@@ -58,6 +65,7 @@ interface MovementControlSectionProps {
 }
 
 export function MovementControlSection({
+  layout = 'card',
   moveX,
   moveY,
   moveZ,
@@ -69,6 +77,7 @@ export function MovementControlSection({
   printerZ,
   homedAxes,
   movementActionPending,
+  movementUnavailable,
   canMove,
   canHomeAll = canMove,
   canHomeXY = canMove,
@@ -90,9 +99,9 @@ export function MovementControlSection({
   onExtrude,
   rightContent,
 }: MovementControlSectionProps) {
-  const homedAxesRaw = homedAxes;
-  const isHomedStateKnown = typeof homedAxesRaw === 'string';
-  const homedAxesLower = (homedAxesRaw ?? '').toLowerCase();
+  const homedAxesRaw = knownHomedAxes(homedAxes);
+  const isHomedStateKnown = homedAxesRaw !== undefined;
+  const homedAxesLower = homedAxesRaw ?? '';
   const isXHomed = isHomedStateKnown && homedAxesLower.includes('x');
   const isYHomed = isHomedStateKnown && homedAxesLower.includes('y');
   const isZHomed = isHomedStateKnown && homedAxesLower.includes('z');
@@ -100,14 +109,14 @@ export function MovementControlSection({
   const isAllHomed = isXYHomed && isZHomed;
 
   return (
-    <div className="mb-2">
-      <div className="flex flex-wrap gap-6 items-start">
+    <div className={layout === 'sidebar' ? undefined : 'mb-2'}>
+      <div className={layout === 'sidebar' ? 'flex flex-wrap gap-4 items-start' : 'flex flex-wrap gap-6 items-start'}>
         {/* Left Column: Move */}
-        <div className="flex flex-col gap-2 items-start">
-          <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
+        <div className={layout === 'sidebar' ? 'flex flex-col gap-1 items-start' : 'flex flex-col gap-2 items-start'}>
+          <div className={layout === 'sidebar' ? 'text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide' : 'text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1'}>
             Move
           </div>
-          <div className="flex gap-2 items-start">
+          <div className="flex gap-2 items-start max-sm:flex-wrap max-sm:[&_button]:min-h-11 max-sm:[&_button]:min-w-11">
             {/* XY Pad */}
             <div className="grid grid-cols-3 grid-rows-3 gap-1 w-fit">
               {/* Top row */}
@@ -122,12 +131,12 @@ export function MovementControlSection({
                 <HomeIcon className="h-4 w-4" />
               </MotionControlButton>
               <MotionControlButton
-                disabled={movementActionPending || !canMove}
+                disabled={movementActionPending || !canMove || !isYHomed}
                 onClick={() => onMove('Y', step)}
                 aria-label="Jog Y positive"
                 padSize="small"
               >
-                ▲
+                {layout === 'sidebar' ? <ArrowUpIcon className="h-4 w-4" /> : '▲'}
               </MotionControlButton>
               <ControlPadButton
                 disabled={!canDisableMotors}
@@ -140,12 +149,12 @@ export function MovementControlSection({
 
               {/* Middle row */}
               <MotionControlButton
-                disabled={movementActionPending || !canMove}
+                disabled={movementActionPending || !canMove || !isXHomed}
                 onClick={() => onMove('X', -step)}
                 aria-label="Jog X negative"
                 padSize="small"
               >
-                ◀
+                {layout === 'sidebar' ? <ArrowLeftIcon className="h-4 w-4" /> : '◀'}
               </MotionControlButton>
               <MotionControlButton
                 disabled={movementActionPending || !canHomeXY}
@@ -158,23 +167,23 @@ export function MovementControlSection({
                 <HomeIcon className="h-4 w-4" />
               </MotionControlButton>
               <MotionControlButton
-                disabled={movementActionPending || !canMove}
+                disabled={movementActionPending || !canMove || !isXHomed}
                 onClick={() => onMove('X', step)}
                 aria-label="Jog X positive"
                 padSize="small"
               >
-                ▶
+                {layout === 'sidebar' ? <ArrowRightIcon className="h-4 w-4" /> : '▶'}
               </MotionControlButton>
 
               {/* Bottom row */}
               <div></div>
               <MotionControlButton
-                disabled={movementActionPending || !canMove}
+                disabled={movementActionPending || !canMove || !isYHomed}
                 onClick={() => onMove('Y', -step)}
                 aria-label="Jog Y negative"
                 padSize="small"
               >
-                ▼
+                {layout === 'sidebar' ? <ArrowDownIcon className="h-4 w-4" /> : '▼'}
               </MotionControlButton>
               <div></div>
             </div>
@@ -182,7 +191,7 @@ export function MovementControlSection({
             {/* Z Pad */}
             <div className="flex flex-col gap-1 w-fit">
               <MotionControlButton
-                disabled={movementActionPending || !canMove}
+                disabled={movementActionPending || !canMove || !isZHomed}
                 onClick={() => onMove('Z', step)}
                 aria-label="Jog Z positive"
                 padSize="small"
@@ -200,7 +209,7 @@ export function MovementControlSection({
                 <HomeIcon className="h-4 w-4" />
               </MotionControlButton>
               <MotionControlButton
-                disabled={movementActionPending || !canMove}
+                disabled={movementActionPending || !canMove || !isZHomed}
                 onClick={() => onMove('Z', -step)}
                 aria-label="Jog Z negative"
                 padSize="small"
@@ -246,7 +255,7 @@ export function MovementControlSection({
                 >
                   E+
                 </ControlPadButton>
-                <div className="h-8 w-8" />
+                <div className="h-8 w-8 max-sm:h-11 max-sm:w-11" />
                 <ControlPadButton
                   disabled={movementActionPending || !canExtrude}
                   onClick={() => onExtrude('retract')}
@@ -284,13 +293,19 @@ export function MovementControlSection({
             </div>
           </div>
           {/* Move distance slider */}
-          <MoveDistanceSlider value={step} onChange={onStepChange} disabled={!canSetStep} />
+          {layout === 'card' && <MoveDistanceSlider value={step} onChange={onStepChange} disabled={!canSetStep} />}
         </div>
 
         {/* Right content (Control/Filament) — same level as Move column */}
         {rightContent}
       </div>
 
+      {layout === 'sidebar' && (
+        <div className="my-4">
+          <div className="text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide mb-1">Step Size</div>
+          <MoveDistanceSlider value={step} onChange={onStepChange} disabled={!canSetStep} />
+        </div>
+      )}
       <PrinterCoordinateRow
         values={{ X: moveX, Y: moveY, Z: moveZ }}
         positions={{ X: printerX, Y: printerY, Z: printerZ }}
@@ -300,7 +315,7 @@ export function MovementControlSection({
         onMove={onMove}
         onMoveTo={onMoveTo}
       />
-      <PrinterMotionHelp />
+      <PrinterMotionHelp movementUnavailable={movementUnavailable} />
     </div>
   );
 }

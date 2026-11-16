@@ -1,11 +1,18 @@
-﻿using Farm.Web.Api;
+﻿using System.Security.Claims;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Authentication;
+using Farm.Web.Api;
 using Farm.Web.Api.Startup;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
@@ -104,5 +111,135 @@ public class JwtEventsAccessTokenQueryTests
         await options.Events.OnMessageReceived(context);
 
         Assert.Equal("prod-query-token", context.Token);
+    }
+
+    [Theory]
+    [InlineData("wrapped-database")]
+    [InlineData("wrapped-timeout")]
+    [InlineData("invalid-operation")]
+    [InlineData("missing-service")]
+    [InlineData("disposed")]
+    [InlineData("database")]
+    [InlineData("update")]
+    [InlineData("timeout")]
+    [InlineData("internal-cancellation")]
+    [InlineData("caller-cancellation")]
+    [InlineData("unexpected")]
+    public async Task TokenValidation_RevocationLookupFailure_HandlesOnlyExpectedFailures(string scenario)
+    {
+        using CancellationTokenSource cancellation = new();
+        Exception failure = scenario switch
+        {
+            "wrapped-database" => new InvalidOperationException("Provider wrapper.", new SqliteException("Store unavailable.", 14)),
+            "wrapped-timeout" => new InvalidOperationException("Provider wrapper.", new TimeoutException("Store timeout.")),
+            "disposed" => new ObjectDisposedException("revocation-store"),
+            "database" => new SqliteException("Revocation store unavailable.", 14),
+            "update" => new DbUpdateException("Revocation store unavailable."),
+            "timeout" => new TimeoutException("Revocation store unavailable."),
+            "internal-cancellation" => new OperationCanceledException("Revocation store cancelled."),
+            "caller-cancellation" => new OperationCanceledException(cancellation.Token),
+            "unexpected" => new ArgumentException("Revocation implementation fault."),
+            _ => new InvalidOperationException("Revocation store unavailable.")
+        };
+        Mock<ITokenRevocationService> revocationService = new(MockBehavior.Strict);
+        revocationService
+            .Setup(service => service.IsTokenRevokedAsync("access-token", It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                if (scenario == "caller-cancellation")
+                {
+                    await cancellation.CancelAsync();
+                }
+                return await Task.FromException<bool>(failure);
+            });
+        List<string> logs = [];
+        Guid userId = Guid.NewGuid();
+        ServiceCollection services = new();
+        services
+            .AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase($"revocation-failure-{Guid.NewGuid()}"))
+            .AddSingleton<ILoggerFactory>(new CapturingLoggerFactory(logs));
+        if (scenario != "missing-service")
+        {
+            services.AddSingleton(revocationService.Object);
+        }
+        using ServiceProvider provider = services.BuildServiceProvider();
+        AppDbContext db = provider.GetRequiredService<AppDbContext>();
+        db.Users.Add(new User { Id = userId, Username = "active-user", Email = "active@example.com", PasswordHash = "unused", IsActive = true });
+        await db.SaveChangesAsync();
+
+        DefaultHttpContext httpContext = new()
+        {
+            RequestServices = provider,
+            RequestAborted = cancellation.Token
+        };
+        httpContext.Request.Headers.Authorization = "Bearer access-token";
+        AuthenticationScheme scheme = new(
+            JwtBearerDefaults.AuthenticationScheme,
+            displayName: null,
+            handlerType: typeof(JwtBearerHandler));
+        TokenValidatedContext context = new(httpContext, scheme, new JwtBearerOptions())
+        {
+            Principal = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.NameIdentifier, userId.ToString())],
+                JwtBearerDefaults.AuthenticationScheme))
+        };
+
+        JwtBearerEvents events = ProgramHelpers.CreateJwtEvents(null, null);
+        Exception? propagated = await Record.ExceptionAsync(() => events.OnTokenValidated(context));
+        if (scenario == "missing-service")
+        {
+            InvalidOperationException missingService = Assert.IsType<InvalidOperationException>(propagated);
+            Assert.Contains(nameof(ITokenRevocationService), missingService.Message, StringComparison.Ordinal);
+            Assert.Null(context.Result);
+            return;
+        }
+        revocationService.Verify(service => service.IsTokenRevokedAsync("access-token", cancellation.Token), Times.Once);
+        if (scenario is "caller-cancellation" or "unexpected" or "invalid-operation" or "disposed")
+        {
+            Assert.Same(failure, propagated);
+            Assert.Null(context.Result);
+            Assert.DoesNotContain(logs, entry =>
+                entry.StartsWith("Error: ", StringComparison.Ordinal) &&
+                entry.Contains("Token revocation status could not be verified", StringComparison.Ordinal));
+            return;
+        }
+
+        Assert.Null(propagated);
+        Assert.False(context.Result!.Succeeded);
+        Assert.Equal("Token revocation status could not be verified.", context.Result.Failure!.Message);
+        Assert.Contains(
+            logs,
+            entry => entry.StartsWith("Error: ", StringComparison.Ordinal) &&
+                     entry.Contains("Token revocation status could not be verified", StringComparison.Ordinal));
+    }
+
+    private sealed class CapturingLoggerFactory(ICollection<string> entries) : ILoggerFactory
+    {
+        public ILogger CreateLogger(string categoryName) => new CapturingLogger(entries);
+
+        public void AddProvider(ILoggerProvider provider)
+        {
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class CapturingLogger(ICollection<string> entries) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            entries.Add($"{logLevel}: {formatter(state, exception)}");
+        }
     }
 }

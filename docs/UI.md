@@ -20,22 +20,99 @@ PrintFarmer uses a **component-based React architecture** with TypeScript for ty
 ## Page Structure
 
 ### Dashboard (Home)
-Main overview page showing all printers with real-time status.
+`PrinterDashboard.tsx` shows farm statistics and alert strips above six widgets.
+At widths of 1024px and up, the grid is Tasks / Active Jobs / Recent Prints, then
+Farm Cost / Background Services / Maintenance Alerts. It uses two columns from
+768px to 1023px, and one column below 768px.
 
-**Components:**
-- `Dashboard.tsx` - Main container
-- `PrinterGrid` - Grid layout of printers
-- `PrinterCard` - Individual printer display
-- `LocationFilter` - Filter by location dropdown
-- `JobQueue` - Active jobs panel
-- `HealthStatus` - System health indicator
+**Banner dismissal:** maintenance and configuration dismissals are saved per
+signed-in user in this browser's local storage. They survive refresh, but do not
+sync across devices or hide the underlying maintenance/configuration views.
+New maintenance alerts, a new occurrence or severity change, and newer catalog
+revisions reappear. Successfully observing the condition resolved also resets its
+dismissal, including within the same visit. Failed requests do not reset it.
+An empty successful printer-summary response can be a startup fallback rather
+than proof of resolution, so it preserves configuration dismissals until a
+nonempty summary confirms resolution or a new revision arrives.
+Anonymous users and older servers without a catalog revision get session-only
+configuration dismissal. Storage failures show a warning and hide only for the
+current session. Dismiss does not complete maintenance or apply configuration.
+The existing maintenance severity selection is unchanged.
 
-**Features:**
-- Real-time printer status via SignalR
-- Filter by location
-- Quick job queue view
-- One-click print controls
-- Auto-refresh on status changes
+**Pending Tasks:** "Import slicer profiles" means the model lacks imported
+database machine/model profiles; it does not mean a worker-library profile upgrade
+was detected. The scanner checks at startup and every five minutes when slicer
+workers are registered. Import-task dismissals retain the existing **farm-wide**
+task scope: the same model/printer group is not regenerated, but a newly uncovered
+printer can create a task. The widget discloses this scope beside the import-task
+explanation and in the dismiss control's accessible description. Import titles
+wrap above their actions so the model identity remains readable in narrow cards.
+Already-open tasks remain visible until acted on; the
+fix does not delete history or silently dismiss old duplicates.
+
+The printer summary API adds nullable `catalogUpdateRevision`, derived from the
+catalog model's update timestamp, so a newer update for the same printer is not
+confused with a previously dismissed one. No database migration is needed.
+
+### Printer service status
+
+Administrators use the **In Service / Out of Service** control in the action area
+of compact cards, detailed cards and the table, or beside identity in the details sidebar.
+Other users see a read-only status. It is the existing `IsEnabled` setting,
+not a second monitoring flag.
+Cards and table actions show a green filled power plug for In Service and a neutral
+outline plug for Out of Service. The plug is first in the table's **Actions** column;
+there is no separate Service column. Authorized users can toggle the glyph; other users see status only.
+The operational **Status** column is unchanged; the former **Last Updated**
+column has been removed.
+
+Both card styles place **Open in Browser** at the far right of the header and
+the remaining actions in a two-column right-hand grid, without an overflow menu.
+Compact cards place **Open details sidebar** immediately before the browser action.
+Their single-row header matches the detailed header height while retaining 44px
+header controls. Both main action grids use uniform 44px square controls in
+row-major order: service status, camera, auto-dispatch, files, history and edit.
+History remains capability-gated; Tags remains compact-only after the shared actions.
+Auto-dispatch shares the other actions' ghost hover treatment in both states,
+while its enabled state retains the accent-colored, filled bolt.
+Unavailable browser actions retain their explanatory tooltip. Both card styles show
+the printer's configured IP address beneath its manufacturer when available.
+Out of Service preserves the existing disabled-printer behavior: the printer is
+excluded from monitoring and dispatch, and is not commanded to power off.
+Offline Out of Service printers do not show the yellow troubleshooting action;
+unexpectedly offline In Service printers retain it. Maintenance remains a separate setting.
+Sorting does not hide printers. The default order in all three views is active
+(printing or paused), pending, error, ready/other, maintenance, then offline.
+Within each group, names sort A-Z ignoring case, with printer ID breaking ties.
+An offline printer stays in the offline group regardless of service status.
+Pending takes precedence over active, and maintenance over error, matching mobile.
+Explicit saved sort choices remain in effect.
+Emergency stop remains available for an online Out of Service printer when
+its backend supports control operations. Service status is not a physical
+safety interlock, and a sent stop command does not prove the printer has stopped.
+
+A printer with an assigned or active job cannot be moved Out of Service. The
+operator must review and resolve that work first; PrintFarmer does not pause or
+cancel it. Concurrent job assignments and service changes use a shared revision
+barrier so neither can silently bypass this check. Externally observed active
+jobs remain recorded even on an Out of Service printer and require operator
+review; this does not authorize dispatch. If an older expected-offline record is migrated while a job is still
+active, the printer is not disabled and the job appears under **Operational
+issues** with a link to the printer. That issue clears when the job is no longer
+active, is unassigned, or is reassigned to another printer. Older expected-offline records without active work migrate to Out of
+Service; printers without such a record retain their existing status.
+
+The conversion is one-way: down-migration leaves `IsEnabled` unchanged and
+restores an empty expected-offline column, not historical suppression or
+timestamps. Restore a pre-upgrade backup to recover the original intent.
+SQLite conversion is exercised locally; PostgreSQL and SQL Server migrations
+require provider-backed validation before deployment.
+
+The Admin Control Center presents **Operational issues** as compact, grouped
+type/severity disclosures rather than repeated warning cards. Totals and
+severity stay visible; critical errors start expanded. Expand a group for
+per-printer links. The backends health tile reflects only printers In Service;
+missing data and failed refreshes are not an all-clear.
 
 ### Files Page
 `/files` separates owned local assets from files observed on printers.

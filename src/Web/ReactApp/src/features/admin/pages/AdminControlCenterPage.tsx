@@ -117,7 +117,9 @@ function OverallStatusBadge({ status, isStale = false }: { status: string; isSta
       data-overall-stale={isStale ? 'true' : 'false'}
     >
       <Badge variant={presentation.badgeVariant} size="sm" className="gap-1.5">
-        <Icon className={clsx('h-3.5 w-3.5', presentation.iconClass)} ariaLabel="" />
+        <span aria-hidden="true">
+          <Icon className={clsx('h-3.5 w-3.5', presentation.iconClass)} />
+        </span>
         {/*
           An operator who navigates by badge alone must not read a cached
           "Healthy" as a live one. The stale caveat rides on the badge itself
@@ -156,7 +158,7 @@ function SubsystemTile({ subsystem }: { subsystem: SubsystemHealthDto }) {
   const { Icon } = presentation;
   return (
     <AdminStatTile
-      icon={<Icon className="h-5 w-5" ariaLabel="" />}
+      icon={<Icon className="h-5 w-5" />}
       iconClassName={presentation.iconClass}
       label={subsystem.name}
       badge={presentation.label}
@@ -260,7 +262,7 @@ function DestinationCard({ destination }: { destination: AdminDestination }) {
             className="mt-0.5 shrink-0 text-pf-text-tertiary transition-colors group-hover:text-pf-accent"
             aria-hidden="true"
           >
-            <ArrowRightIcon className="h-4 w-4" ariaLabel="" />
+            <ArrowRightIcon className="h-4 w-4" />
           </span>
         </Card.Body>
       </Card>
@@ -275,9 +277,8 @@ function DestinationCard({ destination }: { destination: AdminDestination }) {
  * `/admin` Control Center hub.
  *
  * Three bands, always in this order:
- * 1. **Needs attention** — server-ranked items, bounded to a preview with an
- *    explicit "Show all N" disclosure so a busy farm cannot bury the rest of
- *    the hub (#2517). See `AdminAttentionPanel`.
+ * 1. **Operational issues** — server-ranked, grouped type/severity disclosures
+ *    with visible totals and expanded critical errors. See `AdminAttentionPanel`.
  * 2. **System health checks** — compact, truthful subsystem status from the
  *    admin overview. Deliberately *not* the same domain as the header's System
  *    pill, which reports service health from `/api/system/info`; both bands say
@@ -605,7 +606,7 @@ export function AdminControlCenterPage() {
                   void refetch();
                 }}
                 disabled={isFetching}
-                iconLeft={<RefreshIcon className="h-3.5 w-3.5" ariaLabel="" />}
+                iconLeft={<RefreshIcon className="h-3.5 w-3.5" />}
               >
                 {isFetching ? 'Retrying…' : 'Try again'}
               </Button>
@@ -616,7 +617,7 @@ export function AdminControlCenterPage() {
         {/* ── Band 1: attention ── */}
         {canViewOverview && (
           <AdminSection
-            caption="Needs attention"
+            caption="Operational issues"
             captionId="admin-hub-attention-heading"
             count={isHardError ? undefined : data?.attention.length}
           >
@@ -639,29 +640,32 @@ export function AdminControlCenterPage() {
               />
             )}
 
-            {!isLoading && !isHardError && data && data.attention.length === 0 && (
-              <p
-                className="flex items-center gap-2 text-sm text-pf-text-secondary"
-                data-testid="admin-hub-attention-clear"
-              >
-                {isAllClear ? (
-                  <CheckCircleIcon className="h-4 w-4 shrink-0 text-pf-success" ariaLabel="" />
-                ) : (
-                  <HelpCircleIcon className="h-4 w-4 shrink-0 text-pf-text-tertiary" ariaLabel="" />
-                )}
-                {isAllClear
-                  ? 'Nothing needs your attention — every subsystem health check is reporting healthy.'
-                  : isStale
-                    ? 'The last successful check reported no attention items, but that refresh failed — this may be out of date.'
-                    : 'The admin overview reported no attention items. Review the system health checks below for the current status.'}
-              </p>
-            )}
-
-            {!isLoading && !isHardError && data && data.attention.length > 0 && (
+            {!isLoading && !isHardError && data && (
               <AdminAttentionPanel
                 items={data.attention}
                 access={{ hasRole, hasPermission }}
                 labelledBy="admin-hub-attention-heading"
+                emptyState={
+                  <p
+                    className="flex items-center gap-2 text-sm text-pf-text-secondary"
+                    data-testid="admin-hub-attention-clear"
+                  >
+                    {isAllClear ? (
+                      <span aria-hidden="true">
+                        <CheckCircleIcon className="h-4 w-4 shrink-0 text-pf-success" />
+                      </span>
+                    ) : (
+                      <span aria-hidden="true">
+                        <HelpCircleIcon className="h-4 w-4 shrink-0 text-pf-text-tertiary" />
+                      </span>
+                    )}
+                    {isAllClear
+                      ? 'Nothing needs your attention — every subsystem health check is reporting healthy.'
+                      : isStale
+                        ? 'The last successful check reported no attention items, but that refresh failed — this may be out of date.'
+                        : 'The admin overview reported no attention items. Review the system health checks below for the current status.'}
+                  </p>
+                }
               />
             )}
           </AdminSection>
@@ -715,7 +719,7 @@ export function AdminControlCenterPage() {
             )}
             {!isLoading && data && data.subsystems.length === 0 && (
               <AdminEmpty
-                icon={<HelpCircleIcon className="h-8 w-8" ariaLabel="" />}
+                icon={<HelpCircleIcon className="h-8 w-8" />}
                 title="No subsystems reported"
                 description="The overview endpoint returned an empty subsystem list."
                 size="compact"
@@ -735,7 +739,7 @@ export function AdminControlCenterPage() {
                 </p>
               ) : (
                 <AdminEmpty
-                  icon={<HomeIcon className="h-8 w-8" ariaLabel="" />}
+                  icon={<HomeIcon className="h-8 w-8" />}
                   title="No operational tools available"
                   description="Your account does not have access to any operational tools."
                   size="compact"

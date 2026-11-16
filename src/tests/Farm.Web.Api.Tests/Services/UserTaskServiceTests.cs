@@ -20,6 +20,9 @@ public class UserTaskServiceTests
     public UserTaskServiceTests()
     {
         _repositoryMock = new Mock<IUserTaskRepository>();
+        _repositoryMock.Setup(r => r.GetDismissedByEntityAsync(
+                It.IsAny<UserTaskType>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<UserTask>());
         _loggerMock = new Mock<ILogger<UserTaskService>>();
         _broadcasterMock = new Mock<ITaskBroadcaster>();
 
@@ -234,6 +237,145 @@ public class UserTaskServiceTests
             _service.CreateOrUpdateProfileImportTaskAsync(new CreateProfileImportTaskBatchDto(modelId, "MK4", "Prusa", incoming)));
 
         _repositoryMock.Verify(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()), Times.Exactly(5));
+        _broadcasterMock.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task CreateOrUpdateProfileImportTaskAsync_DismissedTaskCoversPrinters_DoesNotRecreateOrBroadcast()
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        UserTask dismissed = CreateUserTask("Import slicer profiles for Prusa MK4S", UserTaskType.ProfileImport);
+        dismissed.EntityType = "PrinterModel";
+        dismissed.EntityId = modelId;
+        dismissed.Status = UserTaskStatus.Dismissed;
+        dismissed.RelatedEntityIdsJson = JsonSerializer.Serialize(new[] { printerId, Guid.NewGuid() });
+        _repositoryMock.Setup(r => r.GetDismissedByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", modelId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([dismissed]);
+
+        UserTaskDto result = await _service.CreateOrUpdateProfileImportTaskAsync(
+            new CreateProfileImportTaskBatchDto(modelId, "MK4S", "Prusa", [printerId, printerId]));
+
+        Assert.Equal(dismissed.Id, result.Id);
+        Assert.Equal(UserTaskStatus.Dismissed, result.Status);
+        _repositoryMock.Verify(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()), Times.Never);
+        _broadcasterMock.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task CreateOrUpdateProfileImportTaskAsync_DismissalDoesNotCoverNewPrinter_CreatesWholeBatch()
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid seenPrinterId = Guid.NewGuid();
+        Guid newPrinterId = Guid.NewGuid();
+        UserTask dismissed = CreateUserTask("Dismissed", UserTaskType.ProfileImport);
+        dismissed.Status = UserTaskStatus.Dismissed;
+        dismissed.RelatedEntityIdsJson = JsonSerializer.Serialize(new[] { seenPrinterId });
+        _repositoryMock.Setup(r => r.GetDismissedByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", modelId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([dismissed]);
+        UserTask? added = null;
+        _repositoryMock.Setup(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()))
+            .Callback<UserTask, CancellationToken>((task, _) => added = task)
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(r => r.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid _, CancellationToken _) => Task.FromResult(added));
+
+        UserTaskDto result = await _service.CreateOrUpdateProfileImportTaskAsync(
+            new CreateProfileImportTaskBatchDto(modelId, "MK4S", "Prusa", [seenPrinterId, newPrinterId]));
+
+        Assert.NotNull(added);
+        Assert.Equal(UserTaskStatus.Pending, result.Status);
+        Assert.True(JsonSerializer.Deserialize<Guid[]>(added.RelatedEntityIdsJson!)!.ToHashSet()
+            .SetEquals([seenPrinterId, newPrinterId]));
+        _broadcasterMock.Verify(b => b.BroadcastTaskCreatedAsync(
+            It.Is<UserTaskDto>(dto => dto.Id == added.Id), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task CreateOrUpdateProfileImportTaskAsync_DismissedDuringMerge_DoesNotRecoverDismissedTask()
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid firstPrinter = Guid.NewGuid();
+        Guid secondPrinter = Guid.NewGuid();
+        UserTask stale = CreateUserTask("Stale", UserTaskType.ProfileImport);
+        stale.RelatedEntityIdsJson = JsonSerializer.Serialize(new[] { firstPrinter });
+        UserTask dismissed = CreateUserTask("Dismissed", UserTaskType.ProfileImport);
+        dismissed.Status = UserTaskStatus.Dismissed;
+        dismissed.RelatedEntityIdsJson = JsonSerializer.Serialize(new[] { firstPrinter, secondPrinter });
+        _repositoryMock.Setup(r => r.GetByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", modelId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(stale);
+        _repositoryMock.Setup(r => r.TryUpdateFieldsIfOpenAsync(
+            It.IsAny<UserTask>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        _repositoryMock.Setup(r => r.GetDismissedByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", modelId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([dismissed]);
+
+        UserTaskDto result = await _service.CreateOrUpdateProfileImportTaskAsync(
+            new CreateProfileImportTaskBatchDto(modelId, "MK4S", "Prusa", [firstPrinter, secondPrinter]));
+
+        Assert.Equal(dismissed.Id, result.Id);
+        Assert.Equal(UserTaskStatus.Dismissed, result.Status);
+        _repositoryMock.Verify(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()), Times.Never);
+        _broadcasterMock.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task CreateOrUpdateProfileImportTaskAsync_OlderDismissalCoversBatch_DoesNotRecreateOrBroadcast()
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid firstPrinter = Guid.NewGuid();
+        Guid secondPrinter = Guid.NewGuid();
+        UserTask newer = CreateUserTask("Newer dismissal", UserTaskType.ProfileImport);
+        newer.Status = UserTaskStatus.Dismissed;
+        newer.RelatedEntityIdsJson = JsonSerializer.Serialize(new[] { firstPrinter });
+        UserTask older = CreateUserTask("Older dismissal", UserTaskType.ProfileImport);
+        older.Status = UserTaskStatus.Dismissed;
+        older.RelatedEntityIdsJson = JsonSerializer.Serialize(new[] { firstPrinter, secondPrinter });
+        _repositoryMock.Setup(r => r.GetDismissedByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", modelId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([newer, older]);
+
+        UserTaskDto result = await _service.CreateOrUpdateProfileImportTaskAsync(
+            new CreateProfileImportTaskBatchDto(modelId, "MK4S", "Prusa", [firstPrinter, secondPrinter]));
+
+        Assert.Equal(older.Id, result.Id);
+        Assert.Equal(UserTaskStatus.Dismissed, result.Status);
+        _repositoryMock.Verify(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()), Times.Never);
+        _broadcasterMock.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateOrUpdateProfileImportTaskAsync_SplitDismissalsCoverBatch_DoesNotRecreateOrBroadcast(bool dismissedDuringMerge)
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid firstPrinter = Guid.NewGuid();
+        Guid secondPrinter = Guid.NewGuid();
+        UserTask newer = CreateUserTask("Newer dismissal", UserTaskType.ProfileImport);
+        newer.Status = UserTaskStatus.Dismissed;
+        newer.RelatedEntityIdsJson = JsonSerializer.Serialize(new[] { firstPrinter });
+        UserTask older = CreateUserTask("Older dismissal", UserTaskType.ProfileImport);
+        older.Status = UserTaskStatus.Dismissed;
+        older.RelatedEntityIdsJson = JsonSerializer.Serialize(new[] { secondPrinter });
+        _repositoryMock.Setup(r => r.GetDismissedByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", modelId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([newer, older]);
+        if (dismissedDuringMerge)
+        {
+            UserTask stale = CreateUserTask("Stale", UserTaskType.ProfileImport);
+            stale.RelatedEntityIdsJson = JsonSerializer.Serialize(new[] { firstPrinter });
+            _repositoryMock.Setup(r => r.GetByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", modelId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(stale);
+            _repositoryMock.Setup(r => r.TryUpdateFieldsIfOpenAsync(
+                It.IsAny<UserTask>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(false);
+        }
+
+        UserTaskDto result = await _service.CreateOrUpdateProfileImportTaskAsync(
+            new CreateProfileImportTaskBatchDto(modelId, "MK4S", "Prusa", [firstPrinter, secondPrinter]));
+
+        Assert.Equal(older.Id, result.Id);
+        Assert.Equal(UserTaskStatus.Dismissed, result.Status);
+        _repositoryMock.Verify(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()), Times.Never);
         _broadcasterMock.VerifyNoOtherCalls();
     }
 
@@ -1051,6 +1193,9 @@ public class UserTaskServiceTests
     private static Mock<IUserTaskRepository> CreateProfileImportRepository(ProfileImportRepositoryState state)
     {
         Mock<IUserTaskRepository> repository = new();
+        repository.Setup(r => r.GetDismissedByEntityAsync(
+                It.IsAny<UserTaskType>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<UserTask>());
         repository.Setup(r => r.GetByEntityAsync(
                 UserTaskType.ProfileImport,
                 "PrinterModel",
@@ -1079,6 +1224,9 @@ public class UserTaskServiceTests
         InverseInterleavingProfileImportRepositoryState state)
     {
         Mock<IUserTaskRepository> repository = new();
+        repository.Setup(r => r.GetDismissedByEntityAsync(
+                It.IsAny<UserTaskType>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<UserTask>());
         repository.Setup(r => r.GetByEntityAsync(
                 UserTaskType.ProfileImport,
                 "PrinterModel",

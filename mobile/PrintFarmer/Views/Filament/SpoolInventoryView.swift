@@ -141,6 +141,15 @@ struct SpoolInventoryView: View {
                         }
                 }
             }
+            .sheet(item: $viewModel.pendingNFCTagLink) { tag in
+                NFCTagLinkView(
+                        uid: tag.uid,
+                        scannedData: viewModel.nfcTagLinkData,
+                        spoolService: services.spoolService
+                ) { spool in
+                        viewModel.completeNFCTagLink(to: spool)
+                }
+            }
             .sheet(item: $nfcWriteTarget) { target in
                 NFCWriteView(spool: target.spool, filament: target.filament) {
                     await viewModel.writeNFCTag(for: target.spool)

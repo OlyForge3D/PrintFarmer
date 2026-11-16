@@ -416,13 +416,13 @@ function TaskFormModal({ isOpen, taskId, tasks, categories, cloneSource, onClose
             </h3>
 
             {!isEdit ? (
-              <p className="text-sm text-pf-text-muted py-6 text-center border border-dashed border-pf-border rounded-lg">
+              <p className="text-sm text-pf-text-secondary py-6 text-center border border-dashed border-pf-border rounded-lg">
                 Save the task first to manage required parts.
               </p>
             ) : (
               <>
                 {/* Summary */}
-                <p className="text-sm text-pf-text-muted">
+                <p className="text-sm text-pf-text-secondary">
                   {task!.taskComponents.length === 0
                     ? 'No parts linked to this task yet. Add parts from your inventory below.'
                     : `${task!.taskComponents.length} part${task!.taskComponents.length !== 1 ? 's' : ''} required for this task.`}
@@ -734,7 +734,7 @@ export function TaskCatalogTab() {
       </Toolbar>
 
       {/* Summary */}
-      <p className="text-sm text-pf-text-muted">
+      <p className="text-sm text-pf-text-secondary">
         {filtered.length} task{filtered.length !== 1 ? 's' : ''}
         {categoryFilter ? ` in "${categoryFilter}"` : ''}
         {search ? ` matching "${search}"` : ''}
@@ -759,7 +759,7 @@ export function TaskCatalogTab() {
       {grouped.map(([cat, catTasks]) => (
         <section key={cat} className="space-y-2">
           <h3 className="text-sm font-semibold text-pf-text-secondary uppercase tracking-wide">
-            {cat} <span className="text-pf-text-muted font-normal">({catTasks.length})</span>
+            {cat} <span className="text-pf-text-secondary font-normal">({catTasks.length})</span>
           </h3>
           <div className="divide-y divide-pf-border rounded-lg border border-pf-border bg-pf-bg-2">
             {catTasks.map(task => (
@@ -779,9 +779,9 @@ export function TaskCatalogTab() {
                     )}
                   </div>
                   {task.description && (
-                    <p className="text-xs text-pf-text-muted mt-0.5 line-clamp-1">{task.description}</p>
+                    <p className="text-xs text-pf-text-secondary mt-0.5 line-clamp-1">{task.description}</p>
                   )}
-                  <div className="flex items-center gap-3 mt-1 text-xs text-pf-text-muted">
+                  <div className="flex items-center gap-3 mt-1 text-xs text-pf-text-secondary">
                     <span>{intervalText(task)}</span>
                     {task.estimatedDurationMinutes != null && <span>~{task.estimatedDurationMinutes} min</span>}
                     {task.taskComponents.length > 0 && (

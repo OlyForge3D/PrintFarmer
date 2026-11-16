@@ -91,6 +91,15 @@ struct SpoolPickerView: View {
                         }
                 }
             }
+            .sheet(item: $viewModel.pendingNFCTagLink) { tag in
+                NFCTagLinkView(
+                        uid: tag.uid,
+                        scannedData: viewModel.nfcTagLinkData,
+                        spoolService: services.spoolService
+                ) { spool in
+                        viewModel.completeNFCTagLink(to: spool)
+                }
+            }
             .task {
                 viewModel.configure(spoolService: services.spoolService)
                 #if canImport(UIKit)

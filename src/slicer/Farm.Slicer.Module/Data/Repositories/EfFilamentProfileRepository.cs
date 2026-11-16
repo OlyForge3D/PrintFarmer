@@ -15,6 +15,13 @@ public class EfFilamentProfileRepository(SlicerDbContext db) : IFilamentProfileR
         await _db.FilamentProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
 
     /// <inheritdoc/>
+    public async Task<IReadOnlyList<FilamentProfile>> GetOwnedNonSystemAsync(SlicerType engine, Guid userId, CancellationToken ct = default) =>
+        await _db.FilamentProfiles.AsNoTracking()
+            .Where(p => p.SlicerType == engine && !p.IsSystem && p.CreatedByUserId == userId)
+            .OrderBy(p => p.Material)
+            .ToListAsync(ct);
+
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<FilamentProfile>> GetByEngineAsync(SlicerType engine, bool includeSystem = true, Guid? userId = null, CancellationToken ct = default)
     {
         IQueryable<FilamentProfile> query = _db.FilamentProfiles.AsNoTracking().Where(p => p.SlicerType == engine);

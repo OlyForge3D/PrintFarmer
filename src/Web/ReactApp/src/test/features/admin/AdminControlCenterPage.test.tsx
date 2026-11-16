@@ -15,7 +15,7 @@ vi.mock('react-router', async (importOriginal) => {
   return {
     ...actual,
     Link: ({ state, ...props }: React.ComponentProps<typeof actual.Link>) => (
-      <actual.Link {...props} state={state} data-route-state={state ? JSON.stringify(state) : undefined} />
+      <actual.Link {...props} state={state} data-route-state={state ? JSON.stringify(state) : undefined} /> // eslint-disable-line local/pf-no-unguarded-console -- Serialized router state is asserted by this test fixture.
     ),
   };
 });
@@ -201,7 +201,7 @@ describe('AdminControlCenterPage', () => {
     });
 
     const headings = screen.getAllByRole('heading');
-    expect(headings.findIndex((heading) => heading.textContent === 'Needs attention')).toBeLessThan(
+    expect(headings.findIndex((heading) => heading.textContent === 'Operational issues')).toBeLessThan(
       headings.findIndex((heading) => heading.textContent === 'System health checks'),
     );
     expect(screen.getByText(/Checked at/i)).toBeInTheDocument();
@@ -439,7 +439,8 @@ describe('AdminControlCenterPage', () => {
     const row = screen.getByTestId('admin-hub-attention-item');
     expect(within(row).getByText("Printer 'printer-02' is unreachable")).toBeInTheDocument();
     // Text label paired with icon/colour.
-    expect(within(row).getByText('Warning')).toBeInTheDocument();
+    expect(screen.getByText('1 Warning')).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByText('Unexpected offline printers'));
 
     const actionLink = within(row).getByRole('link', { name: /Open Printers/i });
     expect(actionLink).toHaveAttribute('href', '/printers');
@@ -689,7 +690,7 @@ describe('AdminControlCenterPage', () => {
 
     const row = screen.getByTestId('admin-hub-attention-item');
     expect(row.getAttribute('data-attention-severity')).toBe('CosmicRay');
-    expect(within(row).getByText('CosmicRay')).toBeInTheDocument();
+    expect(screen.getByText('1 CosmicRay')).toBeInTheDocument();
     expect(within(row).getByText('A brand-new severity')).toBeInTheDocument();
   });
 
@@ -720,7 +721,7 @@ describe('AdminControlCenterPage', () => {
     expect(mockedApiGet).toHaveBeenCalledTimes(2);
   });
 
-  it('renders permitted operational cards and seven focused settings categories', async () => {
+  it('renders permitted operational cards and twelve focused settings categories', async () => {
     mockedApiGet.mockResolvedValue({ data: makeOverview() });
 
     renderHub();
@@ -731,19 +732,26 @@ describe('AdminControlCenterPage', () => {
 
     const cards = screen.getAllByTestId('admin-hub-destination');
     // 8 operational (including Printed Parts, #2588) + 3 standalone
-    // configuration (Catalog, Locations, Power Monitors) + 7 categories.
-    expect(cards.length).toBe(18);
+    // configuration (Catalog, Locations, Power Monitors) + 12 categories.
+    expect(cards.length).toBe(23);
     // Every card links somewhere absolute.
     for (const card of cards) {
       expect(card.getAttribute('href')).toMatch(/^\//);
     }
     const settingsCards = within(screen.getByTestId('admin-hub-settings')).getAllByRole('link');
     expect(settingsCards.map(card => card.getAttribute('data-destination-id'))).toEqual([
-      'settings-general', 'settings-slicing', 'settings-hardware', 'settings-integrations',
+      'settings-identity',
+      'settings-system', 'settings-failure-detection', 'settings-costs', 'settings-planning',
+      'settings-operator-features', 'settings-slicing', 'settings-hardware', 'settings-integrations',
       'settings-quotas', 'settings-users', 'settings-data',
     ]);
     expect(settingsCards.map(card => card.getAttribute('href'))).toEqual([
-      '/admin/settings?scope=system&tab=general&sub=farm',
+      '/admin/settings?scope=system&tab=identity&sub=details',
+      '/admin/settings?scope=system&tab=system',
+      '/admin/settings?scope=system&tab=failure-detection',
+      '/admin/settings?scope=system&tab=costs',
+      '/admin/settings?scope=system&tab=planning',
+      '/admin/settings?scope=system&tab=operator-features',
       '/admin/settings?scope=system&tab=slicing&sub=defaults',
       '/admin/settings?scope=system&tab=hardware&sub=nfc',
       '/admin/settings?scope=system&tab=integrations&sub=connections',
@@ -756,7 +764,7 @@ describe('AdminControlCenterPage', () => {
       'href',
       '/admin/workers?workerTab=jobs',
     );
-    expect(screen.getByRole('link', { name: /Power Monitors/i })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /^Power Monitors/i })).toHaveAttribute(
       'href',
       '/admin/power-monitors',
     );

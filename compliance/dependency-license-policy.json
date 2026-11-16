@@ -25,6 +25,7 @@
     "MIT AND ISC",
     "MIT-0",
     "MPL-2.0",
+    "OFL-1.1",
     "PostgreSQL",
     "Unlicense",
     "Zlib",
@@ -54,20 +55,6 @@
       "package-lock.json"
     ],
     "licenseTextFallbacks": [
-      {
-        "package": "@microsoft/signalr",
-        "version": "10.0.11",
-        "license": "MIT",
-        "licenseFile": "compliance/licenses/npm/microsoft-signalr-10.0.11.txt",
-        "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310",
-        "source": "https://github.com/dotnet/aspnetcore/blob/a5383385245bdacc20ec19f30e46090a8154d8da/LICENSE.txt",
-        "evidence": "Upstream LICENSE.txt at https://github.com/dotnet/aspnetcore/blob/a5383385245bdacc20ec19f30e46090a8154d8da/LICENSE.txt (tag v10.0.11); byte-identical to the v10.0.0 text reviewed under #902. The published 10.0.11 package declares MIT and ships only src/third-party-notices.txt, omitting the repository-root license.",
-        "reviewer": "PrintFarmer dependency bump review (#3148)",
-        "reviewDate": "2026-09-27",
-        "reviewAfter": "2027-09-27",
-        "rationale": "The package declares MIT, and the immutable upstream license text is preserved as fallback evidence.",
-        "reviewIssue": "OlyForge3D/PrintFarmer#3148"
-      },
       {
         "package": "agent-base",
         "version": "6.0.2",
@@ -399,6 +386,16 @@
     ]
   },
   "reviewedEvidence": [
+    {
+      "ecosystem": "npm",
+      "observedLicense": "OFL-1.1",
+      "approvedExpression": "OFL-1.1",
+      "evidence": "The lockfile-integrity-pinned @fontsource/{chakra-petch,dm-mono,ibm-plex-sans,inter,jetbrains-mono,merriweather-sans,nunito-sans,rajdhani,space-grotesk}@5.3.0 packages each include a LICENSE with the font authors' copyright notice and SIL Open Font License 1.1. Exact-version license links and usage boundaries are recorded in THIRD-PARTY-NOTICES.md.",
+      "reviewer": "Copilot App",
+      "reviewDate": "2026-11-10",
+      "reviewAfter": "2027-11-10",
+      "rationale": "OFL 1.1 permits bundled and embedded use with copyright and license notices preserved; fonts remain separately OFL-licensed, may not be sold alone, and modified versions must respect reserved names. These unmodified devDependencies supply local browser-test fonts only, not production imports. Rendered screenshots are documents, not redistribution of the font software. This is a source review, not external legal approval."
+    },
     {
       "ecosystem": "nuget",
       "observedLicense": "FILE-SHA256:3e6ed02b718eec8e95805b3515e380fe83767b753b69e21641f9ed6f66580fe1",

@@ -220,6 +220,134 @@ public class SpoolmanController(
     }
 
     /// <summary>
+    /// Resolves an NFC tag UID using Spoolman's persistent tag mapping.
+    /// </summary>
+    [HttpPost("tags/scan")]
+    [ProducesResponseType(typeof(SpoolmanTagScanResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<SpoolmanTagScanResultDto>> ScanTagAsync(
+        [FromBody] SpoolmanTagScanRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            return Ok(await spoolman.ScanTagAsync(request, ct));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (SpoolmanApiException ex)
+        {
+            _logger.LogWarning(ex, "Spoolman NFC tag lookup failed: {Message}", LogSanitizer.Sanitize(ex.Message));
+            return StatusCode((int)(ex.StatusCode ?? System.Net.HttpStatusCode.ServiceUnavailable), new { message = ex.Message });
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "Spoolman NFC tag lookup failed due to a transport error.");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Connected Spoolman is unavailable." });
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Spoolman NFC tag lookup returned invalid JSON.");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Connected Spoolman returned an invalid response." });
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Spoolman NFC tag lookup timed out.");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Connected Spoolman did not respond in time." });
+        }
+    }
+
+    /// <summary>
+    /// Links an NFC tag UID to a Spoolman spool.
+    /// </summary>
+    [RequirePermission("spoolman", "admin")]
+    [HttpPost("spools/{id:int}/tag")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> LinkTagToSpoolAsync(
+        int id,
+        [FromBody] SpoolmanTagLinkRequest request,
+        CancellationToken ct)
+    {
+        if (id <= 0)
+        {
+            return BadRequest(new { message = "A positive spool ID is required." });
+        }
+
+        try
+        {
+            await spoolman.LinkTagToSpoolAsync(id, request.Uid, ct);
+            return NoContent();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (SpoolmanApiException ex)
+        {
+            _logger.LogWarning(ex, "Spoolman NFC tag link failed for spool {SpoolId}: {Message}", id, LogSanitizer.Sanitize(ex.Message));
+            return StatusCode((int)(ex.StatusCode ?? System.Net.HttpStatusCode.ServiceUnavailable), new { message = ex.Message });
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "Spoolman NFC tag link failed due to a transport error for spool {SpoolId}.", id);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Connected Spoolman is unavailable." });
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Spoolman NFC tag link timed out for spool {SpoolId}.", id);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Connected Spoolman did not respond in time." });
+        }
+    }
+
+    /// <summary>
+    /// Removes an NFC tag UID association from a Spoolman spool.
+    /// </summary>
+    [RequirePermission("spoolman", "admin")]
+    [HttpDelete("spools/{id:int}/tag/{uid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> UnlinkTagFromSpoolAsync(int id, string uid, CancellationToken ct)
+    {
+        if (id <= 0)
+        {
+            return BadRequest(new { message = "A positive spool ID is required." });
+        }
+
+        try
+        {
+            await spoolman.UnlinkTagFromSpoolAsync(id, uid, ct);
+            return NoContent();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (SpoolmanApiException ex)
+        {
+            _logger.LogWarning(ex, "Spoolman NFC tag unlink failed for spool {SpoolId}: {Message}", id, LogSanitizer.Sanitize(ex.Message));
+            return StatusCode((int)(ex.StatusCode ?? System.Net.HttpStatusCode.ServiceUnavailable), new { message = ex.Message });
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "Spoolman NFC tag unlink failed due to a transport error for spool {SpoolId}.", id);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Connected Spoolman is unavailable." });
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Spoolman NFC tag unlink timed out for spool {SpoolId}.", id);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Connected Spoolman did not respond in time." });
+        }
+    }
+
+    /// <summary>
     /// Returns distinct material, vendor, and location values across all spools.
     /// Used to populate filter dropdowns without relying on paginated data.
     /// </summary>
@@ -1106,6 +1234,49 @@ public class SpoolmanController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting filament {Id}: {Message}", id, LogSanitizer.Sanitize(ex.Message));
+            return BadRequest(new { message = $"Delete failed: {ex.Message}" });
+        }
+    }
+
+    /// <summary>Checks all referencing spools, including archived spools, before confirmation.</summary>
+    [RequirePermission("spoolman", "admin")]
+    [HttpGet("filaments/{id:int}/delete-preview")]
+    [ProducesResponseType(typeof(SpoolmanFilamentDeletePreview), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<SpoolmanFilamentDeletePreview>> PreviewFilamentDeleteAsync(int id, CancellationToken ct)
+    {
+        try
+        {
+            return Ok(await spoolman.PreviewFilamentDeleteAsync(id, ct));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error checking spools before deleting filament {Id}", id);
+            return BadRequest(new { message = $"Cannot check filament deletion: {ex.Message}" });
+        }
+    }
+
+    /// <summary>Permanently deletes exactly the confirmed archived spools, then the filament.</summary>
+    [RequirePermission("spoolman", "admin")]
+    [HttpPost("filaments/{id:int}/delete-confirmed")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ConfirmFilamentDeleteAsync(
+        int id, [FromBody] SpoolmanConfirmFilamentDeleteRequest request, CancellationToken ct)
+    {
+        if (request?.ArchivedSpoolIds is null)
+        {
+            return BadRequest(new { message = "An explicit archived spool ID list is required. Review the deletion confirmation again." });
+        }
+
+        try
+        {
+            await spoolman.DeleteFilamentWithArchivedSpoolsAsync(id, request.ArchivedSpoolIds, ct);
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting filament {Id} with confirmed archived spools", id);
             return BadRequest(new { message = $"Delete failed: {ex.Message}" });
         }
     }

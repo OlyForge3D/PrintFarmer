@@ -47,4 +47,7 @@ public interface IPrinterStatusCacheWriter
 
     /// <summary>Invalidates runtime factor observations without refreshing unrelated status evidence.</summary>
     PrinterStatusDto? ClearRuntimeFactors(Guid printerId);
+
+    /// <summary>Invalidates raw activity without refreshing unrelated status evidence.</summary>
+    void ClearRawActivityState(Guid printerId);
 }

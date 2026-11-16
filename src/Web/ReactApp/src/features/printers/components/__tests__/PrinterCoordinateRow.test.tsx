@@ -106,18 +106,17 @@ describe('shared coordinate entry', () => {
     expect(input()).toHaveValue(null);
   });
 
-  it.each([undefined, '', 'unknown', 'not available', 'xy', 'x', 'yz', 'xz'])('submits coordinates without homing evidence (%s)', async homedAxes => {
+  it.each([undefined, '', 'unknown', 'not available', 'xyzunknown'])('blocks coordinates without affirmative homing evidence (%s)', homedAxes => {
     const move = vi.fn();
     render(<Entry homedAxes={homedAxes} onMoveTo={move} />);
-    for (const field of screen.getAllByRole('spinbutton')) expect(field).toBeEnabled();
+    for (const field of screen.getAllByRole('spinbutton')) expect(field).toBeDisabled();
     enter('40'); fireEvent.blur(input());
-    expect(move).toHaveBeenCalledExactlyOnceWith({ x: 40 });
-    await waitFor(() => expect(input()).toBeEnabled());
+    expect(move).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Relative' }));
-    for (const field of screen.getAllByRole('spinbutton')) expect(field).toBeEnabled();
+    for (const field of screen.getAllByRole('spinbutton')) expect(field).toBeDisabled();
   });
 
-  it('enables all coordinates only with positive full XYZ homing, regardless of axis order or case', () => {
+  it('enables coordinates with positive XYZ homing, regardless of axis order or case', () => {
     render(<Entry homedAxes="ZYX" onMoveTo={vi.fn()} />);
     for (const field of screen.getAllByRole('spinbutton')) expect(field).toBeEnabled();
     expect(screen.queryByText(/Home X, Y and Z before coordinate entry/)).not.toBeInTheDocument();
@@ -129,27 +128,28 @@ describe('shared coordinate entry', () => {
     for (const control of [...screen.getAllByRole('spinbutton'), ...screen.getAllByRole('button')]) expect(control).toBeDisabled();
   });
 
-  it.each(['xy', 'xz', 'yz', '', undefined, 'unknown'])('preserves deliberate edits when homing telemetry becomes %s', async homedAxes => {
+  it.each(['yz', '', undefined, 'unknown'])('does not send an edited axis after losing its homing evidence (%s)', homedAxes => {
     const onMoveTo = vi.fn();
     const onMove = vi.fn();
     const { rerender, client } = render(<Entry onMoveTo={onMoveTo} onMove={onMove} />);
     fireEvent.focus(input()); enter('20');
     enter('30', 'Y');
     rerender(<QueryClientProvider client={client}><Entry homedAxes={homedAxes} onMoveTo={onMoveTo} onMove={onMove} /></QueryClientProvider>);
-    for (const field of screen.getAllByRole('spinbutton')) expect(field).toBeEnabled();
+    expect(input()).toBeDisabled();
     expect(input()).toHaveValue(20);
     expect(input('Y')).toHaveValue(30);
     fireEvent.keyDown(input(), { key: 'Enter' });
-    expect(onMoveTo).toHaveBeenCalledExactlyOnceWith({ x: 20 });
-    await waitFor(() => expect(input()).toBeEnabled());
+    expect(onMoveTo).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Relative' }));
-    fireEvent.focus(input('X', false)); enter('5', 'X', false);
-    rerender(<QueryClientProvider client={client}><Entry homedAxes={homedAxes} onMoveTo={onMoveTo} onMove={onMove} /></QueryClientProvider>);
-    expect(input('X', false)).toHaveValue(5);
+    expect(input('X', false)).toBeDisabled();
+    enter('5', 'X', false);
     fireEvent.keyDown(input('X', false), { key: 'Enter' });
     fireEvent.blur(input('X', false));
-    expect(onMove).toHaveBeenCalledExactlyOnceWith('X', 5);
-    await waitFor(() => expect(input('X', false)).toBeEnabled());
+    expect(onMove).not.toHaveBeenCalled();
+    rerender(<QueryClientProvider client={client}><Entry homedAxes="xyz" onMoveTo={onMoveTo} onMove={onMove} /></QueryClientProvider>);
+    expect(input('X', false)).toBeEnabled();
+    fireEvent.blur(input('X', false));
+    expect(onMove).not.toHaveBeenCalled();
   });
 
   it('hides help in Expert but keeps validation', () => {

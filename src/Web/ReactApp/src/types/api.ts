@@ -584,7 +584,7 @@ export interface PrinterJobInfo {
 export interface PrinterOperationalState {
   /** Whether printer is in maintenance mode */
   inMaintenance?: boolean;
-  /** Whether printer is enabled for operations */
+  /** Whether printer is in service for visibility, monitoring, and dispatch */
   isEnabled?: boolean;
 }
 
@@ -810,6 +810,8 @@ export interface PrinterSummary {
   inMaintenance: boolean;
   isEnabled: boolean;
   hasCatalogUpdate: boolean;
+  /** Catalog model revision; absent on older servers, so unknown updates must not be persistently hidden. */
+  catalogUpdateRevision?: string | null;
 }
 
 /**
@@ -3925,6 +3927,12 @@ export interface SpoolmanBulkUpdateResult {
   errors: string[];
 }
 
+/** Fresh references to review before permanently deleting a Spoolman filament. */
+export interface SpoolmanFilamentDeletePreview {
+  activeSpoolCount: number;
+  archivedSpoolIds: number[];
+}
+
 /** Per-ID outcome of a local-library bulk delete (`DELETE /api/gcode-files` or `DELETE /api/3d-models`). */
 export type BulkDeleteItemStatus =
   | 'Deleted'
@@ -5433,4 +5441,8 @@ export interface CustomFieldValue {
   value?: string;
   options?: string;
   isRequired: boolean;
+}
+export interface FarmIdentitySettings {
+  farmName: string;
+  timeZone: string;
 }

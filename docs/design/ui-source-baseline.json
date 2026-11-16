@@ -389,7 +389,7 @@
         },
         {
           "file": "scripts/design/check-ui-design.mjs",
-          "sha256": "9b9ec5b7b88808df987ea4be451e1855cf1cd4eb8cff4c6bf5044ab4e3d1604a"
+          "sha256": "07ce0898414c2f7b4ea31a228a6897a35c339bf2d1bd9d81a531fcc66f4d3708"
         },
         {
           "file": "scripts/design/source-adapter.mjs",

@@ -41,7 +41,7 @@ export function QueueJobReorderControls({
         variant="subtle"
         size="sm"
         disabled={busy || !canMoveUp}
-        aria-label={`Move ${fileName} up`}
+        aria-label={`Move up ${fileName}`}
         title="Move up in this printer queue"
         onClick={(event) => {
           event.stopPropagation();
@@ -55,7 +55,7 @@ export function QueueJobReorderControls({
         variant="subtle"
         size="sm"
         disabled={busy || !canMoveDown}
-        aria-label={`Move ${fileName} down`}
+        aria-label={`Move down ${fileName}`}
         title="Move down in this printer queue"
         onClick={(event) => {
           event.stopPropagation();

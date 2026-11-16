@@ -31,18 +31,19 @@ test.describe('Printer Details — Moonraker', () => {
     await dismissTourIfVisible(page);
   });
 
-  test('the detailed card exposes inline detail sections without a sidebar action', async ({ page }) => {
+  test('the detailed card exposes telemetry inline and keeps metadata in the sidebar', async ({ page }) => {
     const details = await getInlinePrinterDetails(page, MOONRAKER_PRINTERS.ready);
     await expect(details).toContainText(MOONRAKER_PRINTERS.ready);
-    await expect(details.getByRole('button', { name: 'Statistics' })).toBeVisible();
-    await expect(details.getByRole('button', { name: 'Version' })).toBeVisible();
+    await expect(details.getByRole('group', { name: 'Coordinate movement mode' })).toBeVisible();
+    await expect(details.getByRole('button', { name: 'Statistics' })).toHaveCount(0);
+    await expect(details.getByRole('button', { name: 'Version', exact: true })).toHaveCount(0);
     await expect(page.getByRole('complementary', { name: `${MOONRAKER_PRINTERS.ready} details` })).toHaveCount(0);
   });
 
-  test('the inline Version section reports real Moonraker metadata, not the unavailable fallback', async ({ page }) => {
-    const details = await getInlinePrinterDetails(page, MOONRAKER_PRINTERS.ready);
+  test('the sidebar Version section reports real Moonraker metadata, not the unavailable fallback', async ({ page }) => {
+    const details = await openCollapsedPrinterDetailsSidebar(page, MOONRAKER_PRINTERS.ready);
 
-    await details.getByRole('button', { name: 'Version' }).click();
+    await expect(details.getByRole('button', { name: 'Collapse Version', exact: true })).toHaveAttribute('aria-expanded', 'true');
     await expect(details.getByText('Firmware', { exact: true }).locator('..')).toContainText('v0.9.2-emulator');
     await expect(details.getByText('Backend', { exact: true }).locator('..')).toContainText('v0.9.2-emulator');
     await expect(details.getByText('API', { exact: true }).locator('..')).toContainText('1.5.0');
@@ -51,9 +52,9 @@ test.describe('Printer Details — Moonraker', () => {
   });
 
   test('expanding Statistics shows real print totals, not the unavailable fallback', async ({ page }) => {
-    const details = await getInlinePrinterDetails(page, MOONRAKER_PRINTERS.ready);
+    const details = await openCollapsedPrinterDetailsSidebar(page, MOONRAKER_PRINTERS.ready);
 
-    await details.getByRole('button', { name: 'Statistics' }).click();
+    await details.getByRole('button', { name: /^Expand Statistics/ }).click();
     const statistics = details.locator('dl').filter({ hasText: 'Print time' });
     await expect(statistics.getByText('Print time', { exact: true }).locator('..')).toContainText('1.0h');
     await expect(statistics.getByText('Filament', { exact: true }).locator('..')).toContainText('0g');
@@ -65,8 +66,13 @@ test.describe('Printer Details — Moonraker', () => {
   test('telemetry values and movement/temperature controls mutate the emulator through the real backend', async ({ page, request }) => {
     const details = await getInlinePrinterDetails(page, MOONRAKER_PRINTERS.ready);
 
-    await expect(details.getByText('23.4°C', { exact: true })).toBeVisible({ timeout: 15_000 });
-    await expect(details.getByText('22.1°C', { exact: true })).toBeVisible();
+    const temperatures = details.getByRole('table', { name: 'Temperature readings' });
+    await expect(temperatures.getByRole('row').filter({
+      has: page.getByRole('rowheader', { name: 'Extruder', exact: true }),
+    })).toContainText('23.4°C', { timeout: 15_000 });
+    await expect(temperatures.getByRole('row').filter({
+      has: page.getByRole('rowheader', { name: 'Heater Bed', exact: true }),
+    })).toContainText('22.1°C');
     await details.getByRole('button', { name: 'Relative', exact: true }).click();
     await expect(details.getByLabel('X movement amount').locator('..')).toContainText('[ 120.0 ]');
     await expect(details.getByLabel('Y movement amount').locator('..')).toContainText('[ 120.0 ]');

@@ -8,6 +8,7 @@ import {
 } from '@/common/components/icons/MdiIcons';
 
 interface PrinterActionBarProps {
+  layout?: 'card' | 'sidebar';
   isPaused: boolean;
   isShutdown: boolean;
   controlActionPending: boolean;
@@ -18,6 +19,7 @@ interface PrinterActionBarProps {
 }
 
 export function PrinterActionBar({
+  layout = 'card',
   isPaused,
   isShutdown,
   controlActionPending,
@@ -27,16 +29,16 @@ export function PrinterActionBar({
   onControlAction,
 }: PrinterActionBarProps) {
   return (
-    <div className="flex flex-col gap-2 items-start">
-      <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
+    <div className={layout === 'sidebar' ? 'flex flex-col gap-1' : 'flex flex-col gap-2 items-start'}>
+      <div className={layout === 'sidebar' ? 'text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide' : 'text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1'}>
         Control
       </div>
-      <div className="grid grid-cols-3 gap-1 w-fit">
+      <div className="grid grid-cols-3 gap-1 w-fit max-sm:[&>button]:min-h-11 max-sm:[&>button]:min-w-11">
         <ControlPadButton
           disabled={controlActionPending || !canPauseOrResume}
           onClick={() => onControlAction(isPaused ? 'resume' : 'pause')}
-          title={isPaused ? 'Resume' : 'Pause'}
-          aria-label={isPaused ? 'Resume' : 'Pause'}
+          title={isPaused ? 'Resume print' : 'Pause print'}
+          aria-label={layout === 'sidebar' ? (isPaused ? 'Resume print' : 'Pause print') : (isPaused ? 'Resume' : 'Pause')}
           padSize="small"
         >
           {isPaused ? <PlayIcon className="h-4 w-4" /> : <PauseIcon className="h-4 w-4" />}
@@ -44,8 +46,8 @@ export function PrinterActionBar({
         <ControlPadButton
           disabled={controlActionPending || !canCancel}
           onClick={() => onControlAction('cancel')}
-          title="Cancel"
-          aria-label="Cancel"
+          title="Cancel print"
+          aria-label={layout === 'sidebar' ? 'Cancel print' : 'Cancel'}
           padSize="small"
         >
           <XCircleIcon className="h-4 w-4" ariaLabel="Cancel" />

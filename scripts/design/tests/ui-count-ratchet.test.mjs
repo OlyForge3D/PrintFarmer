@@ -114,6 +114,46 @@ test('trusted execution scans immutable targets, ignores PR tooling/allowance/po
     finding.antipattern === 'side-tab'));
 });
 
+test('baseline provenance must match the scanner committed in the trusted base', t => {
+  const f = fixture(t);
+  f.write('scripts/design/check-ui-design.mjs', 'export const scannerVersion = "changed";\n');
+  f.git(['add', 'scripts/design/check-ui-design.mjs']);
+  f.git(['commit', '--quiet', '-m', 'Change trusted scanner']);
+  const trustedBase = f.git(['rev-parse', 'HEAD']);
+
+  assert.throws(
+    () => runCountRatchet({ root: f.directory, trustedBase, head: trustedBase }),
+    /Baseline tooling provenance mismatch: scripts\/design\/check-ui-design\.mjs/,
+  );
+});
+
+test('committed repository baseline and allowance match their pinned tooling', () => {
+  const git = args => {
+    const result = spawnSync('git', args, {
+      cwd: root,
+      encoding: 'utf8',
+      windowsHide: true,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    assert.equal(result.status, 0, result.error?.message ?? result.stderr);
+    return result.stdout;
+  };
+  const head = git(['rev-parse', 'HEAD']).trim();
+  const baselineBytes = Buffer.from(git(['show', `${head}:${baselinePath}`]));
+  const policy = JSON.parse(git(['show', `${head}:${allowancePath}`]));
+  const baseline = JSON.parse(baselineBytes);
+
+  assert.equal(policy.baselineSha256, hash(baselineBytes));
+  for (const input of baseline.provenance.tooling.files) {
+    const committedTool = Buffer.from(git(['show', `${head}:${input.file}`]));
+    assert.equal(hash(committedTool), input.sha256, `${input.file} must match its committed provenance pin`);
+  }
+
+  const result = runCountRatchet({ root, trustedBase: head, head });
+  assert.equal(result.status, 'pass');
+  assert.equal(result.baselineSha256, policy.baselineSha256);
+});
+
 test('PR-added shared and inline waivers cannot buy a lower total or hide new debt', t => {
   const f = fixture(t);
   const head = f.target({

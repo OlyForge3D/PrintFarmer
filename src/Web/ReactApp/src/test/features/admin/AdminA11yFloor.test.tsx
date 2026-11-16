@@ -60,7 +60,7 @@ vi.mock('@/features/admin/pages/SettingsPage', () => ({
 const mockedApiGet = vi.mocked(client.get);
 
 const ROUTES: ReadonlyArray<readonly [string, string, 'system']> = [
-  ['system settings', '/admin/settings?tab=general', 'system'],
+  ['system settings', '/admin/settings?tab=system', 'system'],
   ['admin settings — users', '/admin/settings?tab=users&sub=accounts', 'system'],
 ];
 
@@ -144,7 +144,12 @@ describe('admin surface accessibility floor (#1016)', () => {
   it.each(ROUTES)('%s exposes the settings nav as a named landmark', (_name, path, scope) => {
     const { container } = renderAt(path, scope);
     const navs = [...container.querySelectorAll('nav')];
-    expect(navs.length).toBeGreaterThan(0);
+    if (path.includes('tab=system')) {
+      expect(navs).toHaveLength(0);
+      expect(screen.getByRole('link', { name: 'Admin Control Center' })).toHaveAttribute('href', '/admin');
+    } else {
+      expect(navs.length).toBeGreaterThan(0);
+    }
 
     // An unnamed <nav> is indistinguishable from any other in a landmark list.
     const unnamed = navs.filter(
@@ -155,6 +160,11 @@ describe('admin surface accessibility floor (#1016)', () => {
 
   it.each(ROUTES)('%s marks the active settings page for assistive tech', (_name, path, scope) => {
     renderAt(path, scope);
+    if (path.includes('tab=system')) {
+      expect(screen.getByRole('heading', { level: 1, name: 'System' })).toBeInTheDocument();
+      expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+      return;
+    }
     // Admin routes have no cross-category sidebar; the category's pages are a
     // tablist inside a named navigation landmark.
     const nav = screen.getByRole('navigation', { name: /settings pages$/i });

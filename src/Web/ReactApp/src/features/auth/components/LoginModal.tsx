@@ -126,7 +126,7 @@ export function LoginModal({
                 placeholder="Enter your password"
                 required
                 disabled={isLoading}
-                className="w-full pr-10"
+                className="w-full pr-12"
               />
               <Button
                 type="button"
@@ -134,7 +134,7 @@ export function LoginModal({
                 variant="subtle"
                 size="sm"
                 disabled={isLoading}
-                className="absolute right-3 top-1/2 !h-auto !p-0 -translate-y-1/2"
+                className="absolute right-1 top-1/2 !h-11 !w-11 !p-0 -translate-y-1/2"
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
               >
                 {showPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
