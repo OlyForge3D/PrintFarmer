@@ -12,6 +12,32 @@ The PrintFarmer app now has a **centralized, explicit controls stylesheet** (`sr
 - **No duplication**: Never duplicate these styles in component-specific CSS modules
 - **CSS-only**: Uses pure CSS (no @apply), compatible with all CSS processors
 
+## Shared Printer Controls
+
+The detailed printer card and sidebar use `usePrinterControls` for print actions,
+movement, heater presets, and filament commands. Both render `PrinterActionBar`,
+`MovementControlSection`, and `TemperatureControlSection`; layout variants preserve
+the card's inline controls and the sidebar's separate collapsible sections.
+Filament macros continue through the shared materials controls.
+Movement-pad and print-action buttons have at least 44px touch targets below the
+small-screen breakpoint; desktop controls retain their compact sizing.
+
+Cancel opens the same `CancelPrintConfirmation` on either surface. Dismissing it
+sends no command; confirming sends one cancellation request. Changing the selected
+printer, reported job/file, or cancellation eligibility discards the confirmation,
+and failures appear as error notifications. Pause and emergency stop remain immediate.
+The printer status contract has no unique active-job identifier, so two consecutive
+prints with identical names cannot be distinguished without an intervening status
+change.
+
+Movement still requires explicit backend capability evidence and affirmative homing
+for the selected axis. PrusaLink movement discovery distinguishes confirmed support,
+confirmed lack of support, and unknown status; only confirmed support enables remote
+Home and jog. Unknown status prompts a connection/credentials check and page reload,
+while unsupported status directs operators to the printer's physical controls. Keep
+changes to command guards and confirmation behavior in the shared hook rather than
+adding separate handlers to either surface.
+
 ## Organization
 
 The stylesheet is organized into logical sections:
