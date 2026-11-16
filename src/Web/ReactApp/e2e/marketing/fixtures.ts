@@ -619,6 +619,7 @@ export async function isolateCapture(context: BrowserContext, {
   let routeChunkFailureCount = 0;
   let createdLocation: Record<string, unknown> | undefined;
   let createdPrinterGroup: Record<string, unknown> | undefined;
+  let rolePermissionsState = syntheticRolePermissions;
   let pendingRequestReleased = false;
   let releasePendingRequestResolver: (() => void) | undefined;
   const releasePendingRequest = () => {
@@ -864,19 +865,21 @@ export async function isolateCapture(context: BrowserContext, {
           await route.fulfill({ status: 400, json: { message: 'Unexpected synthetic role-permissions payload.' } });
           return;
         }
+        rolePermissionsState = {
+          ...syntheticRolePermissions,
+          updatedAt: captureTime,
+          resources: [{
+            ...syntheticRolePermissions.resources[0],
+            permissions: [{
+              ...syntheticRolePermissions.resources[0].permissions[0],
+              status: 'Absent',
+            }],
+          }],
+        };
         await route.fulfill({
           status: 200,
           json: {
-            role: {
-              ...syntheticRolePermissions,
-              resources: [{
-                ...syntheticRolePermissions.resources[0],
-                permissions: [{
-                  ...syntheticRolePermissions.resources[0].permissions[0],
-                  status: 'Denied',
-                }],
-              }],
-            },
+            role: rolePermissionsState,
             revokedSessionCount: 0,
           },
         });
@@ -1143,7 +1146,7 @@ export async function isolateCapture(context: BrowserContext, {
         : ['role-create-success', 'role-edit-success', 'role-delete-conflict', 'role-members'].includes(flow.overlayMutation ?? '') && key === 'GET /api/admin/permissions/catalog'
           ? syntheticPermissionCatalog
         : ['role-create-success', 'role-edit-success', 'role-delete-conflict', 'role-members'].includes(flow.overlayMutation ?? '') && key === 'GET /api/admin/roles/fixture-role/permissions'
-          ? syntheticRolePermissions
+          ? rolePermissionsState
         : ['tag-create-success', 'tag-edit-success', 'tag-edit-conflict'].includes(flow.overlayMutation ?? '') && key === 'GET /api/tags'
           ? [syntheticTag]
         : ['user-edit-success', 'user-password-success', 'user-permissions-success', 'user-delete-conflict'].includes(flow.overlayMutation ?? '') && key === 'GET /api/users'

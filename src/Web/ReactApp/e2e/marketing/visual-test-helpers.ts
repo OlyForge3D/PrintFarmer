@@ -328,6 +328,8 @@ export async function prepareVisualScene(context: BrowserContext, page: Page, sc
           permissions: [],
         });
         await expect(page.getByText('Permissions saved.', { exact: true })).toBeVisible();
+        await expect(grantView).not.toBeChecked();
+        await expect(page.getByText('Not granted', { exact: true })).toBeVisible();
       } else if (scene.overlay === 'edit-role') {
         await roleRow.click();
         await roleRow.getByRole('button', { name: 'Edit Coverage role' }).click();
