@@ -46,7 +46,9 @@ and ordered file list. Ambient Compose/image/port variables cannot change them.
 No secrets or resolved Compose environment are printed.
 The browser-facing URL uses `localhost` on the leased HTTP port; WebAuthn uses
 `localhost` as its relying-party ID and the same full origin, including that port.
-Direct API fixture requests continue to use the separately leased loopback API port.
+The acceptance-provenance check connects to the same HTTP port through `127.0.0.1`
+because the published listener is IPv4-only. Direct API fixture requests continue
+to use the separately leased loopback API port.
 First-admin setup uses a fresh per-run `PFARM__Setup__BootstrapSecret`, passed
 through the API's existing Compose environment mapping and sent unchanged as
 the `bootstrapSecret` JSON property to `/api/setup/initial-admin`. It remains in

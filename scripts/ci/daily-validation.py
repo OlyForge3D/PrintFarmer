@@ -752,7 +752,8 @@ class Run:
         require(not recorded or recorded == identities, "Resources restarted/replaced; prior phases invalid")
         self.state["deployedContainers"] = identities
         args = ["node", str(Path(self.state["source"]) / "scripts/ci/verify-acceptance-provenance.mjs"),
-                "--expected-sha", self.state["commit"], "--base-url", self.env["BASE_URL"],
+                "--expected-sha", self.state["commit"],
+                "--base-url", f'http://127.0.0.1:{self.state["ports"]["HTTP_PORT"]}',
                 "--evidence-dir", str(self.directory / "provenance")]
         for service, image in self.state["manifest"]["images"].items():
             args += ["--image-digest", f'{service}={image["reference"]}']
