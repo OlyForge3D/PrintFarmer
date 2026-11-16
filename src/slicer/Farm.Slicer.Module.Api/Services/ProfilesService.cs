@@ -1525,9 +1525,11 @@ public class ProfilesService(
                                 processProfile, modelDisplayName, printerModelId,
                                 orcaVersion, checkDuplicates: true, ct);
 
-                            importedProcessIdentities.Add(processIdentity);
                             if (imported)
                             {
+                                // A matching hash can belong to another printer model; only claim
+                                // this model-scoped identity after this candidate is imported.
+                                importedProcessIdentities.Add(processIdentity);
                                 result.ProcessProfilesImported++;
                             }
                             else

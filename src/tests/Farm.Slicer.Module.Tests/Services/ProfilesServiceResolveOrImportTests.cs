@@ -984,6 +984,30 @@ public class ProfilesServiceResolveOrImportTests
     }
 
     [Fact]
+    public async Task ImportSelectedProfilesForModelAsync_ProcessHashDuplicate_AllowsLaterCandidateForModel()
+    {
+        MicronHarness harness = new(duplicateFirstProcessByHash: true);
+        using HttpClient httpClient = CreateMicronWorkerHttpClient(new Dictionary<string, (MachineProfileDto[], ProcessProfileDto[])>
+        {
+            [MicronCatalogManufacturer] = ([MicronMachine()], [
+                MicronProcess(0.06, MicronMachineName),
+                MicronProcess(0.08, MicronMachineName)
+            ])
+        });
+
+        SelectiveProfileImportRequest request = new() { ManufacturerName = MicronCatalogManufacturer };
+        request.SelectedProcessProfiles.Add(MicronProcessName);
+
+        SelectiveProfileImportResultDto result = await harness.Service.ImportSelectedProfilesForModelAsync(
+            httpClient, harness.ModelId, request, CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.Equal(1, result.ProcessProfilesImported);
+        Assert.Equal(1, result.Skipped);
+        Assert.Equal(0.08, Assert.Single(harness.Processes).LayerHeight);
+    }
+
+    [Fact]
     public async Task ImportSelectedProfilesForModelAsync_DuplicateMachineNames_ArePersistedOnce()
     {
         MicronHarness harness = new();
@@ -1086,7 +1110,7 @@ public class ProfilesServiceResolveOrImportTests
 
         public ProfilesService Service { get; }
 
-        public MicronHarness(bool failFirstProcessAdd = false)
+        public MicronHarness(bool failFirstProcessAdd = false, bool duplicateFirstProcessByHash = false)
         {
             Guid manufacturerId = Guid.NewGuid();
 
@@ -1106,9 +1130,17 @@ public class ProfilesServiceResolveOrImportTests
             _ = processRepo
                 .Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => new List<ProcessProfile>(Processes));
+            int processHashLookupCount = 0;
             _ = processRepo
                 .Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((ProcessProfile?)null);
+                .ReturnsAsync(() => duplicateFirstProcessByHash && processHashLookupCount++ == 0
+                    ? new ProcessProfile
+                    {
+                        IsSystem = true,
+                        SlicerType = SlicerType.OrcaSlicer,
+                        PrinterModelId = Guid.NewGuid()
+                    }
+                    : null);
             int processAddCount = 0;
             _ = processRepo
                 .Setup(r => r.AddAsync(It.IsAny<ProcessProfile>(), It.IsAny<CancellationToken>()))
