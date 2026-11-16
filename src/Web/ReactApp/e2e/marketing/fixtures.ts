@@ -382,6 +382,83 @@ const syntheticPrinterGroup = {
   printerCount: 0,
 };
 
+const syntheticRole = {
+  id: 'fixture-role',
+  name: 'coverage_role',
+  displayName: 'Coverage role',
+  description: 'Synthetic role for admin coverage.',
+  isSystemRole: false,
+  isActive: true,
+  memberCount: 2,
+  permissionCount: 1,
+  hasImplicitTotalAccess: false,
+  createdAt: captureTime,
+  updatedAt: captureTime,
+  permissions: [{ resource: 'printers', action: 'view', granted: true }],
+};
+const syntheticPermissionCatalog = {
+  generatedAt: captureTime,
+  resources: [{
+    resource: 'printers',
+    displayName: 'Printers',
+    permissions: [{
+      resource: 'printers', action: 'view', permission: 'printers:view',
+      actionDisplayName: 'View', actionDescription: 'View printers',
+      impliedByAdmin: false, routes: [],
+    }],
+  }],
+  orphanedCatalogEntries: [],
+};
+const syntheticRolePermissions = {
+  roleId: syntheticRole.id,
+  roleName: syntheticRole.name,
+  roleDisplayName: syntheticRole.displayName,
+  isSystemRole: false,
+  isEditable: true,
+  hasImplicitTotalAccess: false,
+  updatedAt: captureTime,
+  resources: [{
+    resource: 'printers',
+    displayName: 'Printers',
+    permissions: [{
+      resource: 'printers', action: 'view', permission: 'printers:view',
+      actionDisplayName: 'View', actionDescription: 'View printers',
+      impliedByAdmin: false, status: 'Granted',
+    }],
+  }],
+};
+const syntheticTag = {
+  id: 'fixture-tag',
+  name: 'Synthetic coverage tag',
+  color: '#d74242',
+  description: 'Fixture-only tag.',
+  usageCount: 0,
+  revision: 1,
+  concurrencyToken: 'fixture-tag-token-1',
+};
+const syntheticUserRole = {
+  id: 'fixture-user-role',
+  name: 'operator',
+  displayName: 'Operator',
+  description: 'Synthetic operator role.',
+  isSystemRole: true,
+  isActive: true,
+  permissions: [{ resource: 'printers', action: 'view', granted: true }],
+};
+const syntheticUser = {
+  id: 'fixture-user',
+  username: 'fixture.operator',
+  email: 'fixture.operator@example.invalid',
+  firstName: 'Fixture',
+  lastName: 'Operator',
+  isActive: true,
+  emailConfirmed: true,
+  lastLogin: captureTime,
+  createdAt: captureTime,
+  roles: ['operator'],
+  permissions: ['printers', 'files'],
+};
+
 const responses: Record<string, unknown> = {
   ...Object.fromEntries(Object.entries(inventory).map(([path, value]) => [`GET ${path}`, value])),
   ...Object.fromEntries(Object.entries(toolbarAdminSeeds).map(([path, value]) => [`GET ${path}`, value])),
@@ -420,6 +497,9 @@ const responses: Record<string, unknown> = {
   'GET /api/catalog/manufacturers': manufacturers,
   'GET /api/catalog/printer-models': printerModels,
   'GET /api/tags/objects': [],
+  'GET /api/admin/roles/fixture-role/permissions': syntheticRolePermissions,
+  'GET /api/admin/permissions/catalog': syntheticPermissionCatalog,
+  'GET /api/tags/fixture-tag': syntheticTag,
   'GET /api/job-queue-analytics/printer-summaries': [],
   'GET /api/auto-dispatch/status': { globalEnabled: false, printers: [] },
   'GET /api/job-queue/subscription-resources': { printerIds: [], jobIds: [], projectIds: [] },
@@ -503,7 +583,7 @@ type CaptureOptions = {
   routeChunkLoading?: boolean;
   flow?: {
     setupCompletion?: boolean;
-    overlayMutation?: 'task-create-success' | 'task-create-error' | 'location-create-success' | 'location-create-error' | 'printer-group-create-success' | 'printer-group-create-error' | 'file-delete-partial' | 'project-create-error' | 'nfc-link-error' | 'harvest-success' | 'harvest-error' | 'webhook-create-error' | 'role-create-error' | 'tag-create-error';
+    overlayMutation?: 'task-create-success' | 'task-create-error' | 'location-create-success' | 'location-create-error' | 'printer-group-create-success' | 'printer-group-create-error' | 'file-delete-partial' | 'project-create-error' | 'nfc-link-error' | 'harvest-success' | 'harvest-error' | 'webhook-create-error' | 'role-create-success' | 'role-create-error' | 'role-edit-success' | 'role-delete-conflict' | 'role-members' | 'tag-create-success' | 'tag-create-error' | 'tag-edit-success' | 'tag-edit-conflict' | 'user-edit-success' | 'user-password-success' | 'user-permissions-success' | 'user-delete-conflict';
   };
 };
 
@@ -746,28 +826,63 @@ export async function isolateCapture(context: BrowserContext, {
         await route.fulfill({ status: 503, json: { message: 'Synthetic webhook creation failure.' } });
         return;
       }
-      if (flow.overlayMutation === 'role-create-error' && key === 'POST /api/admin/roles') {
+      if ((flow.overlayMutation === 'role-create-success' || flow.overlayMutation === 'role-create-error') && key === 'POST /api/admin/roles') {
         const expected = { name: 'coverage_role', displayName: 'Coverage role' };
         if (JSON.stringify(request.postDataJSON()) !== JSON.stringify(expected)) {
           violations.push('Unexpected role-create payload.');
           await route.fulfill({ status: 400, json: { message: 'Unexpected synthetic role payload.' } });
           return;
         }
-        await route.fulfill({ status: 503, json: { message: 'Synthetic role creation failure.' } });
+        if (flow.overlayMutation === 'role-create-error') {
+          await route.fulfill({ status: 503, json: { message: 'Synthetic role creation failure.' } });
+        } else {
+          await route.fulfill({ status: 201, json: syntheticRole });
+        }
         return;
       }
-      if (flow.overlayMutation === 'tag-create-error' && key === 'POST /api/tags') {
+      if (flow.overlayMutation === 'role-edit-success' && key === 'PUT /api/admin/roles/fixture-role') {
+        await route.fulfill({ status: 200, json: { ...syntheticRole, displayName: 'Edited coverage role' } });
+        return;
+      }
+      if (flow.overlayMutation === 'role-delete-conflict' && key === 'DELETE /api/admin/roles/fixture-role') {
+        await route.fulfill({ status: 409, json: { error: 'This role still has 2 member(s).', memberCount: 2 } });
+        return;
+      }
+      if ((flow.overlayMutation === 'tag-create-success' || flow.overlayMutation === 'tag-create-error') && key === 'POST /api/tags') {
         const expected = {
           name: 'Synthetic coverage tag',
           color: '#d74242',
           description: '',
         };
-        if (JSON.stringify(request.postDataJSON()) !== JSON.stringify(expected)) {
+        if (flow.overlayMutation === 'tag-create-error' && JSON.stringify(request.postDataJSON()) !== JSON.stringify(expected)) {
           violations.push('Unexpected tag-create payload.');
           await route.fulfill({ status: 400, json: { message: 'Unexpected synthetic tag payload.' } });
           return;
         }
-        await route.fulfill({ status: 503, json: { message: 'Synthetic tag creation failure.' } });
+        await route.fulfill({
+          status: flow.overlayMutation === 'tag-create-error' ? 503 : 201,
+          json: flow.overlayMutation === 'tag-create-error' ? { message: 'Synthetic tag creation failure.' } : syntheticTag,
+        });
+        return;
+      }
+      if (flow.overlayMutation === 'tag-edit-success' && key === 'PUT /api/tags/fixture-tag') {
+        await route.fulfill({ status: 200, json: { ...syntheticTag, name: 'Edited coverage tag', revision: 2 } });
+        return;
+      }
+      if (flow.overlayMutation === 'tag-edit-conflict' && key === 'PUT /api/tags/fixture-tag') {
+        await route.fulfill({ status: 409, json: { error: 'This tag was modified by another request.', expectedRevision: 1, actualRevision: 2 } });
+        return;
+      }
+      if ((flow.overlayMutation === 'user-edit-success' || flow.overlayMutation === 'user-permissions-success') && key === 'PUT /api/users/fixture-user') {
+        await route.fulfill({ status: 200, json: syntheticUser });
+        return;
+      }
+      if (flow.overlayMutation === 'user-password-success' && key === 'POST /api/users/fixture-user/change-password') {
+        await route.fulfill({ status: 200, json: { message: 'Password changed successfully.' } });
+        return;
+      }
+      if (flow.overlayMutation === 'user-delete-conflict' && key === 'DELETE /api/users/fixture-user') {
+        await route.fulfill({ status: 409, json: { message: 'Cannot delete the last administrator.' } });
         return;
       }
       if (
@@ -944,6 +1059,18 @@ export async function isolateCapture(context: BrowserContext, {
           ? toolbarAdminSeeds['/api/catalog/manufacturers']
           : profileImport && key === 'GET /api/catalog/printer-models'
             ? toolbarAdminSeeds['/api/catalog/printer-models']
+        : ['role-create-success', 'role-edit-success', 'role-delete-conflict', 'role-members'].includes(flow.overlayMutation ?? '') && key === 'GET /api/admin/roles'
+          ? [syntheticRole]
+        : ['role-create-success', 'role-edit-success', 'role-delete-conflict', 'role-members'].includes(flow.overlayMutation ?? '') && key === 'GET /api/admin/permissions/catalog'
+          ? syntheticPermissionCatalog
+        : ['role-create-success', 'role-edit-success', 'role-delete-conflict', 'role-members'].includes(flow.overlayMutation ?? '') && key === 'GET /api/admin/roles/fixture-role/permissions'
+          ? syntheticRolePermissions
+        : ['tag-create-success', 'tag-edit-success', 'tag-edit-conflict'].includes(flow.overlayMutation ?? '') && key === 'GET /api/tags'
+          ? [syntheticTag]
+        : ['user-edit-success', 'user-password-success', 'user-permissions-success', 'user-delete-conflict'].includes(flow.overlayMutation ?? '') && key === 'GET /api/users'
+          ? [syntheticUser]
+        : ['user-edit-success', 'user-password-success', 'user-permissions-success', 'user-delete-conflict'].includes(flow.overlayMutation ?? '') && key === 'GET /api/users/roles'
+          ? [syntheticUserRole]
         : key === 'GET /api/filament-types' && catalogFilaments
           ? catalogInventory['/api/filament-types']
           : slicerCapabilityState === 'disabled' && key === 'GET /api/system/capabilities'

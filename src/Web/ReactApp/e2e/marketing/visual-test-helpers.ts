@@ -285,7 +285,7 @@ export async function prepareVisualScene(context: BrowserContext, page: Page, sc
       await page.locator('main').getByRole('button', { name: 'New role' }).first().click();
       const dialog = page.getByRole('dialog', { name: 'New role' });
       await expect(dialog).toBeVisible();
-      if (scene.overlayMutation === 'role-create-error') {
+      if (scene.overlayMutation === 'role-create-error' || scene.overlayMutation === 'role-create-success') {
         await dialog.getByRole('textbox', { name: 'Name', exact: true }).fill('coverage_role');
         await dialog.getByLabel('Display name').fill('Coverage role');
         const responsePromise = page.waitForResponse(response =>
@@ -293,32 +293,62 @@ export async function prepareVisualScene(context: BrowserContext, page: Page, sc
         );
         await dialog.getByRole('button', { name: 'Create role', exact: true }).click();
         const response = await responsePromise;
-        expect(response.status()).toBe(503);
+        expect(response.status()).toBe(scene.overlayMutation === 'role-create-error' ? 503 : 201);
         expect(response.request().postDataJSON()).toEqual({ name: 'coverage_role', displayName: 'Coverage role' });
-        await expect(dialog.getByRole('alert')).toHaveText('Synthetic role creation failure.');
-        await expect(dialog.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('coverage_role');
+        if (scene.overlayMutation === 'role-create-error') {
+          await expect(dialog.getByRole('alert')).toHaveText('Synthetic role creation failure.');
+          await expect(dialog.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('coverage_role');
+        } else {
+          await expect(dialog).toBeHidden();
+        }
+      }
+    }
+    if (scene.overlay === 'edit-role' || scene.overlay === 'delete-role' || scene.overlay === 'role-members') {
+      const roleRow = page.getByRole('row').filter({ hasText: 'Coverage role' });
+      if (scene.overlay === 'role-members') {
+        await roleRow.click();
+        await expect(page.getByText('Printers', { exact: true }).last()).toBeVisible();
+      } else if (scene.overlay === 'edit-role') {
+        await roleRow.getByRole('button', { name: 'Edit Coverage role' }).click();
+        const dialog = page.getByRole('dialog', { name: 'Edit role' });
+        await expect(dialog).toBeVisible();
+        await dialog.getByLabel('Display name').fill('Edited coverage role');
+      } else {
+        await roleRow.getByRole('button', { name: 'Delete Coverage role' }).click();
+        await expect(page.getByRole('dialog', { name: 'Delete role' })).toBeVisible();
       }
     }
     if (scene.overlay === 'new-tag') {
       await page.getByTestId('add-tag-action').click();
       const dialog = page.getByRole('dialog', { name: 'Create New Tag' });
       await expect(dialog).toBeVisible();
-      if (scene.overlayMutation === 'tag-create-error') {
+      if (scene.overlayMutation === 'tag-create-error' || scene.overlayMutation === 'tag-create-success') {
         await dialog.getByLabel('Tag Name').fill('Synthetic coverage tag');
         const responsePromise = page.waitForResponse(response =>
           response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/tags',
         );
         await dialog.getByRole('button', { name: 'Create tag', exact: true }).click();
         const response = await responsePromise;
-        expect(response.status()).toBe(503);
+        expect(response.status()).toBe(scene.overlayMutation === 'tag-create-error' ? 503 : 201);
         expect(response.request().postDataJSON()).toEqual({
           name: 'Synthetic coverage tag',
-          color: '#d74242',
+          color: scene.overlayMutation === 'tag-create-error' ? '#d74242' : '#42d76e',
           description: '',
         });
-        await expect(dialog.getByText("Couldn't create tag", { exact: true })).toBeVisible();
-        await expect(dialog.getByLabel('Tag Name')).toHaveValue('Synthetic coverage tag');
+        if (scene.overlayMutation === 'tag-create-error') {
+          await expect(dialog.getByText("Couldn't create tag", { exact: true })).toBeVisible();
+          await expect(dialog.getByLabel('Tag Name')).toHaveValue('Synthetic coverage tag');
+        } else {
+          await expect(dialog).toBeHidden();
+        }
       }
+    }
+    if (scene.overlay === 'edit-tag') {
+      const editButton = page.locator('button[title="Edit tag (E)"]');
+      await editButton.click();
+      const nameInput = page.getByRole('cell', { name: 'Synthetic coverage tag' }).getByRole('textbox');
+      await expect(nameInput).toBeVisible();
+      await page.keyboard.press('Escape');
     }
     if (scene.overlay === 'new-custom-field') {
       await page.locator('main').getByRole('button', { name: 'Add Field' }).first().click();
@@ -327,6 +357,31 @@ export async function prepareVisualScene(context: BrowserContext, page: Page, sc
     if (scene.overlay === 'new-user') {
       await page.getByRole('button', { name: 'Add User', exact: true }).click();
       await expect(page.getByRole('dialog', { name: 'Create New User' })).toBeVisible();
+    }
+    if (
+      scene.overlay === 'edit-user' ||
+      scene.overlay === 'change-user-password' ||
+      scene.overlay === 'manage-user-permissions' ||
+      scene.overlay === 'delete-user'
+    ) {
+      const row = page.getByRole('row').filter({ hasText: 'fixture.operator' });
+      if (scene.overlay === 'edit-user') {
+        await row.locator('button[title="Edit user"]').click();
+        const dialog = page.getByRole('dialog', { name: /Edit User:/ });
+        await expect(dialog).toBeVisible();
+      } else if (scene.overlay === 'change-user-password') {
+        await row.locator('button[title="Change password"]').click();
+        const dialog = page.getByRole('dialog', { name: /Change Password:/ });
+        await expect(dialog).toBeVisible();
+      } else if (scene.overlay === 'manage-user-permissions') {
+        await row.locator('button[title="Manage permissions"]').click();
+        const dialog = page.getByRole('dialog', { name: /Manage Application Access/ });
+        await expect(dialog).toBeVisible();
+      } else {
+        await row.locator('button[title="Delete user"]').click();
+        const dialog = page.getByRole('dialog', { name: /Delete User/i });
+        await expect(dialog).toBeVisible();
+      }
     }
     if (scene.overlay === 'new-printer-group') {
       await page.getByTestId('create-printer-group-action').click();
@@ -666,7 +721,11 @@ export async function prepareVisualScene(context: BrowserContext, page: Page, sc
     for (const marker of scene.contentMarkers ?? []) {
       await expect(page.getByText(marker, { exact: false }).first()).toBeVisible();
     }
-    if (scene.overlay !== 'capability-loading' && scene.overlay !== 'lazy-route-loading') {
+    if (
+      scene.overlay !== 'capability-loading' &&
+      scene.overlay !== 'lazy-route-loading' &&
+      !['role-create-success', 'role-edit-success', 'role-delete-conflict', 'role-members'].includes(scene.overlayMutation ?? '')
+    ) {
       await expect(page.locator('main [aria-busy="true"]')).toHaveCount(0);
     }
     return { violations: networkViolations, pageErrors, releasePendingRequest };
