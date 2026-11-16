@@ -123,6 +123,17 @@ class BootstrapTests(unittest.TestCase):
             for name in ("secrets.json", "compose.env"):
                 self.assertEqual((runtime / name).stat().st_mode & 0o777, 0o600)
 
+    def test_webauthn_origin_matches_browser_url_and_is_persisted_for_compose(self):
+        env = self.run.env
+        self.assertEqual(env["WebAuthn__RelyingPartyId"], "localhost")
+        self.assertEqual(env["WebAuthn__RelyingPartyName"], "PrintFarmer Daily Validation")
+        self.assertEqual(env["WebAuthn__Origin"], env["BASE_URL"])
+        self.assertTrue(env["BASE_URL"].startswith("http://localhost:"))
+
+        compose_env = (Path(self.run.state["workspace"]) / "compose.env").read_text()
+        for key in ("WebAuthn__RelyingPartyId", "WebAuthn__RelyingPartyName", "WebAuthn__Origin"):
+            self.assertIn(f"{key}='{env[key]}'\n", compose_env)
+
     def test_setup_sends_exact_environment_secret_and_existing_setup_is_not_recreated(self):
         printers = [{"backend": "Moonraker", "name": name, "isOnline": name != "Moonraker Offline"}
                     for name in (*daily.INSTANCES, "Moonraker Offline")]
@@ -445,6 +456,30 @@ class LifecycleTests(unittest.TestCase):
                 self.run.phase("phase-a")
         self.assertEqual(self.run.state["phases"], {})
         self.assertIsNone(self.run.summary()["phases"]["phase-a"]["counts"])
+
+    def test_acceptance_provenance_uses_ipv4_http_binding(self):
+        run = self.run
+        run.state.update(source=self.temp.name, commit="a" * 40, manifest=manifest(),
+                         ports={"HTTP_PORT": 31000})
+        containers = [{
+            "Config": {
+                "Labels": {"com.docker.compose.service": service},
+                "Image": run.state["manifest"]["images"].get(
+                    "moonraker-emulator" if service.startswith("moonraker-") else service, {}
+                ).get("reference", "test-image"),
+            },
+            "State": {"Status": "running", "Health": {"Status": "healthy"}, "StartedAt": "started"},
+            "Id": service,
+            "Image": "test-image",
+        } for service in daily.TOPOLOGY]
+        with patch.object(run, "verify_files"), \
+                patch.object(run, "owned_resources", return_value=containers), \
+                patch.object(run, "command", return_value=(0, "")) as command, \
+                patch.object(run, "save"):
+            run.health()
+
+        args = command.call_args.args[0]
+        self.assertEqual(args[args.index("--base-url") + 1], "http://127.0.0.1:31000")
 
     def test_interrupted_partial_evidence_cannot_authorize_phase_b(self):
         for code, status in ((124, "interrupted"), (130, "failed"), (1, "timedout")):
