@@ -41,6 +41,8 @@ internal sealed class PrinterState
 
     public string? State { get; set; }
 
+    public string? RawActivityState { get; set; }
+
     /// <summary>
     /// Tracks the previous state for detecting state transitions (e.g., printing → standby).
     /// </summary>
