@@ -11,6 +11,7 @@ Run from `src/Web/ReactApp/`:
 ```text
 npm run typecheck:e2e
 npx playwright test --config=e2e/marketing/playwright.config.ts accessibility-follow-up.spec.ts
+npm run test:ui-coverage:candidate
 ```
 
 `e2e/marketing/accessibility-follow-up.spec.ts` covers:
@@ -22,6 +23,10 @@ npx playwright test --config=e2e/marketing/playwright.config.ts accessibility-fo
   light/normal on printers, and forge/high on appearance settings;
 - route rendering, root theme/contrast state, horizontal overflow, and the
   existing synthetic-network isolation.
+
+The maintained `test:ui-coverage:candidate` command runs this spec together
+with the catalog-driven UI coverage candidates, so required UI-coverage CI
+protects these four checks.
 
 The existing UI coverage suite still exercises 200%-equivalent CSS reflow,
 high-contrast scenes, axe checks, keyboard traversal, and narrow viewports.
@@ -45,13 +50,17 @@ equivalent viewport, `deviceScaleFactor`, `visualViewport.scale`, axe output,
 or a CSS `zoom: 2` fixture must not be reported as this check.
 
 Manual observation completed on 2026-11-16: Microsoft Edge's native menu
-reported **Zoom 200%** for `http://127.0.0.1:3002/login` on Windows. The
-PrintFarmer setup wizard's heading, step navigation, labels, and form controls
-were visibly enlarged and remained reachable through the document scroll area.
-No setup secret, account data, or credentials were entered. The local host was
-in the initial setup state, so authenticated dashboard, printers, and settings
-routes could not be manually exercised in this pass; the automated isolated
-route checks do not substitute for that limitation.
+reported **Zoom 200%** on Windows for both the local setup wizard
+(`http://127.0.0.1:3002/login`) and the synthetic marketing surface
+(`http://127.0.0.1:4179/PrintFarmer/`). On the setup wizard, the heading, step
+navigation, labels, and form controls were visibly enlarged and remained
+reachable through the document scroll area. On the marketing surface, the
+navigation, hero heading, calls to action, and synthetic fleet section remained
+present in the accessibility tree at 200%. No setup secret, account data, or
+credentials were entered. These are unauthenticated surfaces; authenticated
+dashboard, printers, and settings routes could not be manually exercised in
+this pass. The automated isolated route checks do not substitute for that
+limitation.
 
 ## Manual assistive-technology checks and limitations
 
