@@ -37,6 +37,11 @@ describe('shared coordinate entry', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('uses a touch-sized mobile target and retains compact desktop inputs', () => {
+    render(<Entry onMoveTo={vi.fn()} />);
+    expect(input()).toHaveClass('h-11', 'sm:h-8');
+  });
+
   it('Tabs a changed absolute target to only that axis, ignoring other drafts', async () => {
     const onMoveTo = vi.fn();
     const user = userEvent.setup();
