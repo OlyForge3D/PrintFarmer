@@ -213,6 +213,15 @@ async function probeDeniedQueueSubscription(
       throw new Error(`Denied-subscription user creation failed: ${created.status}`);
     }
     const user = await created.json() as { id: string };
+    const deleteProbeUser = async () => {
+      const deleted = await fetch(`/api/users/${user.id}`, {
+        method: 'DELETE',
+        headers: adminHeaders,
+      });
+      if (!deleted.ok) {
+        throw new Error(`Denied-subscription user cleanup failed: ${deleted.status}`);
+      }
+    };
     try {
       const login = await fetch('/api/auth/login', {
         method: 'POST',
@@ -281,13 +290,7 @@ async function probeDeniedQueueSubscription(
         socket.close();
       }
     } finally {
-      const deleted = await fetch(`/api/users/${user.id}`, {
-        method: 'DELETE',
-        headers: adminHeaders,
-      });
-      if (!deleted.ok) {
-        throw new Error(`Denied-subscription user cleanup failed: ${deleted.status}`);
-      }
+      await deleteProbeUser();
     }
   }, { invocationId, jobId });
 }
