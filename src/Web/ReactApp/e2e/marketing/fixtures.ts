@@ -841,6 +841,16 @@ export async function isolateCapture(context: BrowserContext, {
         return;
       }
       if (flow.overlayMutation === 'role-edit-success' && key === 'PUT /api/admin/roles/fixture-role') {
+        const expected = {
+          displayName: 'Edited coverage role',
+          description: 'Synthetic role for admin coverage.',
+          isActive: true,
+        };
+        if (JSON.stringify(request.postDataJSON()) !== JSON.stringify(expected)) {
+          violations.push('Unexpected role-edit payload.');
+          await route.fulfill({ status: 400, json: { message: 'Unexpected synthetic role-edit payload.' } });
+          return;
+        }
         await route.fulfill({ status: 200, json: { ...syntheticRole, displayName: 'Edited coverage role' } });
         return;
       }
@@ -865,19 +875,60 @@ export async function isolateCapture(context: BrowserContext, {
         });
         return;
       }
-      if (flow.overlayMutation === 'tag-edit-success' && key === 'PUT /api/tags/fixture-tag') {
+      if (
+        (flow.overlayMutation === 'tag-edit-success' || flow.overlayMutation === 'tag-edit-conflict') &&
+        key === 'PUT /api/tags/fixture-tag'
+      ) {
+        const expected = {
+          name: 'Edited coverage tag',
+          color: '#d74242',
+          description: 'Fixture-only tag.',
+          expectedRevision: 1,
+        };
+        if (JSON.stringify(request.postDataJSON()) !== JSON.stringify(expected)) {
+          violations.push('Unexpected tag-edit payload.');
+          await route.fulfill({ status: 400, json: { message: 'Unexpected synthetic tag-edit payload.' } });
+          return;
+        }
+        if (flow.overlayMutation === 'tag-edit-conflict') {
+          await route.fulfill({ status: 409, json: { error: 'This tag was modified by another request.', expectedRevision: 1, actualRevision: 2 } });
+          return;
+        }
         await route.fulfill({ status: 200, json: { ...syntheticTag, name: 'Edited coverage tag', revision: 2 } });
         return;
       }
-      if (flow.overlayMutation === 'tag-edit-conflict' && key === 'PUT /api/tags/fixture-tag') {
-        await route.fulfill({ status: 409, json: { error: 'This tag was modified by another request.', expectedRevision: 1, actualRevision: 2 } });
-        return;
-      }
-      if ((flow.overlayMutation === 'user-edit-success' || flow.overlayMutation === 'user-permissions-success') && key === 'PUT /api/users/fixture-user') {
+      if (
+        (flow.overlayMutation === 'user-edit-success' || flow.overlayMutation === 'user-permissions-success') &&
+        key === 'PUT /api/users/fixture-user'
+      ) {
+        const expected = flow.overlayMutation === 'user-edit-success'
+          ? {
+            firstName: 'Edited',
+            lastName: 'Operator',
+            email: 'fixture.operator@example.invalid',
+            isActive: true,
+            roleIds: ['fixture-user-role'],
+            accessibleAreas: ['printers', 'files'],
+          }
+          : { accessibleAreas: ['printers'] };
+        if (JSON.stringify(request.postDataJSON()) !== JSON.stringify(expected)) {
+          violations.push('Unexpected user-update payload.');
+          await route.fulfill({ status: 400, json: { message: 'Unexpected synthetic user-update payload.' } });
+          return;
+        }
         await route.fulfill({ status: 200, json: syntheticUser });
         return;
       }
       if (flow.overlayMutation === 'user-password-success' && key === 'POST /api/users/fixture-user/change-password') {
+        const expected = {
+          newPassword: 'FixturePassword1!',
+          confirmNewPassword: 'FixturePassword1!',
+        };
+        if (JSON.stringify(request.postDataJSON()) !== JSON.stringify(expected)) {
+          violations.push('Unexpected user-password payload.');
+          await route.fulfill({ status: 400, json: { message: 'Unexpected synthetic user-password payload.' } });
+          return;
+        }
         await route.fulfill({ status: 200, json: { message: 'Password changed successfully.' } });
         return;
       }

@@ -309,13 +309,39 @@ export async function prepareVisualScene(context: BrowserContext, page: Page, sc
         await roleRow.click();
         await expect(page.getByText('Printers', { exact: true }).last()).toBeVisible();
       } else if (scene.overlay === 'edit-role') {
+        await roleRow.click();
         await roleRow.getByRole('button', { name: 'Edit Coverage role' }).click();
         const dialog = page.getByRole('dialog', { name: 'Edit role' });
         await expect(dialog).toBeVisible();
         await dialog.getByLabel('Display name').fill('Edited coverage role');
+        const responsePromise = page.waitForResponse(response =>
+          response.request().method() === 'PUT' &&
+          new URL(response.url()).pathname === '/api/admin/roles/fixture-role',
+        );
+        await dialog.getByRole('button', { name: 'Save changes', exact: true }).click();
+        const response = await responsePromise;
+        expect(response.status()).toBe(200);
+        expect(response.request().postDataJSON()).toEqual({
+          displayName: 'Edited coverage role',
+          description: 'Synthetic role for admin coverage.',
+          isActive: true,
+        });
+        await expect(page.getByText('Role "Edited coverage role" updated.', { exact: true })).toBeVisible();
+        await expect(dialog).toBeHidden();
       } else {
         await roleRow.getByRole('button', { name: 'Delete Coverage role' }).click();
-        await expect(page.getByRole('dialog', { name: 'Delete role' })).toBeVisible();
+        const dialog = page.getByRole('dialog', { name: 'Delete role' });
+        await expect(dialog).toBeVisible();
+        const responsePromise = page.waitForResponse(response =>
+          response.request().method() === 'DELETE' &&
+          new URL(response.url()).pathname === '/api/admin/roles/fixture-role',
+        );
+        await dialog.getByRole('button', { name: 'Confirm', exact: true }).click();
+        const response = await responsePromise;
+        expect(response.status()).toBe(409);
+        const conflictDialog = page.getByRole('dialog', { name: 'Role has members' });
+        await expect(conflictDialog).toBeVisible();
+        await expect(conflictDialog.getByText('This role still has 2 member(s).', { exact: true })).toBeVisible();
       }
     }
     if (scene.overlay === 'new-tag') {
@@ -348,7 +374,28 @@ export async function prepareVisualScene(context: BrowserContext, page: Page, sc
       await editButton.click();
       const nameInput = page.getByRole('cell', { name: 'Synthetic coverage tag' }).getByRole('textbox');
       await expect(nameInput).toBeVisible();
-      await page.keyboard.press('Escape');
+      await nameInput.fill('Edited coverage tag');
+      const responsePromise = page.waitForResponse(response =>
+        response.request().method() === 'PUT' &&
+        new URL(response.url()).pathname === '/api/tags/fixture-tag',
+      );
+      await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+      const response = await responsePromise;
+      const isConflict = scene.overlayMutation === 'tag-edit-conflict';
+      expect(response.status()).toBe(isConflict ? 409 : 200);
+      expect(response.request().postDataJSON()).toEqual({
+        name: 'Edited coverage tag',
+        color: '#d74242',
+        description: 'Fixture-only tag.',
+        expectedRevision: 1,
+      });
+      if (isConflict) {
+        const conflictDialog = page.getByRole('dialog', { name: 'Conflict updating "Edited coverage tag"' });
+        await expect(conflictDialog).toBeVisible();
+        await expect(conflictDialog.getByRole('alert')).toContainText('This tag was changed by someone else');
+      } else {
+        await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeHidden();
+      }
     }
     if (scene.overlay === 'new-custom-field') {
       await page.locator('main').getByRole('button', { name: 'Add Field' }).first().click();
@@ -369,18 +416,76 @@ export async function prepareVisualScene(context: BrowserContext, page: Page, sc
         await row.locator('button[title="Edit user"]').click();
         const dialog = page.getByRole('dialog', { name: /Edit User:/ });
         await expect(dialog).toBeVisible();
+        await dialog.getByPlaceholder('First Name').fill('Edited');
+        const responsePromise = page.waitForResponse(response =>
+          response.request().method() === 'PUT' &&
+          new URL(response.url()).pathname === '/api/users/fixture-user',
+        );
+        await dialog.getByRole('button', { name: 'Save changes', exact: true }).click();
+        const response = await responsePromise;
+        expect(response.status()).toBe(200);
+        expect(response.request().postDataJSON()).toEqual({
+          firstName: 'Edited',
+          lastName: 'Operator',
+          email: 'fixture.operator@example.invalid',
+          isActive: true,
+          roleIds: ['fixture-user-role'],
+          accessibleAreas: ['printers', 'files'],
+        });
+        await expect(page.getByText('User updated successfully', { exact: true })).toBeVisible();
+        await expect(dialog).toBeHidden();
       } else if (scene.overlay === 'change-user-password') {
         await row.locator('button[title="Change password"]').click();
         const dialog = page.getByRole('dialog', { name: /Change Password:/ });
         await expect(dialog).toBeVisible();
+        await dialog.getByPlaceholder('Enter new password').fill('FixturePassword1!');
+        await dialog.getByPlaceholder('Confirm new password').fill('FixturePassword1!');
+        await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+        const confirmation = page.getByRole('dialog', { name: 'Confirm Password Change?' });
+        await expect(confirmation).toBeVisible();
+        const responsePromise = page.waitForResponse(response =>
+          response.request().method() === 'POST' &&
+          new URL(response.url()).pathname === '/api/users/fixture-user/change-password',
+        );
+        await confirmation.getByRole('button', { name: 'Change Password', exact: true }).click();
+        const response = await responsePromise;
+        expect(response.status()).toBe(200);
+        expect(response.request().postDataJSON()).toEqual({
+          newPassword: 'FixturePassword1!',
+          confirmNewPassword: 'FixturePassword1!',
+        });
+        await expect(page.getByText('Password changed for "fixture.operator"', { exact: true })).toBeVisible();
+        await expect(dialog).toBeHidden();
       } else if (scene.overlay === 'manage-user-permissions') {
         await row.locator('button[title="Manage permissions"]').click();
         const dialog = page.getByRole('dialog', { name: /Manage Application Access/ });
         await expect(dialog).toBeVisible();
+        await dialog.getByText('Files', { exact: true }).click();
+        const responsePromise = page.waitForResponse(response =>
+          response.request().method() === 'PUT' &&
+          new URL(response.url()).pathname === '/api/users/fixture-user',
+        );
+        await dialog.getByRole('button', { name: 'Save permissions', exact: true }).click();
+        const response = await responsePromise;
+        expect(response.status()).toBe(200);
+        expect(response.request().postDataJSON()).toEqual({ accessibleAreas: ['printers'] });
+        await expect(page.getByText('Permissions updated', { exact: true })).toBeVisible();
+        await expect(dialog).toBeHidden();
       } else {
         await row.locator('button[title="Delete user"]').click();
         const dialog = page.getByRole('dialog', { name: /Delete User/i });
         await expect(dialog).toBeVisible();
+        const responsePromise = page.waitForResponse(response =>
+          response.request().method() === 'DELETE' &&
+          new URL(response.url()).pathname === '/api/users/fixture-user',
+        );
+        await dialog.getByRole('button', { name: 'Delete User', exact: true }).click();
+        const response = await responsePromise;
+        expect(response.status()).toBe(409);
+        await expect(page.getByRole('row').filter({ hasText: 'fixture.operator' })).toBeVisible();
+        const errorToast = page.getByText('Failed to delete user', { exact: true });
+        await expect(errorToast).toBeVisible();
+        await expect(errorToast).toBeHidden({ timeout: 10000 });
       }
     }
     if (scene.overlay === 'new-printer-group') {
