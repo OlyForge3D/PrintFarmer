@@ -6,7 +6,7 @@ import { AuthContext } from '@/common/contexts/auth-context';
 import { PrinterCoordinateRow } from '@/features/printers/components/PrinterCoordinateRow';
 import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
 import { PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
-import { PrinterBackend } from '@/types/api';
+import { PrinterBackend, type PrinterMovementSupportStatus } from '@/types/api';
 import '@/index.css';
 
 export function mountCoordinates(element: HTMLElement) {
@@ -46,9 +46,10 @@ export function mountCoordinates(element: HTMLElement) {
     defaultSlicerPreset: null, printablesUsername: null, printerControlMode: 'Guided', rowVersion: 'v1',
   });
   const supportState = new URLSearchParams(window.location.search).get('support');
-  const motionSupportStatus = supportState === 'unknown'
+  const motionSupportStatus: PrinterMovementSupportStatus | undefined = supportState === 'unknown'
     ? 'Unknown'
-    : supportState === 'unsupported' ? 'Unsupported' : undefined;
+    : supportState === 'unsupported' ? 'Unsupported'
+      : supportState === 'supported' ? 'Supported' : undefined;
   createRoot(element).render(
     <QueryClientProvider client={queryClient}>
       <AuthContext value={{ user: null, isAuthenticated: true, isLoading: false, hasPermission: () => true,
