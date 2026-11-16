@@ -61,6 +61,7 @@ async function installWebhookFixture(
   }];
   let deliveries: DeliveryFixture[] = [];
   const requests: { method: string; path: string }[] = [];
+  const createdWebhookIds: string[] = [];
 
   await page.route('**/api/webhooks**', async (route) => {
     const request = route.request();
@@ -80,6 +81,25 @@ async function installWebhookFixture(
 
     if (request.method() === 'GET' && path.endsWith('/webhooks')) {
       await route.fulfill({ json: webhooks });
+      return;
+    }
+
+    if (request.method() === 'POST' && path.endsWith('/webhooks')) {
+      const body = request.postDataJSON() as Required<Pick<WebhookWrite, 'name' | 'url'>> & WebhookWrite;
+      const created: WebhookFixture = {
+        id: 'fixture-webhook-created',
+        name: body.name,
+        url: body.url,
+        hasSecret: Boolean(body.secret),
+        eventTypes: body.eventTypes ?? '*',
+        isActive: body.isActive ?? true,
+        consecutiveFailures: 0,
+        maxConsecutiveFailures: body.maxConsecutiveFailures ?? 10,
+        createdAt: '2026-01-01T00:00:02Z',
+      };
+      webhooks = [...webhooks, created];
+      createdWebhookIds.push(created.id);
+      await route.fulfill({ status: 201, json: created });
       return;
     }
 
@@ -132,28 +152,10 @@ async function installWebhookFixture(
       return;
     }
 
-    if (request.method() === 'POST') {
-      const body = request.postDataJSON() as Required<Pick<WebhookWrite, 'name' | 'url'>> & WebhookWrite;
-      const created: WebhookFixture = {
-        id: 'fixture-webhook-created',
-        name: body.name,
-        url: body.url,
-        hasSecret: Boolean(body.secret),
-        eventTypes: body.eventTypes ?? '*',
-        isActive: body.isActive ?? true,
-        consecutiveFailures: 0,
-        maxConsecutiveFailures: body.maxConsecutiveFailures ?? 10,
-        createdAt: '2026-01-01T00:00:02Z',
-      };
-      webhooks = [...webhooks, created];
-      await route.fulfill({ status: 201, json: created });
-      return;
-    }
-
     await route.continue();
   });
 
-  return { requests };
+  return { requests, createdWebhookIds };
 }
 
 async function openWebhooksPage(page: Page) {
@@ -189,6 +191,7 @@ test.describe('Admin Webhooks — deterministic emulator fixtures', () => {
     await expect(dialog).toBeHidden();
     await expect(page.getByRole('article', { name: 'Created Fixture Webhook webhook', exact: true })).toBeVisible();
     expect(fixture.requests).toContainEqual({ method: 'POST', path: '/api/webhooks' });
+    expect(fixture.createdWebhookIds).toEqual(['fixture-webhook-created']);
   });
 
   test('covers edit success and renders the updated webhook', async ({ page }) => {
