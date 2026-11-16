@@ -20,8 +20,5 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["node", "@playwright/test"]
   },
-  "include": ["e2e", "src/types/printfarmer-debug.d.ts"],
-  "exclude": [
-    "e2e/emulator/queue-realtime-auth.spec.ts"
-  ]
+  "include": ["e2e", "src/types/printfarmer-debug.d.ts"]
 }

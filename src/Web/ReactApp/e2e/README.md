@@ -409,10 +409,25 @@ npm run test:e2e:list      # Playwright test discovery dry-run (no server requir
 npm run test:run -- e2e/fixtures/emulator-setup.unit.test.ts  # Vitest unit coverage for fixture logic (no server required)
 ```
 
-`tsconfig.e2e.json` excludes `e2e/emulator/queue-realtime-auth.spec.ts` — a
-pre-existing, unrelated auth/queue spec with type errors that predate this
-change and are out of scope for the Moonraker printer-facing contract (see
-"Out of scope" below).
+The daily suites run against a production frontend, not Vite. Observe live
+SignalR frames, authenticated REST requests and rendered UI; do not import
+`/src` modules or depend on unpublished window service instances.
+
+Printer metadata (Statistics and Version) lives in the details sidebar.
+Detailed cards keep live telemetry inline, including temperature tables.
+Remote deletion must use the authoritative **Files > On printers** catalog
+with exact-source review and explicit irreversible-delete consent; the legacy
+printer-files dialog intentionally disables deletion.
+
+MMU fixtures must configure both the emulator's live protocol and the saved
+printer's `multiMaterial` topology through the real concurrency-checked API.
+Changing only the emulator leaves the single physical T0 seed unchanged and
+correctly blocks spool assignment with a hardware-layout warning. Restore the
+saved single-feed configuration and reset the emulator after each test.
+
+Camera decoding coverage explicitly selects Stream mode and supplies a supported
+JPEG response to the authenticated stream route, then checks the rendered blob
+image's decoded dimensions. A loaded snapshot is not proof of a working stream.
 
 ## Fixtures
 
