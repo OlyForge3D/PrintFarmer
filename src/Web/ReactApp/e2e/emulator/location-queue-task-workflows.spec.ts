@@ -404,6 +404,10 @@ test.describe('Location and queue task workflows — Emulator', () => {
     ];
     const actionRequests: string[] = [];
     const actionEffects: string[] = [];
+    let releaseFailure: () => void = () => {};
+    const failureResponse = new Promise<void>((resolve) => {
+      releaseFailure = resolve;
+    });
     let releaseDuplicate: () => void = () => {};
     const duplicateResponse = new Promise<void>((resolve) => {
       releaseDuplicate = resolve;
@@ -433,6 +437,7 @@ test.describe('Location and queue task workflows — Emulator', () => {
       actionRequests.push(requestKey);
 
       if (taskId === 'task-failure') {
+        await failureResponse;
         await fulfillJson(route, { message: 'Synthetic terminal failure' }, 500);
         return;
       }
@@ -461,8 +466,12 @@ test.describe('Location and queue task workflows — Emulator', () => {
     const retryRow = page.locator('[data-testid="tasks-widget-row"][data-task-id="task-retry"]');
     const duplicateRow = page.locator('[data-testid="tasks-widget-row"][data-task-id="task-duplicate"]');
 
-    await failureRow.getByTestId('tasks-widget-complete').click();
+    const failureComplete = failureRow.getByTestId('tasks-widget-complete');
+    await failureComplete.click();
     await expect.poll(() => actionRequests).toEqual(['complete:task-failure']);
+    await expect(failureComplete).toBeDisabled();
+    releaseFailure();
+    await expect(failureComplete).toBeEnabled();
     await expect(failureRow).toBeVisible();
     expect(actionEffects).toEqual([]);
 
