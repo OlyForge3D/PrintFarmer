@@ -108,7 +108,7 @@ export function PrinterCoordinateRow({ values, positions, homedAxes, onChange, o
           </div>
         ))}
       </div>
-      {homed.length < axes.length && <p className="mt-1 text-xs text-pf-text-secondary">
+      {helpMode === 'guided' && homed.length < axes.length && <p className="mt-1 text-xs text-pf-text-secondary">
         Movement requires the printer to report the selected axis as homed.
       </p>}
       {action.pending && <p role="status" className="mt-1 text-xs text-pf-text-secondary">Sending movement command…</p>}
