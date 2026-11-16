@@ -1,10 +1,6 @@
 import { test, expect } from '../fixtures/emulator-setup';
 
 const CAMERA_STREAM_ROUTE = '**/api/cameras/*/stream';
-const CAMERA_STREAM_FRAME = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
-  'base64',
-);
 
 /**
  * Cameras Page E2E Tests — Emulator-backed
@@ -24,11 +20,20 @@ test.describe('Cameras — Emulator', () => {
   test.beforeEach(async ({ page }) => {
     consoleErrors = [];
     page.on('pageerror', (error) => consoleErrors.push(error.message));
+    const jpeg = await page.evaluate(() => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 2;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Canvas unavailable for deterministic camera fixture');
+      context.fillStyle = '#123456';
+      context.fillRect(0, 0, 2, 2);
+      return canvas.toDataURL('image/jpeg').split(',')[1];
+    });
     await page.route(CAMERA_STREAM_ROUTE, async (route) => {
       await route.fulfill({
         status: 200,
-        contentType: 'image/png',
-        body: CAMERA_STREAM_FRAME,
+        contentType: 'image/jpeg',
+        body: Buffer.from(jpeg, 'base64'),
       });
     });
     await page.goto('/cameras');
@@ -107,20 +112,24 @@ test.describe('Cameras — Emulator', () => {
   });
 
   test('camera stream frames decode a deterministic media fixture', async ({ page }) => {
-    const streamFrames = page.locator('iframe[title$=" live camera feed"]');
-    await expect.poll(() => streamFrames.count()).toBeGreaterThan(0);
+    const cameras = page.getByRole('article', { name: / camera$/ });
+    await expect.poll(() => cameras.count()).toBeGreaterThan(0);
 
-    const streamCount = await streamFrames.count();
+    const streamCount = await cameras.count();
     for (let index = 0; index < streamCount; index++) {
-      const streamFrame = streamFrames.nth(index);
-      await streamFrame.scrollIntoViewIfNeeded();
-      await expect(streamFrame).toBeVisible();
-      const image = streamFrame.contentFrame().locator('img');
+      const camera = cameras.nth(index);
+      await camera.scrollIntoViewIfNeeded();
+      const streamMode = camera.getByRole('button', { name: 'Stream mode', exact: true });
+      await streamMode.click();
+      await expect(streamMode).toHaveAttribute('aria-pressed', 'true');
+      const image = camera.getByRole('img', { name: / live camera feed$/ });
+      await expect(image).toBeVisible();
       await expect.poll(
         () => image.evaluate((element: HTMLImageElement) =>
-          element.complete && element.naturalWidth > 0
+          element.complete && element.naturalWidth === 2 && element.naturalHeight === 2
+            && element.src.startsWith('blob:')
         ),
-        { message: `Camera stream fixture ${index + 1} should decode in its frame` },
+        { message: `Camera stream fixture ${index + 1} should decode through the authenticated stream` },
       ).toBe(true);
     }
 
