@@ -123,6 +123,17 @@ class BootstrapTests(unittest.TestCase):
             for name in ("secrets.json", "compose.env"):
                 self.assertEqual((runtime / name).stat().st_mode & 0o777, 0o600)
 
+    def test_webauthn_origin_matches_browser_url_and_is_persisted_for_compose(self):
+        env = self.run.env
+        self.assertEqual(env["WebAuthn__RelyingPartyId"], "localhost")
+        self.assertEqual(env["WebAuthn__RelyingPartyName"], "PrintFarmer Daily Validation")
+        self.assertEqual(env["WebAuthn__Origin"], env["BASE_URL"])
+        self.assertTrue(env["BASE_URL"].startswith("http://localhost:"))
+
+        compose_env = (Path(self.run.state["workspace"]) / "compose.env").read_text()
+        for key in ("WebAuthn__RelyingPartyId", "WebAuthn__RelyingPartyName", "WebAuthn__Origin"):
+            self.assertIn(f"{key}='{env[key]}'\n", compose_env)
+
     def test_setup_sends_exact_environment_secret_and_existing_setup_is_not_recreated(self):
         printers = [{"backend": "Moonraker", "name": name, "isOnline": name != "Moonraker Offline"}
                     for name in (*daily.INSTANCES, "Moonraker Offline")]

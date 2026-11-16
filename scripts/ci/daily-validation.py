@@ -579,8 +579,11 @@ class Run:
                    EXTERNAL_ORCA_WORKER_TEMP=str(runtime / "stack/.volumes/printfarmer-orcaslicer-temp"),
                    E2E_ADMIN_USERNAME="daily-admin", E2E_ADMIN_PASSWORD="Aa1!" + secrets.token_hex(24),
                    E2E_ADMIN_EMAIL="daily-admin@printfarmer.test",
-                   BASE_URL=f'http://127.0.0.1:{ports["HTTP_PORT"]}',
+                   BASE_URL=f'http://localhost:{ports["HTTP_PORT"]}',
                    API_BASE_URL=f'http://127.0.0.1:{ports["API_PORT"]}',
+                   WebAuthn__RelyingPartyId="localhost",
+                   WebAuthn__RelyingPartyName="PrintFarmer Daily Validation",
+                   WebAuthn__Origin=f'http://localhost:{ports["HTTP_PORT"]}',
                    PLAYWRIGHT_BROWSERS_PATH=str(runtime / "browsers"),
                    DOCKER_CONFIG=str(runtime / "docker"),
                    PRINTFARMER_BUILD_CONTEXT=self.state["source"])
