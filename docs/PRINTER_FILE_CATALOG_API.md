@@ -110,6 +110,8 @@ For Moonraker, raw activity comes only from explicit `print_stats.state`, not
 cache updates apply the same confirmed-idle policy: `standby`, `complete` and
 `cancelled` qualify; printing, paused, missing, empty, unknown and error activity
 do not. The displayed printer state retains its existing readiness fallback.
+Known Klippy shutdown or disconnection invalidates raw activity; readiness alone
+cannot restore it without a new explicit print-activity observation.
 
 Busy or unknown sources receive a jittered next-attempt time without advancing
 last-seen or complete-scan evidence, so they cannot monopolize the due batch.

@@ -196,6 +196,46 @@ public sealed class MoonrakerSensorSubscriptionTests : IAsyncDisposable
         Assert.False(PrinterFileIndexPolicy.IsConfirmedIdle(new(_cached[^1], DateTime.UtcNow), DateTime.UtcNow));
     }
 
+    [Fact]
+    public async Task ProcessStatusUpdateAsync_ActivityWhileKlippyShutdown_RequiresNewReadyActivity()
+    {
+        await ProcessStatusAsync("""{"webhooks":{"state":"ready"},"print_stats":{"state":"standby"}}""");
+        await ProcessStatusAsync("""{"webhooks":{"state":"shutdown"}}""");
+        await ProcessStatusAsync("""{"print_stats":{"state":"standby"}}""");
+
+        Assert.True(_cached[^1].IsOnline);
+        Assert.Null(_cached[^1].RawActivityState);
+        Assert.False(PrinterFileIndexPolicy.IsConfirmedIdle(new(_cached[^1], DateTime.UtcNow), DateTime.UtcNow));
+
+        await ProcessStatusAsync("""{"webhooks":{"state":"ready"}}""");
+        Assert.Null(_cached[^1].RawActivityState);
+        Assert.False(PrinterFileIndexPolicy.IsConfirmedIdle(new(_cached[^1], DateTime.UtcNow), DateTime.UtcNow));
+
+        await ProcessStatusAsync("""{"print_stats":{"state":"standby"}}""");
+        Assert.True(PrinterFileIndexPolicy.IsConfirmedIdle(new(_cached[^1], DateTime.UtcNow), DateTime.UtcNow));
+    }
+
+    [Theory]
+    [InlineData("notify_klippy_shutdown")]
+    [InlineData("notify_klippy_disconnected")]
+    public async Task ProcessStatusUpdateAsync_KlippyUnavailableThenStateFreeDelta_DoesNotReviveIdle(string notification)
+    {
+        await ProcessStatusAsync("""{"webhooks":{"state":"ready"},"print_stats":{"state":"standby"}}""");
+        await ProcessMessageAsync(JsonSerializer.Serialize(new { method = notification }));
+        await ProcessStatusAsync("""{"toolhead":{"homed_axes":"xyz"}}""");
+
+        Assert.True(_cached[^1].IsOnline);
+        Assert.Null(_cached[^1].RawActivityState);
+        Assert.False(PrinterFileIndexPolicy.IsConfirmedIdle(new(_cached[^1], DateTime.UtcNow), DateTime.UtcNow));
+
+        await ProcessStatusAsync("""{"webhooks":{"state":"ready"}}""");
+        Assert.Null(_cached[^1].RawActivityState);
+        Assert.False(PrinterFileIndexPolicy.IsConfirmedIdle(new(_cached[^1], DateTime.UtcNow), DateTime.UtcNow));
+
+        await ProcessStatusAsync("""{"print_stats":{"state":"standby"}}""");
+        Assert.True(PrinterFileIndexPolicy.IsConfirmedIdle(new(_cached[^1], DateTime.UtcNow), DateTime.UtcNow));
+    }
+
     private static readonly List<string> HeaterObjects =
         ["configfile", "webhooks", "print_stats", "toolhead", "extruder", "extruder1", "extruder2", "extruder3", "heater_bed", "fan"];
 

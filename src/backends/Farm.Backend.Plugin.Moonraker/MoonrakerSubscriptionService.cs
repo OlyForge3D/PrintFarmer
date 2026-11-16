@@ -1124,6 +1124,7 @@ public sealed class MoonrakerSubscriptionService(
 
         _ = state.Sensors.MarkAllUnavailable();
         state.ClearRuntimeFactors();
+        state.RawActivityState = null;
         return state.Sensors.Snapshot();
     }
 
@@ -1139,6 +1140,7 @@ public sealed class MoonrakerSubscriptionService(
             if (state is not null)
             {
                 state.ClearRuntimeFactors();
+                state.RawActivityState = null;
             }
 
             PrinterStatusDto? invalidated = _statusCacheWriter.ClearRuntimeFactors(printerId);
@@ -2964,7 +2966,8 @@ public sealed class MoonrakerSubscriptionService(
 
             if (ps.TryGetProperty("state", out _))
             {
-                state.RawActivityState = string.IsNullOrWhiteSpace(printStatsState) ? null : printStatsState;
+                state.RawActivityState = _klippyReadyState.TryGetValue(printerId, out bool ready) && ready &&
+                    !string.IsNullOrWhiteSpace(printStatsState) ? printStatsState : null;
             }
 
             if (ps.TryGetProperty("filename", out JsonElement fn) && fn.ValueKind == JsonValueKind.String)
@@ -3327,7 +3330,11 @@ public sealed class MoonrakerSubscriptionService(
                 Sensors = sensors,
             };
             _statusCacheWriter.UpdateStatus(
-                cacheUpdate with { RawActivityState = state.RawActivityState, ObservationStartedAtUtc = state.ObservationStartedAtUtc }, state.OriginWatermark);
+                cacheUpdate with
+                {
+                    RawActivityState = _klippyReadyState.TryGetValue(printerId, out bool ready) && ready ? state.RawActivityState : null,
+                    ObservationStartedAtUtc = state.ObservationStartedAtUtc,
+                }, state.OriginWatermark);
 
             _logger.LogDebug("[MoonrakerSubscriptionService] Broadcasting printerupdated for {PrinterId} via SignalR", printerId);
             await hub!.Clients.Group(
