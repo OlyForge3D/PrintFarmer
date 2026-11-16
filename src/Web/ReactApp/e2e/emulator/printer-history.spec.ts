@@ -46,6 +46,9 @@ test.describe('Printer History — Moonraker', () => {
     // Cancel the fixture's real occupied dispatch so the history entry is
     // deterministic and does not repeat the separately-covered start flow.
     await card.getByRole('button', { name: 'Cancel' }).click();
+    const confirmation = page.getByRole('dialog', { name: 'Cancel print?' });
+    await expect(confirmation).toBeVisible();
+    await confirmation.getByRole('button', { name: 'Cancel print', exact: true }).click();
     await expect(card.getByRole('button', { name: 'Cancel' })).toBeDisabled({ timeout: 15_000 });
     await expect(card.getByText('Cancelled', { exact: true }).first()).toBeVisible({ timeout: 15_000 });
 
