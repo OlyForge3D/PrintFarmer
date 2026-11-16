@@ -1,4 +1,4 @@
-import { test, expect } from '../fixtures/emulator-setup';
+import { test as emulatorTest, expect, API_BASE_URL, getStoredAuthToken } from '../fixtures/emulator-setup';
 import type { Page } from '@playwright/test';
 
 type SignalRFrame = Record<string, unknown> & {
@@ -32,6 +32,39 @@ type QueueChangeFeedSnapshot = {
   nextSequence: number;
   events: Array<{ jobId?: string | null; sequence: number }>;
 };
+
+type QueueTestResources = { jobIds: string[]; fileIds: string[] };
+
+const test = emulatorTest.extend<{ queueResources: QueueTestResources }>({
+  queueResources: [async ({ page }, use) => {
+    const resources: QueueTestResources = { jobIds: [], fileIds: [] };
+    await use(resources);
+    const token = await getStoredAuthToken(page);
+    const headers = { Authorization: `Bearer ${token}` };
+    const jobCleanup = await Promise.allSettled(resources.jobIds.map(async id => {
+      const url = `${API_BASE_URL}/api/job-queue/${id}`;
+      const current = await page.request.get(url, { headers });
+      expect(current.status(), 'Created queue job must remain available for cleanup').toBe(200);
+      const etag = current.headers().etag;
+      expect(Boolean(etag), 'Queue cleanup requires the current revision').toBe(true);
+      const removed = await page.request.delete(url, {
+        headers: { ...headers, 'If-Match': etag },
+      });
+      expect(removed.status(), 'Created queue job must be removed').toBe(204);
+      expect((await page.request.get(url, { headers })).status()).toBe(404);
+    }));
+    const fileCleanup = await Promise.allSettled(resources.fileIds.map(async id => {
+      const url = `${API_BASE_URL}/api/gcode-files/${id}`;
+      const removed = await page.request.delete(url, { headers });
+      expect(removed.status(), 'Uploaded queue fixture must be removed').toBe(204);
+      expect((await page.request.get(url, { headers })).status()).toBe(404);
+    }));
+    const failures = [...jobCleanup, ...fileCleanup]
+      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      .map(result => result.reason as unknown);
+    if (failures.length > 0) throw new AggregateError(failures, 'Queue fixture cleanup failed');
+  }, { auto: true }],
+});
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -122,17 +155,15 @@ function hasSuccessfulInvocation(
 
 async function createQueueJob(
   page: Page,
+  resources: QueueTestResources,
 ): Promise<{ id: string; printerId: string; fileName: string }> {
-  return page.evaluate(async () => {
-    const isRecord = (value: unknown): value is Record<string, unknown> =>
-      typeof value === 'object' && value !== null;
-    const token = localStorage.getItem('auth-token');
+    const token = await getStoredAuthToken(page);
     const authorization = { Authorization: `Bearer ${token ?? ''}` };
-    const printersResponse = await fetch('/api/printers', {
+    const printersResponse = await page.request.get(`${API_BASE_URL}/api/printers`, {
       headers: authorization,
     });
-    if (!printersResponse.ok) {
-      throw new Error(`Printers failed: ${printersResponse.status}`);
+    if (!printersResponse.ok()) {
+      throw new Error(`Printers failed: ${printersResponse.status()}`);
     }
     const printerPayload: unknown = await printersResponse.json();
     const printers = Array.isArray(printerPayload)
@@ -146,45 +177,44 @@ async function createQueueJob(
     if (!printer) throw new Error('No emulator printer is available');
 
     const fileName = `realtime-${crypto.randomUUID()}.gcode`;
-    const form = new FormData();
-    form.append(
-      'file',
-      new Blob([`; ${fileName}\n; server-driven queue event\nG28\n`], { type: 'text/plain' }),
-      fileName,
-    );
-    const uploadResponse = await fetch('/api/gcode-files/upload', {
-      method: 'POST',
+    const uploadResponse = await page.request.post(`${API_BASE_URL}/api/gcode-files/upload`, {
       headers: authorization,
-      body: form,
+      multipart: {
+        file: {
+          name: fileName,
+          mimeType: 'text/plain',
+          buffer: Buffer.from(`; ${fileName}\n; server-driven queue event\nG28\n`),
+        },
+      },
     });
-    if (!uploadResponse.ok) {
+    if (!uploadResponse.ok()) {
       throw new Error(
-        `Upload failed: ${uploadResponse.status} ${await uploadResponse.text()}`,
+        `Upload failed: ${uploadResponse.status()} ${await uploadResponse.text()}`,
       );
     }
     const upload = await uploadResponse.json() as { id: string };
+    resources.fileIds.push(upload.id);
 
-    const queueResponse = await fetch('/api/job-queue', {
-      method: 'POST',
+    const queueResponse = await page.request.post(`${API_BASE_URL}/api/job-queue`, {
       headers: {
         ...authorization,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
+      data: {
         gcodeFileId: upload.id,
         assignedPrinterId: printer.id,
         priority: 'Normal',
-      }),
+      },
     });
-    if (!queueResponse.ok) {
+    if (!queueResponse.ok()) {
       throw new Error(
-        `Queue creation failed: ${queueResponse.status} ${await queueResponse.text()}`,
+        `Queue creation failed: ${queueResponse.status()} ${await queueResponse.text()}`,
       );
     }
 
     const job = await queueResponse.json() as { id: string };
+    resources.jobIds.push(job.id);
     return { id: job.id, printerId: printer.id, fileName };
-  });
 }
 
 async function probeDeniedQueueSubscription(
@@ -338,6 +368,7 @@ test.describe('Queue realtime authentication — Emulator', () => {
 
   test('restores subscriptions, rejects unauthorized groups, drains gaps, and refetches queue data', async ({
     page,
+    queueResources,
   }) => {
     test.setTimeout(60_000);
     const clientFrames: CapturedFrame[] = [];
@@ -479,7 +510,7 @@ test.describe('Queue realtime authentication — Emulator', () => {
       result: undefined,
     });
 
-    const reconnectJob = await createQueueJob(page);
+    const reconnectJob = await createQueueJob(page, queueResources);
     await expect.poll(() => subscriptionResources.some((resources) =>
       resources.jobIds.includes(reconnectJob.id)
     ), { timeout: 20_000 }).toBe(true);
@@ -527,7 +558,7 @@ test.describe('Queue realtime authentication — Emulator', () => {
 
     dropQueueEvents = true;
     const droppedQueueEventBaseline = droppedQueueEvents;
-    const gapJob = await createQueueJob(page);
+    const gapJob = await createQueueJob(page, queueResources);
     await expect.poll(() => subscriptionResources.some((resources) =>
       resources.jobIds.includes(gapJob.id)
     ), { timeout: 20_000 }).toBe(true);
@@ -585,6 +616,7 @@ test.describe('Queue realtime authentication — Emulator', () => {
 
   test('discovers a server-created queue job after connect and refetches queue data', async ({
     page,
+    queueResources,
   }) => {
     test.setTimeout(45_000);
     const clientFrames: CapturedFrame[] = [];
@@ -655,7 +687,7 @@ test.describe('Queue realtime authentication — Emulator', () => {
       stats: queueStatsResponses,
     };
 
-    const job = await createQueueJob(page);
+    const job = await createQueueJob(page, queueResources);
 
     await expect
       .poll(() => resourceResponses, { timeout: 15_000 })

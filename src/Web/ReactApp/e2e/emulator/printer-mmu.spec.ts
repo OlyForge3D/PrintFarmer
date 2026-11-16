@@ -63,10 +63,16 @@ test.describe('Printer MMU controls — Moonraker', () => {
   });
 
   test.afterEach(async ({ page, request, moonrakerSeedReady }) => {
-    await configureMmuTopology(page, moonrakerSeedReady.get(MOONRAKER_PRINTERS.ready)!.id, false);
     const control = createMoonrakerControl(request);
-    await control.setMmuMode('ready', 'None');
-    await control.reset('ready');
+    try {
+      await configureMmuTopology(page, moonrakerSeedReady.get(MOONRAKER_PRINTERS.ready)!.id, false);
+    } finally {
+      try {
+        await control.setMmuMode('ready', 'None');
+      } finally {
+        await control.reset('ready');
+      }
+    }
   });
 
   test('Happy Hare gates render and load/eject through the real backend', async ({ page }) => {

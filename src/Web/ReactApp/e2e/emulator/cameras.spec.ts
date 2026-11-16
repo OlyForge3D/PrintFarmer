@@ -1,4 +1,4 @@
-import { test, expect } from '../fixtures/emulator-setup';
+import { test, expect, getStoredAuthToken } from '../fixtures/emulator-setup';
 
 const CAMERA_STREAM_ROUTE = '**/api/cameras/*/stream';
 
@@ -20,6 +20,8 @@ test.describe('Cameras — Emulator', () => {
   test.beforeEach(async ({ page }) => {
     consoleErrors = [];
     page.on('pageerror', (error) => consoleErrors.push(error.message));
+    const token = await getStoredAuthToken(page);
+    expect(Boolean(token), 'Camera stream fixture requires an authenticated session').toBe(true);
     const jpeg = await page.evaluate(() => {
       const canvas = document.createElement('canvas');
       canvas.width = canvas.height = 2;
@@ -30,6 +32,10 @@ test.describe('Cameras — Emulator', () => {
       return canvas.toDataURL('image/jpeg').split(',')[1];
     });
     await page.route(CAMERA_STREAM_ROUTE, async (route) => {
+      expect(
+        route.request().headers().authorization === `Bearer ${token}`,
+        'Camera stream request must carry the current session bearer token',
+      ).toBe(true);
       await route.fulfill({
         status: 200,
         contentType: 'image/jpeg',
