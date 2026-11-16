@@ -1,4 +1,4 @@
-import { test as emulatorTest, expect, API_BASE_URL, getStoredAuthToken } from '../fixtures/emulator-setup';
+import { test as emulatorTest, expect, API_BASE_URL, getStoredAuthToken, dismissTourIfVisible } from '../fixtures/emulator-setup';
 import type { Page } from '@playwright/test';
 
 type SignalRFrame = Record<string, unknown> & {
@@ -41,23 +41,30 @@ const test = emulatorTest.extend<{ queueResources: QueueTestResources }>({
     await use(resources);
     const token = await getStoredAuthToken(page);
     const headers = { Authorization: `Bearer ${token}` };
-    const jobCleanup = await Promise.allSettled(resources.jobIds.map(async id => {
+    const cleanupJob = async (id: string) => {
       const url = `${API_BASE_URL}/api/job-queue/${id}`;
-      const current = await page.request.get(url, { headers });
-      expect(current.status(), 'Created queue job must remain available for cleanup').toBe(200);
-      const etag = current.headers().etag;
-      expect(Boolean(etag), 'Queue cleanup requires the current revision').toBe(true);
-      const removed = await page.request.delete(url, {
-        headers: { ...headers, 'If-Match': etag },
-      });
-      expect(removed.status(), 'Created queue job must be removed').toBe(204);
+      await expect.poll(async () => {
+        const current = await page.request.get(url, { headers });
+        expect(current.status(), 'Created queue job must remain available for cleanup').toBe(200);
+        const etag = current.headers().etag;
+        expect(Boolean(etag), 'Queue cleanup requires the current revision').toBe(true);
+        const removed = await page.request.delete(url, {
+          headers: { ...headers, 'If-Match': etag },
+        });
+        expect([204, 412], 'Only a stale revision permits another cleanup attempt').toContain(removed.status());
+        return removed.status();
+      }, { timeout: 10_000 }).toBe(204);
       expect((await page.request.get(url, { headers })).status()).toBe(404);
-    }));
+    };
+    const jobCleanup: PromiseSettledResult<void>[] = [];
+    for (const id of resources.jobIds) {
+      jobCleanup.push(...await Promise.allSettled([cleanupJob(id)]));
+    }
     const fileCleanup = await Promise.allSettled(resources.fileIds.map(async id => {
       const url = `${API_BASE_URL}/api/gcode-files/${id}`;
       const removed = await page.request.delete(url, { headers });
       expect(removed.status(), 'Uploaded queue fixture must be removed').toBe(204);
-      expect((await page.request.get(url, { headers })).status()).toBe(404);
+      expect((await page.request.get(`${API_BASE_URL}/api/gcode-files/file/${id}`, { headers })).status()).toBe(404);
     }));
     const failures = [...jobCleanup, ...fileCleanup]
       .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
@@ -475,6 +482,8 @@ test.describe('Queue realtime authentication — Emulator', () => {
     );
 
     await page.goto('/printQueue');
+    await dismissTourIfVisible(page);
+    await page.getByRole('button', { name: 'List view', exact: true }).click();
     await page.waitForLoadState('networkidle');
     await expect.poll(() => hubSockets.length).toBeGreaterThan(0);
     await expect.poll(() => subscriptionResources.length).toBeGreaterThan(0);
@@ -677,6 +686,8 @@ test.describe('Queue realtime authentication — Emulator', () => {
     );
 
     await page.goto('/printQueue');
+    await dismissTourIfVisible(page);
+    await page.getByRole('button', { name: 'List view', exact: true }).click();
     await page.waitForLoadState('networkidle');
     await expect.poll(() => hubSockets.length).toBeGreaterThan(0);
     await expect.poll(() => subscriptionResources.length).toBeGreaterThan(0);
