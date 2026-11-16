@@ -19,6 +19,8 @@ movement, heater presets, and filament commands. Both render `PrinterActionBar`,
 `MovementControlSection`, and `TemperatureControlSection`; layout variants preserve
 the card's inline controls and the sidebar's separate collapsible sections.
 Filament macros continue through the shared materials controls.
+Movement-pad and print-action buttons have at least 44px touch targets below the
+small-screen breakpoint; desktop controls retain their compact sizing.
 
 Cancel opens the same `CancelPrintConfirmation` on either surface. Dismissing it
 sends no command; confirming sends one cancellation request. Changing the selected

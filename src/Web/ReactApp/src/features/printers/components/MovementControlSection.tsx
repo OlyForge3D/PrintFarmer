@@ -116,7 +116,7 @@ export function MovementControlSection({
           <div className={layout === 'sidebar' ? 'text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide' : 'text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1'}>
             Move
           </div>
-          <div className="flex gap-2 items-start">
+          <div className="flex gap-2 items-start max-sm:flex-wrap max-sm:[&_button]:min-h-11 max-sm:[&_button]:min-w-11">
             {/* XY Pad */}
             <div className="grid grid-cols-3 grid-rows-3 gap-1 w-fit">
               {/* Top row */}
@@ -255,7 +255,7 @@ export function MovementControlSection({
                 >
                   E+
                 </ControlPadButton>
-                <div className="h-8 w-8" />
+                <div className="h-8 w-8 max-sm:h-11 max-sm:w-11" />
                 <ControlPadButton
                   disabled={movementActionPending || !canExtrude}
                   onClick={() => onExtrude('retract')}

@@ -33,7 +33,7 @@ export function PrinterActionBar({
       <div className={layout === 'sidebar' ? 'text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide' : 'text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1'}>
         Control
       </div>
-      <div className="grid grid-cols-3 gap-1 w-fit">
+      <div className="grid grid-cols-3 gap-1 w-fit max-sm:[&>button]:min-h-11 max-sm:[&>button]:min-w-11">
         <ControlPadButton
           disabled={controlActionPending || !canPauseOrResume}
           onClick={() => onControlAction(isPaused ? 'resume' : 'pause')}
