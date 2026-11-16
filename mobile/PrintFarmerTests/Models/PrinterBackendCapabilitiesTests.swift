@@ -10,6 +10,7 @@ final class PrinterBackendCapabilitiesTests: XCTestCase {
             XCTAssertFalse(caps.supportsBedTemperature)
             XCTAssertFalse(caps.supportsHoming)
             XCTAssertFalse(caps.supportsAbsoluteMovement)
+            XCTAssertEqual(caps.movementSupportStatus, .unknown)
             XCTAssertFalse(caps.supportsDisableMotors)
             XCTAssertFalse(caps.supportsExtrusion)
             XCTAssertFalse(caps.supportsZOffset)
@@ -238,11 +239,23 @@ final class PrinterBackendCapabilitiesTests: XCTestCase {
         """.utf8)
         let wire = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: missingStatus)
         XCTAssertEqual(PrinterBackendCapabilities(wire: wire).movementSupportStatus, .unknown)
+
+        for (backend, expected) in [
+            ("PrusaLink", PrinterMovementSupportStatus.unknown),
+            ("Moonraker", .unsupported)
+        ] {
+            let json = Data("""
+            {"printerId":"\(TestData.testUUID)","backend":"\(backend)"}
+            """.utf8)
+            let wire = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: json)
+            XCTAssertEqual(PrinterBackendCapabilities(wire: wire).movementSupportStatus, expected, backend)
+        }
     }
 
     func testGenericFlagsDoNotEnableSpecificOperations() throws {
         let json = Data("""
         {"printerId":"\(TestData.testUUID)","backend":"Moonraker",
+         "movementSupportStatus":"Unknown",
          "supportsMovement":true,"supportsTemperatureControl":true,
          "supportsControlOperations":true,"supportsFilamentControl":true}
         """.utf8)

@@ -48,6 +48,7 @@ struct PrinterBackendCapabilities: Codable, Equatable, Sendable {
         PrinterBackendCapabilities(
             supportsMovement: false, supportsTemperatureControl: false,
             supportsBedTemperature: false, supportsFanControl: false,
+            movementSupportStatus: .unknown,
             supportsHoming: false, supportedAxes: []
         )
     }
@@ -63,7 +64,8 @@ extension PrinterBackendCapabilities {
             supportsHoming: wire.supportsHoming == true,
             supportedAxes: (wire.supportedAxes ?? []).map { $0.uppercased() }.filter { ["X", "Y", "Z"].contains($0) }
         )
-        movementSupportStatus = wire.movementSupportStatus ?? .unknown
+        movementSupportStatus = wire.movementSupportStatus
+            ?? (wire.backend == .prusaLink ? .unknown : .unsupported)
         supportsAbsoluteMovement = wire.supportsAbsoluteMovement == true
         supportsDisableMotors = wire.supportsDisableMotors == true
         supportsExtrusion = wire.supportsExtrusion == true

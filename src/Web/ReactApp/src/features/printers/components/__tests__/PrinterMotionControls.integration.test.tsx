@@ -454,7 +454,7 @@ describe.each<Surface>(["detail", "sidebar"])(
         movementSupportStatus="Unknown"
         overrides={{ backend: PrinterBackend.PrusaLink }}
       />);
-      expect(screen.getByText("PrintFarmer could not confirm remote Home and jog support. Check the printer connection and credentials, then reload this page to check again. Use the printer's physical controls while remote motion is unavailable.")).toBeVisible();
+      expect(screen.getByText("PrintFarmer could not confirm remote Home and jog support. Check the printer connection and credentials. Use the printer's physical controls while remote motion is unavailable.")).toBeVisible();
       for (const button of screen.getAllByRole('button', { name: /Home all axes|Home X\/Y|Home Z|Jog [XYZ]/ })) {
         expect(button).toBeDisabled();
         fireEvent.click(button);

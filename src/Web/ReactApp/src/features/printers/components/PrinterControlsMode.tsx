@@ -18,7 +18,7 @@ export function PrinterMotionHelp({
   }
   if (supportStatus === 'Unknown') return (
     <p role="status" className="mt-2 text-xs text-pf-text-secondary">
-      PrintFarmer could not confirm remote Home and jog support. Check the printer connection and credentials, then reload this page to check again. Use the printer&apos;s physical controls while remote motion is unavailable.
+      PrintFarmer could not confirm remote Home and jog support. Check the printer connection and credentials. Use the printer&apos;s physical controls while remote motion is unavailable.
     </p>
   );
   if (supportStatus === 'Unsupported') return (

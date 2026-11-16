@@ -341,7 +341,7 @@ struct PrinterInstrumentPanelControls: View {
 
         switch viewModel.capabilities?.movementSupportStatus ?? .unknown {
         case .unknown:
-            return "PrintFarmer could not confirm remote Home and jog support. Check the printer connection and credentials, then reload this page to check again. Use the printer's physical controls while remote motion is unavailable."
+            return "PrintFarmer could not confirm remote Home and jog support. Check the printer connection and credentials. Use the printer's physical controls while remote motion is unavailable."
         case .unsupported:
             return "Remote Home and jog controls are not supported by this printer's API. Use the printer's physical controls."
         case .supported:
