@@ -60,15 +60,9 @@ async function openSyntheticHarvest(page: Page) {
       path: new URL(request.url()).pathname,
     };
     if (request.method() !== 'GET') {
-      if (
-        request.method() !== 'POST' ||
-        (evidence.path !== '/api/parts-inventory' &&
-          !/^\/api\/job-queue\/[^/]+\/harvest$/.test(evidence.path))
-      ) {
-        unexpectedMutations.push(evidence);
-        await route.abort('blockedbyclient');
-        return;
-      }
+      unexpectedMutations.push(evidence);
+      await route.abort('blockedbyclient');
+      return;
     }
     await route.continue();
   });
