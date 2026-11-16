@@ -1025,6 +1025,34 @@ final class PrinterDetailControlsSnapshotTests: XCTestCase {
         }
     }
 
+    func test_instrumentPanel_unknownAndUnsupportedMovementStatus_beforeCopyEvidence() async throws {
+        for status in ["Unknown", "Unsupported"] {
+            let printer = try makePrinter(backend: .prusaLink)
+            let caps = try wireCapabilities(
+                backend: "PrusaLink",
+                operationFields: """
+                "supportsRelativeMovement": false, "supportsAbsoluteMovement": false,
+                "supportsHoming": false, "supportedAxes": [],
+                "movementSupportStatus": "\(status)"
+                """
+            )
+            let service = makeService(caps: caps)
+            let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+            await model.loadCapabilities()
+            let (window, controller) = install(PrinterInstrumentPanelControls(printer: printer, viewModel: model))
+            defer { window.isHidden = true; model.deactivate() }
+            try await settle(controller)
+
+            XCTAssertFalse(caps.supportsMovement)
+            XCTAssertTrue(
+                VisibleText.collect(in: controller.view).joined(separator: "\n")
+                    .contains("Motion controls are unavailable on this printer."),
+                "\(status) currently renders the same generic motion-unavailable copy"
+            )
+            attachPanelReview(controller, scenario: "R3845-01-before-\(status)")
+        }
+    }
+
     func test_instrumentPanel_loadingCapabilitiesCannotDispatchAndResolvesWithoutRemount() async throws {
         let printer = try makePrinter(backend: .octoPrint)
         let service = makeService(caps: Self.layoutCaps)
