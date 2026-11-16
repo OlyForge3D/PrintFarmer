@@ -65,7 +65,7 @@ test.describe('Printer motion feedback without physical commands', () => {
   for (const state of [
     {
       name: 'unknown',
-      message: "PrintFarmer could not confirm remote Home and jog support. Check the printer connection and credentials, then reload this page to check again. Use the printer's physical controls while remote motion is unavailable.",
+      message: "PrintFarmer could not confirm remote Home and jog support. Check the printer connection and credentials. Use the printer's physical controls while remote motion is unavailable.",
     },
     {
       name: 'unsupported',
