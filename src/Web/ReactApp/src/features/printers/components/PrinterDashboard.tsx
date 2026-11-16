@@ -163,30 +163,21 @@ export const PrinterDashboard: React.FC = () => {
         </div>
       ) : (
         /* Main Dashboard Content */
-        <div className="space-y-6">
-          {/* Row 1: Tasks */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start [&>*]:min-w-0" data-testid="dashboard-widgets">
           <div data-tour="tasks-widget">
             <TasksWidget />
           </div>
-
-          {/* Row 2: Active Jobs + Recent Prints + Farm Cost */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div data-tour="active-jobs">
-              <ActiveJobsWidget />
-            </div>
-            <div data-tour="recent-prints">
-              <RecentPrintsWidget />
-            </div>
-            <FarmCostSummaryWidget />
+          <div data-tour="active-jobs">
+            <ActiveJobsWidget />
           </div>
-
-          {/* Row 3: Maintenance Alerts + Background Services */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div data-tour="services-widget">
-              <BackgroundServicesWidget maxServices={8} />
-            </div>
-            <MaintenanceAlertsWidget />
+          <div data-tour="recent-prints">
+            <RecentPrintsWidget />
           </div>
+          <FarmCostSummaryWidget />
+          <div data-tour="services-widget">
+            <BackgroundServicesWidget maxServices={8} />
+          </div>
+          <MaintenanceAlertsWidget />
         </div>
       )}
     </PageTemplate>

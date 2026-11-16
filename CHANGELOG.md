@@ -83,6 +83,11 @@
 
 ### Fixes
 
+- Keep Printer Dashboard maintenance/configuration banner dismissals across
+  refresh without hiding newer catalog revisions; respect dismissed
+  profile-import tasks on periodic scans. Clarify missing-import tasks and use a
+  consistent responsive three-column widget grid (#3837).
+
 - Gate web jog and coordinate entry on affirmative per-axis homing telemetry.
   Discover PrusaLink motion support per printer without sending motion, disable
   unsupported CORE One L/Buddy Home and jog controls, and distinguish explicit

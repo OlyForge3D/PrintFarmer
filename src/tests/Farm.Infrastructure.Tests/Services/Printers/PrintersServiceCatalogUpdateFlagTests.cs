@@ -74,8 +74,9 @@ public class PrintersServiceCatalogUpdateFlagTests
     {
         // True-positive case must still work: a real, prior model sync exists, but the model was
         // updated again afterwards, so a catalog update genuinely is available.
+        DateTime revision = DateTime.UtcNow.AddMinutes(-1);
         (AppDbContext db, Guid printerId) = await SeedAsync(
-            modelUpdatedAt: DateTime.UtcNow,
+            modelUpdatedAt: revision,
             serviceStateExists: true,
             lastModelSyncAt: DateTime.UtcNow.AddDays(-1));
 
@@ -86,6 +87,15 @@ public class PrintersServiceCatalogUpdateFlagTests
         summaries.Should().ContainSingle(s => s.Id == printerId)
             .Which.HasCatalogUpdate.Should().BeTrue(
                 "the model was updated after the printer's last real model sync, so a catalog update genuinely is available");
+        summaries.Single().CatalogUpdateRevision.Should().Be(revision);
+
+        PrinterModel model = await db.PrinterModels.SingleAsync();
+        model.Name = "Updated model template";
+        await db.SaveChangesAsync();
+
+        PrinterSummaryDto updated = (await service.GetAllSummaryDtosAsync(CancellationToken.None)).Single();
+        updated.HasCatalogUpdate.Should().BeTrue();
+        updated.CatalogUpdateRevision.Should().Be(model.UpdatedAt).And.BeAfter(revision);
     }
 
     [Fact]

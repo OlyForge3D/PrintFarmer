@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
@@ -78,6 +78,7 @@ interface TaskItemProps {
   onSkip: (taskId: string) => void;
   onDismiss: (taskId: string) => void;
   pendingActionTaskIds: ReadonlySet<string>;
+  profileImportDismissDescriptionId: string;
 }
 
 function TaskItem({
@@ -87,12 +88,14 @@ function TaskItem({
   onSkip,
   onDismiss,
   pendingActionTaskIds,
+  profileImportDismissDescriptionId,
 }: TaskItemProps) {
   const details = getShiftTaskDetails(task);
   const anchorHint = formatTaskAnchorHint(task);
   const sourceLabel = describeTaskSource(task.sourceKind);
   const isActionable = !details.isUnknownKind;
   const isRowBusy = pendingActionTaskIds.has(task.id);
+  const isProfileImport = task.taskType === TaskType.ProfileImport;
 
   const handleActivate = () => {
     onNavigate(task);
@@ -100,13 +103,15 @@ function TaskItem({
 
   const outerClasses = [
     'flex items-start gap-3 p-3 rounded-lg transition-colors group',
+    isProfileImport ? 'flex-wrap' : '',
     isRowBusy ? 'opacity-60' : '',
   ]
     .filter(Boolean)
     .join(' ');
 
   const buttonClasses = [
-    'flex-1 flex items-start gap-3 text-left rounded-lg transition-colors',
+    'flex-1 min-w-0 flex items-start gap-3 text-left rounded-lg transition-colors',
+    isProfileImport ? 'basis-full' : '',
     isActionable ? 'hover:bg-pf-bg-2 cursor-pointer' : '',
     'disabled:cursor-default disabled:opacity-100',
   ]
@@ -137,7 +142,7 @@ function TaskItem({
           </div>
         </div>
         <div className="flex-1 min-w-0">
-          <h4 className="text-sm font-medium text-pf-text-primary truncate">{task.title}</h4>
+          <h4 className={`text-sm font-medium text-pf-text-primary ${isProfileImport ? 'break-words' : 'truncate'}`}>{task.title}</h4>
           <span className="sr-only"> — {sourceLabel}</span>
           {task.description && (
             <p className="text-xs text-pf-text-secondary mt-0.5 line-clamp-2">{task.description}</p>
@@ -164,7 +169,7 @@ function TaskItem({
         </div>
       </button>
 
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity shrink-0">
+      <div className="flex items-center gap-1 ml-auto opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity shrink-0">
         <Button
           variant="subtle"
           size="sm"
@@ -202,8 +207,9 @@ function TaskItem({
             e.stopPropagation();
             onDismiss(task.id);
           }}
-          title="Dismiss task"
+          title={isProfileImport ? 'Dismiss import task farm-wide for this model/printer group' : 'Dismiss task'}
           aria-label={`Dismiss ${task.title}`}
+          aria-describedby={isProfileImport ? profileImportDismissDescriptionId : undefined}
           className="h-7 w-7 p-0"
           disabled={isRowBusy}
           data-testid="tasks-widget-dismiss"
@@ -269,6 +275,7 @@ function countTasks(result: ShiftPlanResult | undefined): number {
 export function TasksWidget() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const profileImportDismissDescriptionId = useId();
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState('');
@@ -422,6 +429,14 @@ export function TasksWidget() {
           data-testid="tasks-widget-list"
           data-mode={data?.mode ?? 'unknown'}
         >
+          {groups.some(group => group.tasks.some(task => task.taskType === TaskType.ProfileImport)) && (
+            <div className="px-3 pt-3 pb-1 space-y-1 text-xs text-pf-text-secondary">
+              <p>Profile import tasks mean missing imported profiles, not profile updates.</p>
+              <p id={profileImportDismissDescriptionId}>
+                Dismissing an import task hides it farm-wide for this model/printer group, not just for you.
+              </p>
+            </div>
+          )}
           {groups.map((group) => (
             <section
               key={group.key}
@@ -444,6 +459,7 @@ export function TasksWidget() {
                     onSkip={(id) => skipMutation.mutate(id)}
                     onDismiss={(id) => dismissMutation.mutate(id)}
                     pendingActionTaskIds={pendingActionTaskIds}
+                    profileImportDismissDescriptionId={profileImportDismissDescriptionId}
                   />
                 ))}
               </div>

@@ -39,6 +39,12 @@ clock; existing schedules and UTC planning hours are unchanged.
 ✅ **Printer Discovery** - Auto-detect Moonraker and PrusaLink printers on network  
 ✅ **Cameras** - First-class `/cameras` page (all, by location, by printer); cameras link to many printers and are auto-discovered and kept in sync from printer backends  
 
+The Printer Dashboard uses a responsive three-column widget grid. Maintenance and
+configuration banner dismissals survive refresh for the same signed-in user and
+browser; new alerts or catalog revisions reappear. Profile-import tasks indicate
+missing imported slicer profiles, not available upgrades. See
+[dashboard dismissal behavior](docs/UI.md#dashboard-home) for scope and limitations.
+
 Camera cards prioritize the image, camera name, and compact icon controls.
 Snapshot/Stream icons have tooltips and accessible labels; both controls appear
 only when both modes are supported. Secondary metadata, probe health, preview
