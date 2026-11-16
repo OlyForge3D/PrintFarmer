@@ -64,8 +64,16 @@ extension PrinterBackendCapabilities {
             supportsHoming: wire.supportsHoming == true,
             supportedAxes: (wire.supportedAxes ?? []).map { $0.uppercased() }.filter { ["X", "Y", "Z"].contains($0) }
         )
-        movementSupportStatus = wire.movementSupportStatus
-            ?? (wire.backend == .prusaLink ? .unknown : .unsupported)
+        if let movementSupportStatus = wire.movementSupportStatus {
+            self.movementSupportStatus = movementSupportStatus
+        } else {
+            switch wire.backend {
+            case .prusaLink?, .unknown?, nil:
+                self.movementSupportStatus = .unknown
+            default:
+                self.movementSupportStatus = .unsupported
+            }
+        }
         supportsAbsoluteMovement = wire.supportsAbsoluteMovement == true
         supportsDisableMotors = wire.supportsDisableMotors == true
         supportsExtrusion = wire.supportsExtrusion == true

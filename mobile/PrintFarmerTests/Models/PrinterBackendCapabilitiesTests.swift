@@ -242,7 +242,10 @@ final class PrinterBackendCapabilitiesTests: XCTestCase {
 
         for (backend, expected) in [
             ("PrusaLink", PrinterMovementSupportStatus.unknown),
-            ("Moonraker", .unsupported)
+            ("Moonraker", .unsupported),
+            ("SDCP", .unsupported),
+            ("OctoPrint", .unsupported),
+            ("FlashForge", .unsupported)
         ] {
             let json = Data("""
             {"printerId":"\(TestData.testUUID)","backend":"\(backend)"}
@@ -250,6 +253,12 @@ final class PrinterBackendCapabilitiesTests: XCTestCase {
             let wire = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: json)
             XCTAssertEqual(PrinterBackendCapabilities(wire: wire).movementSupportStatus, expected, backend)
         }
+
+        let futureBackend = Data("""
+        {"printerId":"\(TestData.testUUID)","backend":"FutureBackend"}
+        """.utf8)
+        let futureWire = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: futureBackend)
+        XCTAssertEqual(PrinterBackendCapabilities(wire: futureWire).movementSupportStatus, .unknown)
     }
 
     func testGenericFlagsDoNotEnableSpecificOperations() throws {
