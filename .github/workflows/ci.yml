@@ -592,6 +592,16 @@ jobs:
         working-directory: src/Web/ReactApp
         run: npm run build
 
+      - name: Install Playwright Chromium
+        working-directory: src/Web/ReactApp
+        run: npx playwright install --with-deps chromium
+
+      - name: Test synthetic harvest outcomes
+        working-directory: src/Web/ReactApp
+        env:
+          CI: 1
+        run: npx playwright test e2e/emulator/harvest-outcomes.spec.ts --project=chromium --workers=1
+
       # Mirrors the frontend Docker build's notices step (#3148): fails when a
       # production npm package ships no license text and no reviewed fallback
       # in compliance/dependency-license-policy.json matches its exact version,
