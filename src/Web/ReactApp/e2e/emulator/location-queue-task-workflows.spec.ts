@@ -3,6 +3,7 @@ import type { Page, Route } from '@playwright/test';
 
 const ROOT_LOCATION_ID = 'location-root';
 const CHILD_LOCATION_ID = 'location-child';
+const TARGET_LOCATION_ID = 'location-target';
 const PRINTER_ID = 'printer-synthetic';
 const JOB_ID = 'job-synthetic';
 
@@ -32,6 +33,18 @@ const locationTree = () => [
       },
     ],
   },
+  {
+    id: TARGET_LOCATION_ID,
+    name: 'Annex',
+    description: 'Synthetic move target outside Warehouse',
+    parentId: null,
+    path: '/Annex',
+    depth: 0,
+    sortOrder: 1,
+    printerCount: 0,
+    totalPrinterCount: 0,
+    children: [],
+  },
 ];
 
 const locations = () => [
@@ -43,6 +56,20 @@ const locations = () => [
     path: '/Warehouse',
     depth: 0,
     sortOrder: 0,
+    printerCount: 0,
+    totalPrinterCount: 0,
+    createdAt: '2026-01-01T00:00:00Z',
+    modifiedAt: '2026-01-01T00:00:00Z',
+    isActive: true,
+  },
+  {
+    id: TARGET_LOCATION_ID,
+    name: 'Annex',
+    description: 'Synthetic move target outside Warehouse',
+    parentId: null,
+    path: '/Annex',
+    depth: 0,
+    sortOrder: 1,
     printerCount: 0,
     totalPrinterCount: 0,
     createdAt: '2026-01-01T00:00:00Z',
@@ -103,12 +130,15 @@ async function interceptLocationWorkflow(page: Page): Promise<{
   await page.route(`**/api/locations/${CHILD_LOCATION_ID}/printers/subtree`, (route) =>
     fulfillJson(route, [])
   );
+  await page.route(`**/api/locations/${TARGET_LOCATION_ID}/printers/subtree`, (route) =>
+    fulfillJson(route, [])
+  );
   await page.route(`**/api/locations/${ROOT_LOCATION_ID}/move`, async (route) => {
     moveRequests.push(JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>);
     await fulfillJson(route, {
       ...locations()[0],
-      parentId: CHILD_LOCATION_ID,
-      path: '/North Wing/Warehouse',
+      parentId: TARGET_LOCATION_ID,
+      path: '/Annex/Warehouse',
     });
   });
   await page.route(`**/api/printers/${PRINTER_ID}/location`, async (route) => {
@@ -137,10 +167,11 @@ test.describe('Location and queue task workflows — Emulator', () => {
     await search.fill('does-not-exist');
     await expect(page.getByText('No locations found')).toBeVisible();
     await search.fill('');
-    await page.getByRole('treeitem', { name: /North Wing/ }).click();
+    await expect(page.getByRole('treeitem', { name: /North Wing/ })).toHaveCount(0);
+    await page.getByRole('treeitem', { name: /Annex/ }).click();
     await page.getByRole('button', { name: 'Move location' }).click();
 
-    await expect.poll(() => moveRequests).toEqual([{ newParentId: CHILD_LOCATION_ID }]);
+    await expect.poll(() => moveRequests).toEqual([{ newParentId: TARGET_LOCATION_ID }]);
 
     await page.getByRole('tab', { name: 'Assignments' }).click();
     const syntheticPrinter = page.locator('[draggable="true"]').filter({ hasText: 'Synthetic Printer' });
@@ -155,8 +186,9 @@ test.describe('Location and queue task workflows — Emulator', () => {
 
   test('schedules a repeated queue job with deterministic recurrence payload', async ({ page }) => {
     const scheduleRequests: Array<Record<string, unknown>> = [];
+    const scheduledJobs: Array<Record<string, unknown>> = [];
 
-    await page.route('**/api/job-scheduling/scheduled*', (route) => fulfillJson(route, []));
+    await page.route('**/api/job-scheduling/scheduled*', (route) => fulfillJson(route, scheduledJobs));
     await page.route('**/api/job-scheduling/timezones', (route) =>
       fulfillJson(route, [{ id: 'UTC', displayName: 'Coordinated Universal Time', offset: '+00:00' }])
     );
@@ -169,7 +201,7 @@ test.describe('Location and queue task workflows — Emulator', () => {
     );
     await page.route(`**/api/job-scheduling/${JOB_ID}/schedule`, async (route) => {
       scheduleRequests.push(JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>);
-      await fulfillJson(route, {
+      const scheduledJob = {
         id: 'schedule-synthetic',
         jobId: JOB_ID,
         jobName: 'Synthetic queue job',
@@ -185,7 +217,9 @@ test.describe('Location and queue task workflows — Emulator', () => {
         isPaused: false,
         requiresOperatorReauthorization: false,
         status: 'active',
-      });
+      };
+      scheduledJobs.push(scheduledJob);
+      await fulfillJson(route, scheduledJob);
     });
 
     await page.goto('/scheduling');
@@ -204,6 +238,32 @@ test.describe('Location and queue task workflows — Emulator', () => {
       recurrencePattern: 'Daily',
       recurrenceInterval: 2,
     }]);
+    await expect(page.getByText('Daily × 2')).toBeVisible();
+  });
+
+  test('keeps location move state and reports an intercepted mutation failure', async ({ page }) => {
+    await page.route('**/api/locations/tree', (route) => fulfillJson(route, locationTree()));
+    await page.route('**/api/locations', (route) =>
+      route.request().method() === 'GET'
+        ? fulfillJson(route, locations())
+        : fulfillJson(route, {})
+    );
+    await page.route(`**/api/locations/${ROOT_LOCATION_ID}/printers/subtree`, (route) =>
+      fulfillJson(route, [])
+    );
+    await page.route(`**/api/locations/${ROOT_LOCATION_ID}/move`, (route) =>
+      fulfillJson(route, { message: 'Synthetic move rejected' }, 409)
+    );
+
+    await page.goto('/locations');
+    await page.getByRole('button', { name: 'Manage' }).click();
+    await page.getByRole('row', { name: /Warehouse/ }).getByRole('button', { name: 'Move' }).click();
+    await page.getByRole('button', { name: /None \(top-level\)/ }).last().click();
+    await page.getByRole('treeitem', { name: /Annex/ }).click();
+    await page.getByRole('button', { name: 'Move location' }).click();
+
+    await expect(page.getByRole('alert')).toContainText('Failed to move location');
+    await expect(page.getByRole('dialog', { name: /Move Warehouse/ })).toBeVisible();
   });
 
   test('completes, skips, and dismisses synthetic tasks without mutating farm state', async ({ page }) => {
@@ -283,6 +343,7 @@ test.describe('Location and queue task workflows — Emulator', () => {
 
     await completeRow.getByTestId('tasks-widget-complete').click();
     await expect.poll(() => actionRequests).toContain('complete:task-complete');
+    await expect(completeRow).toHaveCount(0);
     await skipRow.getByTestId('tasks-widget-skip').click();
     await expect.poll(() => actionRequests).toContain('skip:task-skip');
     await dismissRow.getByTestId('tasks-widget-dismiss').click();
