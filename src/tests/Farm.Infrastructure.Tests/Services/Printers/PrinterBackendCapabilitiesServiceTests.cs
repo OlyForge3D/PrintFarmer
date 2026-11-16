@@ -859,6 +859,18 @@ public class PrinterBackendCapabilitiesServiceTests
     }
 
     [Fact]
+    public void MovementSupportStatus_DefaultMatchesMovementCapabilityEvidence()
+    {
+        var supported = new PrinterBackendCapabilitiesDto(
+            Guid.NewGuid(), "supported", PrinterBackend.Moonraker, SupportsMovement: true);
+        var unknown = new PrinterBackendCapabilitiesDto(
+            Guid.NewGuid(), "unknown", PrinterBackend.Moonraker);
+
+        Assert.Equal(PrinterMovementSupportStatus.Supported, supported.MovementSupportStatus);
+        Assert.Equal(PrinterMovementSupportStatus.Unknown, unknown.MovementSupportStatus);
+    }
+
+    [Fact]
     public void Serialize_AdditiveCapabilities_PreservesLegacyNamesAndUsesCamelCase()
     {
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);

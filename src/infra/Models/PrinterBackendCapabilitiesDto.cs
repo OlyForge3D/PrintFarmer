@@ -36,7 +36,9 @@ public record PrinterBackendCapabilitiesDto(
 {
     /// <summary>Whether movement support is confirmed, rejected, or could not be determined.</summary>
     public PrinterMovementSupportStatus MovementSupportStatus { get; init; } =
-        PrinterMovementSupportStatus.Unknown;
+        SupportsMovement
+            ? PrinterMovementSupportStatus.Supported
+            : PrinterMovementSupportStatus.Unknown;
 
     /// <summary>Whether the shared relative-move route has a verified implementation.</summary>
     public bool SupportsRelativeMovement { get; init; }
