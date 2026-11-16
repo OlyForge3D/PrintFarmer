@@ -67,6 +67,15 @@ async function openSyntheticHarvest(page: Page) {
     await route.continue();
   });
   await page.route('**/api/parts-inventory*', async (route) => {
+    if (route.request().method() !== 'GET') {
+      const request = route.request();
+      unexpectedMutations.push({
+        method: request.method(),
+        path: new URL(request.url()).pathname,
+      });
+      await route.abort('blockedbyclient');
+      return;
+    }
     await route.fulfill({ json: [] });
   });
 
