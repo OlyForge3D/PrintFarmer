@@ -1025,7 +1025,7 @@ final class PrinterDetailControlsSnapshotTests: XCTestCase {
         }
     }
 
-    func test_instrumentPanel_unknownAndUnsupportedMovementStatus_beforeCopyEvidence() async throws {
+    func test_instrumentPanel_unknownAndUnsupportedMovementStatus_usesDistinctCopy_andCapturesAfterEvidence() async throws {
         for status in ["Unknown", "Unsupported"] {
             let printer = try makePrinter(backend: .prusaLink)
             let caps = try wireCapabilities(
@@ -1044,12 +1044,16 @@ final class PrinterDetailControlsSnapshotTests: XCTestCase {
             try await settle(controller)
 
             XCTAssertFalse(caps.supportsMovement)
-            XCTAssertTrue(
-                VisibleText.collect(in: controller.view).joined(separator: "\n")
-                    .contains("Motion controls are unavailable on this printer."),
-                "\(status) currently renders the same generic motion-unavailable copy"
-            )
-            attachPanelReview(controller, scenario: "R3845-01-before-\(status)")
+            let visibleText = VisibleText.collect(in: controller.view).joined(separator: "\n")
+            let expected = status == "Unknown"
+                ? "PrintFarmer could not confirm remote Home and jog support. Check the printer connection and credentials, then reload this page to check again. Use the printer's physical controls while remote motion is unavailable."
+                : "Remote Home and jog controls are not supported by this printer's API. Use the printer's physical controls."
+            let other = status == "Unknown"
+                ? "Remote Home and jog controls are not supported by this printer's API. Use the printer's physical controls."
+                : "PrintFarmer could not confirm remote Home and jog support. Check the printer connection and credentials, then reload this page to check again. Use the printer's physical controls while remote motion is unavailable."
+            XCTAssertTrue(visibleText.contains(expected), "\(status) should render its specific motion-support explanation")
+            XCTAssertFalse(visibleText.contains(other), "\(status) should not render the other motion-support explanation")
+            attachPanelReview(controller, scenario: "R3845-01-after-\(status)")
         }
     }
 

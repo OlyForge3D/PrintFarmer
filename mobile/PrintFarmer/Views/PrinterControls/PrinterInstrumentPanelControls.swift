@@ -298,12 +298,25 @@ struct PrinterInstrumentPanelControls: View {
             PrinterControlCommandFeedback(viewModel: viewModel, section: .motion)
             if JogSubgroup.isHidden(for: viewModel.capabilities) {
                 if viewModel.printer.isOnline {
+                    let message: String
+                    if viewModel.capabilities == nil {
+                        message = "Checking motion support…"
+                    } else {
+                        switch viewModel.capabilities?.movementSupportStatus ?? .unknown {
+                        case .unknown:
+                            message = "PrintFarmer could not confirm remote Home and jog support. Check the printer connection and credentials, then reload this page to check again. Use the printer's physical controls while remote motion is unavailable."
+                        case .unsupported:
+                            message = "Remote Home and jog controls are not supported by this printer's API. Use the printer's physical controls."
+                        case .supported:
+                            message = "Motion controls are unavailable on this printer."
+                        }
+                    }
                     HStack(spacing: 8) {
                         Image(systemName: Self.moveEmptyStateSymbol)
                             .font(.subheadline)
                             .foregroundStyle(Color.pfTextTertiary)
                             .accessibilityHidden(true)
-                        Text(viewModel.capabilities == nil ? "Checking motion support…" : "Motion controls are unavailable on this printer.")
+                        Text(message)
                             .font(.footnote)
                             .foregroundStyle(Color.pfTextSecondary)
                             .fixedSize(horizontal: false, vertical: true)
