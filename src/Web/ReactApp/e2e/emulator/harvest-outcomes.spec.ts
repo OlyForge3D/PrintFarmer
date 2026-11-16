@@ -3,6 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 const operationKeyPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 type HarvestRequestBody = Record<string, unknown>;
+type ApiRequestEvidence = { method: string; path: string };
 
 const successResponse = (operationKey: string, alreadyHarvested = false) => ({
   printJobId: 'synthetic-job-1',
@@ -14,6 +15,17 @@ const successResponse = (operationKey: string, alreadyHarvested = false) => ({
 });
 
 async function openSyntheticHarvest(page: Page) {
+  const mutationRequests: ApiRequestEvidence[] = [];
+  const unexpectedMutations: ApiRequestEvidence[] = [];
+
+  page.on('request', (request) => {
+    if (request.url().includes('/api/') && request.method() !== 'GET') {
+      mutationRequests.push({
+        method: request.method(),
+        path: new URL(request.url()).pathname,
+      });
+    }
+  });
   await page.route('**/*', async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === '/') {
@@ -41,12 +53,32 @@ async function openSyntheticHarvest(page: Page) {
     }
     await route.continue();
   });
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const evidence = {
+      method: request.method(),
+      path: new URL(request.url()).pathname,
+    };
+    if (request.method() !== 'GET') {
+      if (
+        request.method() !== 'POST' ||
+        (evidence.path !== '/api/parts-inventory' &&
+          !/^\/api\/job-queue\/[^/]+\/harvest$/.test(evidence.path))
+      ) {
+        unexpectedMutations.push(evidence);
+        await route.abort('blockedbyclient');
+        return;
+      }
+    }
+    await route.continue();
+  });
   await page.route('**/api/parts-inventory*', async (route) => {
     await route.fulfill({ json: [] });
   });
 
   await page.goto('/');
   await expect(page.getByRole('dialog')).toBeVisible();
+  return { mutationRequests, unexpectedMutations };
 }
 
 async function interceptHarvest(
@@ -71,13 +103,7 @@ async function interceptHarvest(
 
 test.describe('Synthetic harvest outcomes', () => {
   test('wrong-bin override sends only the exact override request', async ({ page }) => {
-    const requests: string[] = [];
-    page.on('request', (request) => {
-      if (request.method() !== 'GET' && request.url().includes('/api/')) {
-        requests.push(new URL(request.url()).pathname);
-      }
-    });
-    await openSyntheticHarvest(page);
+    const { mutationRequests, unexpectedMutations } = await openSyntheticHarvest(page);
     const bodies = await interceptHarvest(page, [
       {
         status: 409,
@@ -103,15 +129,15 @@ test.describe('Synthetic harvest outcomes', () => {
       allowWrongBin: true,
       overrideReason: 'Bin relabeled after audit',
     });
-    expect(requests).toEqual([
-      '/api/job-queue/synthetic-job-1/harvest',
-      '/api/job-queue/synthetic-job-1/harvest',
+    expect(mutationRequests).toEqual([
+      { method: 'POST', path: '/api/job-queue/synthetic-job-1/harvest' },
+      { method: 'POST', path: '/api/job-queue/synthetic-job-1/harvest' },
     ]);
-    expect(requests.some((path) => /adjust|ledger|printer/i.test(path))).toBe(false);
+    expect(unexpectedMutations).toEqual([]);
   });
 
   test('manual mapping sends explicit outputs with one idempotency key', async ({ page }) => {
-    await openSyntheticHarvest(page);
+    const { mutationRequests, unexpectedMutations } = await openSyntheticHarvest(page);
     const bodies = await interceptHarvest(page, [
       {
         status: 409,
@@ -139,10 +165,15 @@ test.describe('Synthetic harvest outcomes', () => {
       outputs: [{ sku: 'SKU-MANUAL', quantity: 1 }],
       overrideReason: 'Verified manual count',
     });
+    expect(mutationRequests).toEqual([
+      { method: 'POST', path: '/api/job-queue/synthetic-job-1/harvest' },
+      { method: 'POST', path: '/api/job-queue/synthetic-job-1/harvest' },
+    ]);
+    expect(unexpectedMutations).toEqual([]);
   });
 
   test('feature-disabled response performs no retry or ledger mutation', async ({ page }) => {
-    await openSyntheticHarvest(page);
+    const { mutationRequests, unexpectedMutations } = await openSyntheticHarvest(page);
     const bodies = await interceptHarvest(page, [{
       status: 404,
       json: { code: 'featureDisabled', detail: 'Printed-parts inventory is not enabled.' },
@@ -152,10 +183,14 @@ test.describe('Synthetic harvest outcomes', () => {
     await expect(page.getByTestId('harvest-feature-disabled')).toBeVisible();
     await expect(page.getByRole('button', { name: /retry/i })).toHaveCount(0);
     expect(bodies).toEqual([{ operationKey: expect.stringMatching(operationKeyPattern) }]);
+    expect(mutationRequests).toEqual([
+      { method: 'POST', path: '/api/job-queue/synthetic-job-1/harvest' },
+    ]);
+    expect(unexpectedMutations).toEqual([]);
   });
 
   test('transient failure retries the exact same request', async ({ page }) => {
-    await openSyntheticHarvest(page);
+    const { mutationRequests, unexpectedMutations } = await openSyntheticHarvest(page);
     const bodies = await interceptHarvest(page, [
       { status: 503, json: { message: 'Synthetic transient failure.' } },
       { json: successResponse('synthetic-operation-key') },
@@ -167,10 +202,15 @@ test.describe('Synthetic harvest outcomes', () => {
     await expect(page.getByTestId('harvest-success')).toBeVisible();
     expect(bodies).toHaveLength(2);
     expect(bodies[1]).toEqual(bodies[0]);
+    expect(mutationRequests).toEqual([
+      { method: 'POST', path: '/api/job-queue/synthetic-job-1/harvest' },
+      { method: 'POST', path: '/api/job-queue/synthetic-job-1/harvest' },
+    ]);
+    expect(unexpectedMutations).toEqual([]);
   });
 
   test('idempotent replay returns already-harvested without duplicate adjustments', async ({ page }) => {
-    await openSyntheticHarvest(page);
+    const { mutationRequests, unexpectedMutations } = await openSyntheticHarvest(page);
     const bodies = await interceptHarvest(page, [
       { status: 503, json: { message: 'Synthetic response lost after commit.' } },
       { json: successResponse('synthetic-operation-key', true) },
@@ -187,5 +227,10 @@ test.describe('Synthetic harvest outcomes', () => {
     expect(bodies).toHaveLength(2);
     expect(bodies[1]).toEqual(bodies[0]);
     expect(await page.getByText(/ledger adjustments/i).count()).toBe(0);
+    expect(mutationRequests).toEqual([
+      { method: 'POST', path: '/api/job-queue/synthetic-job-1/harvest' },
+      { method: 'POST', path: '/api/job-queue/synthetic-job-1/harvest' },
+    ]);
+    expect(unexpectedMutations).toEqual([]);
   });
 });
