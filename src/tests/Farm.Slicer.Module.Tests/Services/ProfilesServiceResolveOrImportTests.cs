@@ -883,6 +883,42 @@ public class ProfilesServiceResolveOrImportTests
     }
 
     /// <summary>
+    /// Conflicting compatible profiles resolve from the catalog bucket first, then alias buckets
+    /// in ordinal key order, regardless of the worker dictionary's insertion order.
+    /// </summary>
+    [Fact]
+    public async Task ImportSelectedProfilesForModelAsync_ConflictingProcessNames_PrefersCatalogThenOrdinalBucket()
+    {
+        const string aliasOnlyProcessName = "0.12mm Standard @Micron 180";
+        MicronHarness harness = new();
+        using HttpClient httpClient = CreateMicronWorkerHttpClient(new Dictionary<string, (MachineProfileDto[], ProcessProfileDto[])>
+        {
+            ["PrintFarmer-z"] = ([MicronMachine()], [
+                MicronProcess(0.3, MicronMachineName, aliasOnlyProcessName),
+                MicronProcess(0.2, MicronMachineName)
+            ]),
+            [MicronCatalogManufacturer] = ([MicronMachine()], [MicronProcess(0.06, MicronMachineName)]),
+            ["PrintFarmer-a"] = ([MicronMachine()], [
+                MicronProcess(0.08, MicronMachineName, aliasOnlyProcessName),
+                MicronProcess(0.1, MicronMachineName)
+            ])
+        });
+
+        SelectiveProfileImportRequest request = new() { ManufacturerName = MicronCatalogManufacturer };
+        request.SelectedProcessProfiles.Add(MicronProcessName);
+        request.SelectedProcessProfiles.Add(aliasOnlyProcessName);
+
+        SelectiveProfileImportResultDto result = await harness.Service.ImportSelectedProfilesForModelAsync(
+            httpClient, harness.ModelId, request, CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.Equal(2, result.ProcessProfilesImported);
+        Assert.Equal(2, harness.Processes.Count);
+        Assert.Equal(0.06, Assert.Single(harness.Processes, profile => profile.Name == MicronProcessName).LayerHeight);
+        Assert.Equal(0.08, Assert.Single(harness.Processes, profile => profile.Name == aliasOnlyProcessName).LayerHeight);
+    }
+
+    /// <summary>
     /// When no worker bucket holds an alias-matched machine and none is named after the catalog
     /// manufacturer, the import still fails with the manufacturer error rather than scanning
     /// unrelated vendors.
@@ -915,9 +951,9 @@ public class ProfilesServiceResolveOrImportTests
         PrinterModel = MicronModelName
     };
 
-    private static ProcessProfileDto MicronProcess(double layerHeight, string compatibleMachine) => new()
+    private static ProcessProfileDto MicronProcess(double layerHeight, string compatibleMachine, string? name = null) => new()
     {
-        Name = MicronProcessName,
+        Name = name ?? MicronProcessName,
         Quality = "fine",
         LayerHeight = layerHeight,
         CompatiblePrinters = [compatibleMachine]

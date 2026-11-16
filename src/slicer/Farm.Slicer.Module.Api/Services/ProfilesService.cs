@@ -1345,6 +1345,12 @@ public class ProfilesService(
                      entry.Value.Models.Values.Any(model => model?.MachineProfiles?.Any(machine =>
                          aliasMatchedMachineNames.Contains(machine.Name ?? string.Empty)) == true)))
                 .Select(entry => (entry.Key, entry.Value))
+
+                // Prefer the exact catalog bucket; when multiple alias buckets qualify, use a
+                // stable ordinal order so duplicate profile names resolve consistently.
+                .OrderBy(bucket => string.Equals(bucket.Key, request.ManufacturerName, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenBy(bucket => bucket.Key, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(bucket => bucket.Key, StringComparer.Ordinal)
                 .ToList();
 
             if (manufacturerBuckets.Count == 0)
@@ -1357,6 +1363,9 @@ public class ProfilesService(
             HashSet<string> selectedMachines = new(request.SelectedMachineProfiles, StringComparer.OrdinalIgnoreCase);
             HashSet<string> selectedProcesses = new(request.SelectedProcessProfiles, StringComparer.OrdinalIgnoreCase);
             HashSet<string> selectedFilaments = new(request.SelectedFilamentProfiles, StringComparer.OrdinalIgnoreCase);
+            HashSet<string> importedMachineNames = new(StringComparer.OrdinalIgnoreCase);
+            HashSet<string> importedProcessIdentities = new(StringComparer.OrdinalIgnoreCase);
+            HashSet<string> importedFilamentIdentities = new(StringComparer.OrdinalIgnoreCase);
 
             static bool IsCompatibleWithAliasMatchedMachine(IEnumerable<string> compatiblePrinters, HashSet<string> aliasMatchedMachineNames)
             {
@@ -1394,6 +1403,12 @@ public class ProfilesService(
                             _logger.LogDebug("[ImportSelectedProfilesForModel] Skipping selected machine profile '{MachineProfileName}' because it does not match a configured OrcaSlicer alias", machineProfile.Name);
                             result.Skipped++;
 
+                            continue;
+                        }
+
+                        if (!importedMachineNames.Add(machineProfile.Name ?? string.Empty))
+                        {
+                            result.Skipped++;
                             continue;
                         }
 
@@ -1439,6 +1454,12 @@ public class ProfilesService(
                             continue;
                         }
 
+                        if (!importedFilamentIdentities.Add(FilamentIdentity(filamentProfile.Name, filamentProfile.Material)))
+                        {
+                            result.Skipped++;
+                            continue;
+                        }
+
                         try
                         {
                             bool imported = await PersistFilamentProfileAsync(
@@ -1477,6 +1498,12 @@ public class ProfilesService(
                             _logger.LogDebug("[ImportSelectedProfilesForModel] Skipping selected process profile '{ProcessProfileName}' because it is not compatible with an alias-matched machine", processProfile.Name);
                             result.Skipped++;
 
+                            continue;
+                        }
+
+                        if (!importedProcessIdentities.Add(ProcessIdentity(processProfile.Name, printerModelId)))
+                        {
+                            result.Skipped++;
                             continue;
                         }
 
