@@ -356,4 +356,159 @@ test.describe('Location and queue task workflows — Emulator', () => {
       'dismiss:task-dismiss',
     ]);
   });
+
+  test('retains failed tasks, allows one retry, and suppresses duplicate effects', async ({ page }) => {
+    const tasks = [
+      {
+        id: 'task-failure',
+        taskType: 'Custom',
+        entityType: 'Farm',
+        entityId: 'farm',
+        title: 'Fail synthetic task',
+        description: 'Terminal failure outcome',
+        status: 'Pending',
+        priority: 'Normal',
+        createdAt: '2026-01-01T00:00:00Z',
+        relatedEntityCount: 0,
+        anchorKind: 'now',
+        sourceKind: 'unspecified',
+      },
+      {
+        id: 'task-retry',
+        taskType: 'Custom',
+        entityType: 'Farm',
+        entityId: 'farm',
+        title: 'Retry synthetic task',
+        description: 'Transient failure outcome',
+        status: 'Pending',
+        priority: 'Normal',
+        createdAt: '2026-01-01T00:00:00Z',
+        relatedEntityCount: 0,
+        anchorKind: 'now',
+        sourceKind: 'unspecified',
+      },
+      {
+        id: 'task-duplicate',
+        taskType: 'Custom',
+        entityType: 'Farm',
+        entityId: 'farm',
+        title: 'Duplicate synthetic task',
+        description: 'Single-flight outcome',
+        status: 'Pending',
+        priority: 'Normal',
+        createdAt: '2026-01-01T00:00:00Z',
+        relatedEntityCount: 0,
+        anchorKind: 'now',
+        sourceKind: 'unspecified',
+      },
+    ];
+    const actionRequests: string[] = [];
+    const actionEffects: string[] = [];
+    let releaseDuplicate: () => void = () => {};
+    const duplicateResponse = new Promise<void>((resolve) => {
+      releaseDuplicate = resolve;
+    });
+
+    await page.route('**/api/tasks?view=shift', (route) =>
+      fulfillJson(route, {
+        generatedAt: '2026-01-01T00:00:00Z',
+        groups: [{
+          anchorKind: 'now',
+          tasks: tasks.filter((task) => task.status === 'Pending'),
+        }],
+      })
+    );
+    await page.route('**/api/tasks/**', async (route) => {
+      if (route.request().method() !== 'POST') {
+        return route.continue();
+      }
+
+      const taskId = route.request().url().match(/tasks\/([^/]+)\//)?.[1];
+      const action = route.request().url().match(/\/(complete|skip|dismiss)$/)?.[1];
+      if (!taskId || !action) {
+        return route.continue();
+      }
+
+      const requestKey = `${action}:${taskId}`;
+      actionRequests.push(requestKey);
+
+      if (taskId === 'task-failure') {
+        await fulfillJson(route, { message: 'Synthetic terminal failure' }, 500);
+        return;
+      }
+
+      if (taskId === 'task-retry' && actionRequests.filter((request) => request === requestKey).length === 1) {
+        await fulfillJson(route, { message: 'Synthetic transient failure' }, 409);
+        return;
+      }
+
+      if (taskId === 'task-duplicate' && actionRequests.filter((request) => request === requestKey).length === 1) {
+        await duplicateResponse;
+      }
+
+      const task = tasks.find((candidate) => candidate.id === taskId);
+      if (task) {
+        task.status = action === 'complete' ? 'Completed' : action === 'skip' ? 'Skipped' : 'Dismissed';
+        actionEffects.push(requestKey);
+      }
+      await route.fulfill({ status: 204 });
+    });
+
+    await page.goto('/dashboard');
+    await expect(page.getByText('Fail synthetic task')).toBeVisible();
+
+    const failureRow = page.locator('[data-testid="tasks-widget-row"][data-task-id="task-failure"]');
+    const retryRow = page.locator('[data-testid="tasks-widget-row"][data-task-id="task-retry"]');
+    const duplicateRow = page.locator('[data-testid="tasks-widget-row"][data-task-id="task-duplicate"]');
+
+    await failureRow.getByTestId('tasks-widget-complete').click();
+    await expect.poll(() => actionRequests).toEqual(['complete:task-failure']);
+    await expect(failureRow).toBeVisible();
+    expect(actionEffects).toEqual([]);
+
+    await retryRow.getByTestId('tasks-widget-complete').click();
+    await expect.poll(() => actionRequests).toEqual([
+      'complete:task-failure',
+      'complete:task-retry',
+    ]);
+    await expect(retryRow).toBeVisible();
+    expect(actionEffects).toEqual([]);
+
+    await retryRow.getByTestId('tasks-widget-complete').click();
+    await expect.poll(() => actionRequests).toEqual([
+      'complete:task-failure',
+      'complete:task-retry',
+      'complete:task-retry',
+    ]);
+    await expect.poll(() => actionEffects).toEqual(['complete:task-retry']);
+    await expect(retryRow).toHaveCount(0);
+
+    const duplicateComplete = duplicateRow.getByTestId('tasks-widget-complete');
+    await duplicateComplete.click();
+    await expect.poll(() => actionRequests).toEqual([
+      'complete:task-failure',
+      'complete:task-retry',
+      'complete:task-retry',
+      'complete:task-duplicate',
+    ]);
+    await expect(duplicateComplete).toBeDisabled();
+    await expect.poll(() => actionEffects).toEqual(['complete:task-retry']);
+    releaseDuplicate();
+
+    await expect.poll(() => actionEffects).toEqual([
+      'complete:task-retry',
+      'complete:task-duplicate',
+    ]);
+    await expect(duplicateRow).toHaveCount(0);
+    expect(actionRequests).toEqual([
+      'complete:task-failure',
+      'complete:task-retry',
+      'complete:task-retry',
+      'complete:task-duplicate',
+    ]);
+    expect(actionEffects).toEqual([
+      'complete:task-retry',
+      'complete:task-duplicate',
+    ]);
+  });
 });
