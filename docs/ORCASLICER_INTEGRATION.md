@@ -218,6 +218,7 @@ a bucket named after the catalog manufacturer. Only alias-matched machines and
 processes or filaments whose `compatible_printers` name such a machine are
 imported. Machine rows imported from a non-catalog bucket are attributed to the
 catalog manufacturer.
+
 `POST /api/profiles/cache/reload` performs a full in-process reload. Install and
 remove already perform that reload; callers do not need a second request.
 
