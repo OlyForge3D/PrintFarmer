@@ -200,6 +200,8 @@ function FeatureGate({ feature, children }: { feature: 'modelFiles' | 'slicing';
   return <>{children}</>;
 }
 
+const publicAuthPaths = new Set(['/login', '/forgot-password', '/reset-password']);
+
 function AuthenticatedAppRoutes() {
   // Custom global ProtectedRoute logic for redirecting guests and unapproved users
   const { isAuthenticated, isLoading, user } = useAuth();
@@ -236,8 +238,7 @@ function AuthenticatedAppRoutes() {
     );
   }
   if (!isAuthenticated) {
-    // Don't redirect if already on /login
-    if (location.pathname !== '/login') {
+    if (!publicAuthPaths.has(location.pathname)) {
       return <Navigate to="/login" state={{ from: location }} replace />;
     }
   }
