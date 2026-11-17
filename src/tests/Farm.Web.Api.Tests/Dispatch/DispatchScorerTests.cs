@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Services.AutoTagging;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Tests.Builders;
 using FluentAssertions;
@@ -18,20 +17,8 @@ namespace Farm.Web.Api.Tests.Dispatch;
 
 /// <summary>
 /// Tests for the auto-dispatch scoring algorithm.
-/// The scorer evaluates printers against job requirements using weighted factors:
-/// material match, nozzle diameter, build volume, nozzle hardness, enclosure,
-/// user preferences, and queue depth.
-///
-/// Each factor returns 0–100 or ELIMINATE (represented as null/negative).
-/// The final score is a weighted average of non-eliminated factors.
-///
-/// WARNING: Only the tests before the "MATERIAL MATCH FACTOR TESTS" section call the
-/// production <see cref="DispatchScorer"/>. The tests from that section onward call
-/// private test-local scoring replicas (see "SCORING HELPER METHODS"), not
-/// <see cref="DispatchScorer"/>, and are NOT production regression coverage. Known
-/// divergences: with no material requirement the replica scores 100 where production
-/// returns a neutral 70; an oversized build volume eliminates in the replica where
-/// production returns a soft score of 20. Tracked in issue #3866.
+/// Each test exercises the production <see cref="DispatchScorer"/> and verifies its
+/// observable candidate score and factor breakdown.
 /// </summary>
 public class DispatchScorerTests : IDisposable
 {
@@ -167,16 +154,18 @@ public class DispatchScorerTests : IDisposable
         string? requiredMaterial = "PLA",
         decimal? requiredNozzleDiameter = 0.4m,
         Guid[]? preferredPrinterIds = null,
-        Guid[]? excludedPrinterIds = null)
+        Guid[]? excludedPrinterIds = null,
+        Guid? jobId = null,
+        Guid? gcodeFileId = null)
     {
         var gcodeFile = new GcodeFile
         {
-            Id = _gcodeFileId,
+            Id = gcodeFileId ?? _gcodeFileId,
             Name = "test-print.gcode",
             FileName = $"{Guid.NewGuid()}.gcode",
             FilePath = "/gcode/",
             FolderId = _folderId,
-            FileHash = "abc123",
+            FileHash = Guid.NewGuid().ToString("N"),
             RequiredMaterial = requiredMaterial,
             RequiredNozzleDiameter = requiredNozzleDiameter.HasValue ? (double)requiredNozzleDiameter.Value : null,
             CreatedAt = DateTime.UtcNow,
@@ -186,9 +175,9 @@ public class DispatchScorerTests : IDisposable
 
         var job = new PrintJob
         {
-            Id = _jobId,
+            Id = jobId ?? _jobId,
             Name = "Test Print Job",
-            GcodeFileId = _gcodeFileId,
+            GcodeFileId = gcodeFile.Id,
             GcodeFile = gcodeFile,
             Status = PrintJobStatus.Queued,
             Priority = 1,
@@ -202,6 +191,63 @@ public class DispatchScorerTests : IDisposable
         };
 
         return job;
+    }
+
+    private async Task<DispatchScore> ScorePrinterAsync(Printer printer, PrintJob job)
+    {
+        EnsurePrinterReferences(printer);
+        await _context.SaveChangesAsync();
+        _context.Printers.Add(printer);
+        _context.PrintJobs.Add(job);
+        await _context.SaveChangesAsync();
+
+        var scorer = new DispatchScorer(_context, NullLogger<DispatchScorer>.Instance);
+        List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(job.Id);
+        return scores.Should().ContainSingle().Subject;
+    }
+
+    private void EnsurePrinterReferences(Printer printer)
+    {
+        Guid manufacturerId = printer.ManufacturerId;
+
+        Manufacturer manufacturer = _context.Manufacturers.Local
+            .FirstOrDefault(m => m.Id == manufacturerId)
+            ?? new Manufacturer { Id = manufacturerId, Name = $"{printer.Name} manufacturer" };
+        if (_context.Entry(manufacturer).State == EntityState.Detached)
+        {
+            _context.Manufacturers.Add(manufacturer);
+        }
+
+        foreach (Toolhead toolhead in printer.Toolheads)
+        {
+            if (toolhead.NozzleModel is { ManufacturerId: var nozzleManufacturerId } nozzle
+                && nozzleManufacturerId == Guid.Empty)
+            {
+                nozzle.ManufacturerId = manufacturerId;
+                nozzle.Manufacturer = manufacturer;
+            }
+        }
+
+        if (printer.ModelId is Guid modelId)
+        {
+            PrinterModel model = _context.PrinterModels.Local
+                .FirstOrDefault(m => m.Id == modelId)
+                ?? new PrinterModel
+                {
+                    Id = modelId,
+                    ManufacturerId = manufacturerId,
+                    Manufacturer = manufacturer,
+                    Name = $"{printer.Name} model"
+                };
+            if (_context.Entry(model).State == EntityState.Detached)
+            {
+                _context.PrinterModels.Add(model);
+            }
+
+            printer.Model = model;
+        }
+
+        printer.Manufacturer = manufacturer;
     }
 
     #endregion
@@ -346,57 +392,71 @@ public class DispatchScorerTests : IDisposable
 
     // =========================================================================
     // MATERIAL MATCH FACTOR TESTS
-    // WARNING: Tests from here onward exercise test-local replicas, not
-    // DispatchScorer. See the class summary and issue #3866.
     // =========================================================================
 
     [Fact]
     [Trait("Category", "Dispatch")]
-    public void ScorePrinter_ExactMaterialMatch_Returns100()
+    public async Task ScorePrinter_ExactMaterialMatch_Returns100()
     {
-        // Printer has PLA loaded and job needs PLA → perfect match → 100
         Printer printer = CreateTestPrinter(currentMaterial: "PLA");
-        Toolhead toolhead = CreateToolhead(printer.Id, supportedMaterials: ["PLA", "PETG"]);
-        printer.Toolheads.Add(toolhead);
-
+        printer.Toolheads.Add(CreateToolhead(printer.Id, supportedMaterials: ["PLA", "PETG"]));
         PrintJob job = CreateTestJob(requiredMaterial: "PLA");
 
-        // Score the material factor
-        int score = ScoreMaterialMatch(printer, job);
+        DispatchScore score = await ScorePrinterAsync(printer, job);
 
-        score.Should().Be(100, "exact material match should score 100");
+        score.ScoreBreakdown["MaterialMatch"].Score.Should().Be(100);
+        score.Eliminated.Should().BeFalse();
     }
 
     [Fact]
     [Trait("Category", "Dispatch")]
-    public void ScorePrinter_WrongMaterial_Eliminates()
+    public async Task ScorePrinter_WrongMaterial_Eliminates()
     {
-        // Printer has ABS loaded, job needs PLA, toolhead does NOT support PLA → ELIMINATE
         Printer printer = CreateTestPrinter(currentMaterial: "ABS");
-        Toolhead toolhead = CreateToolhead(printer.Id, supportedMaterials: ["ABS"]);
-        printer.Toolheads.Add(toolhead);
-
+        printer.Toolheads.Add(CreateToolhead(printer.Id, supportedMaterials: ["ABS"]));
         PrintJob job = CreateTestJob(requiredMaterial: "PLA");
 
-        int score = ScoreMaterialMatch(printer, job);
+        DispatchScore score = await ScorePrinterAsync(printer, job);
 
-        score.Should().BeLessThan(0, "wrong material with no toolhead support should eliminate");
+        score.ScoreBreakdown["MaterialMatch"].Score.Should().Be(0);
+        score.ScoreBreakdown["MaterialMatch"].EliminationReason.Should().Contain("PLA");
+        score.Eliminated.Should().BeTrue();
     }
 
     [Fact]
     [Trait("Category", "Dispatch")]
-    public void ScorePrinter_MaterialSupportedButNotLoaded_Returns50()
+    public async Task ScorePrinter_MaterialSupportedButNotLoaded_Returns50()
     {
-        // Printer has PETG loaded, job needs PLA, but toolhead supports PLA → partial match → 50
         Printer printer = CreateTestPrinter(currentMaterial: "PETG");
-        Toolhead toolhead = CreateToolhead(printer.Id, supportedMaterials: ["PLA", "PETG", "ABS"]);
-        printer.Toolheads.Add(toolhead);
-
+        printer.Toolheads.Add(CreateToolhead(printer.Id, supportedMaterials: ["PLA", "PETG", "ABS"]));
         PrintJob job = CreateTestJob(requiredMaterial: "PLA");
 
-        int score = ScoreMaterialMatch(printer, job);
+        DispatchScore score = await ScorePrinterAsync(printer, job);
 
-        score.Should().Be(50, "material supported but not loaded should score 50");
+        score.ScoreBreakdown["MaterialMatch"].Score.Should().Be(50);
+        score.Eliminated.Should().BeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public async Task ScorePrinter_JobWithNoMaterialRequirement_ReturnsNeutral70()
+    {
+        Printer printer = CreateTestPrinter(currentMaterial: "PETG");
+        printer.Toolheads.Add(CreateToolhead(printer.Id));
+        PrintJob job = CreateTestJob(requiredMaterial: null);
+
+        DispatchScore score = await ScorePrinterAsync(printer, job);
+
+        score.ScoreBreakdown["MaterialMatch"].Score.Should().Be(70);
+        score.ScoreBreakdown["NozzleDiameter"].Score.Should().Be(100);
+        score.ScoreBreakdown["BuildVolume"].Score.Should().Be(70);
+        score.ScoreBreakdown["Enclosure"].Score.Should().Be(100);
+        score.ScoreBreakdown["NozzleHardness"].Score.Should().Be(100);
+        score.ScoreBreakdown["ModelMatch"].Score.Should().Be(70);
+        score.ScoreBreakdown["QueueDepth"].Score.Should().Be(100);
+        score.ScoreBreakdown["Preferred"].Score.Should().Be(70);
+        score.ScoreBreakdown["ColorMatch"].Score.Should().Be(50);
+        score.TotalScore.Should().Be(84.82);
     }
 
     // =========================================================================
@@ -405,34 +465,29 @@ public class DispatchScorerTests : IDisposable
 
     [Fact]
     [Trait("Category", "Dispatch")]
-    public void ScorePrinter_NozzleDiameterExactMatch_Returns100()
+    public async Task ScorePrinter_NozzleDiameterExactMatch_Returns100()
     {
-        // Printer nozzle 0.4mm, job needs 0.4mm → exact match → 100
         Printer printer = CreateTestPrinter();
-        Toolhead toolhead = CreateToolhead(printer.Id, nozzleDiameter: 0.4);
-        printer.Toolheads.Add(toolhead);
-
+        printer.Toolheads.Add(CreateToolhead(printer.Id, nozzleDiameter: 0.4));
         PrintJob job = CreateTestJob(requiredNozzleDiameter: 0.4m);
 
-        int score = ScoreNozzleDiameter(printer, job);
+        DispatchScore score = await ScorePrinterAsync(printer, job);
 
-        score.Should().Be(100, "exact nozzle match (±0.01mm) should score 100");
+        score.ScoreBreakdown["NozzleDiameter"].Score.Should().Be(100);
     }
 
     [Fact]
     [Trait("Category", "Dispatch")]
-    public void ScorePrinter_NozzleTooSmall_Eliminates()
+    public async Task ScorePrinter_NozzleTooSmall_Eliminates()
     {
-        // Printer nozzle 0.4mm, job needs 0.6mm → wrong nozzle → ELIMINATE
         Printer printer = CreateTestPrinter();
-        Toolhead toolhead = CreateToolhead(printer.Id, nozzleDiameter: 0.4);
-        printer.Toolheads.Add(toolhead);
-
+        printer.Toolheads.Add(CreateToolhead(printer.Id, nozzleDiameter: 0.4));
         PrintJob job = CreateTestJob(requiredNozzleDiameter: 0.6m);
 
-        int score = ScoreNozzleDiameter(printer, job);
+        DispatchScore score = await ScorePrinterAsync(printer, job);
 
-        score.Should().BeLessThan(0, "wrong nozzle diameter should eliminate");
+        score.ScoreBreakdown["NozzleDiameter"].Score.Should().Be(0);
+        score.Eliminated.Should().BeTrue();
     }
 
     // =========================================================================
@@ -441,16 +496,70 @@ public class DispatchScorerTests : IDisposable
 
     [Fact]
     [Trait("Category", "Dispatch")]
-    public void ScorePrinter_BuildVolumeExceeded_Eliminates()
+    public async Task ScorePrinter_BuildVolumeExceeded_ReturnsSoftScore20()
     {
-        // Printer build volume 250x210x210, gcode needs 300x200x200 → too big → ELIMINATE
         Printer printer = CreateTestPrinter(maxBuildX: 250, maxBuildY: 210, maxBuildZ: 210);
+        printer.Toolheads.Add(CreateToolhead(printer.Id));
+        PrintJob job = CreateTestJob();
+        var manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = "Gcode target manufacturer" };
+        var targetModel = new PrinterModel
+        {
+            Id = Guid.NewGuid(),
+            ManufacturerId = manufacturer.Id,
+            Name = "300x200x200 target",
+            MaxX = 300,
+            MaxY = 200,
+            MaxZ = 200
+        };
+        job.GcodeFile!.PrinterModelId = targetModel.Id;
+        job.GcodeFile.PrinterModel = targetModel;
+        _context.Manufacturers.Add(manufacturer);
+        _context.PrinterModels.Add(targetModel);
 
-        // Simulate a gcode file that exceeds build volume
-        // Replica check: production DispatchScorer gives a soft score of 20, not elimination (#3866).
-        bool exceeds = DoesBuildVolumeExceed(printer, 300, 200, 200);
+        DispatchScore score = await ScorePrinterAsync(printer, job);
 
-        exceeds.Should().BeTrue("gcode exceeding build volume should be eliminated");
+        score.ScoreBreakdown["BuildVolume"].Score.Should().Be(20);
+        score.Eliminated.Should().BeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public async Task ScorePrinter_BuildVolumeFits_Returns100()
+    {
+        Printer printer = CreateTestPrinter(maxBuildX: 250, maxBuildY: 210, maxBuildZ: 210);
+        printer.Toolheads.Add(CreateToolhead(printer.Id));
+        PrintJob job = CreateTestJob();
+        var manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = "Gcode fit manufacturer" };
+        var targetModel = new PrinterModel
+        {
+            Id = Guid.NewGuid(),
+            ManufacturerId = manufacturer.Id,
+            Name = "200x200x200 target",
+            MaxX = 200,
+            MaxY = 200,
+            MaxZ = 200
+        };
+        job.GcodeFile!.PrinterModelId = targetModel.Id;
+        job.GcodeFile.PrinterModel = targetModel;
+        _context.Manufacturers.Add(manufacturer);
+        _context.PrinterModels.Add(targetModel);
+
+        DispatchScore score = await ScorePrinterAsync(printer, job);
+
+        score.ScoreBreakdown["BuildVolume"].Score.Should().Be(100);
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public async Task ScorePrinter_GcodeFileWithoutTargetModel_ReturnsNeutral70()
+    {
+        Printer printer = CreateTestPrinter(maxBuildX: 250, maxBuildY: 210, maxBuildZ: 210);
+        printer.Toolheads.Add(CreateToolhead(printer.Id));
+        PrintJob job = CreateTestJob();
+
+        DispatchScore score = await ScorePrinterAsync(printer, job);
+
+        score.ScoreBreakdown["BuildVolume"].Score.Should().Be(70);
     }
 
     // =========================================================================
@@ -459,38 +568,44 @@ public class DispatchScorerTests : IDisposable
 
     [Fact]
     [Trait("Category", "Dispatch")]
-    public void ScorePrinter_AbrasiveMaterial_BrassNozzle_Eliminates()
+    public async Task ScorePrinter_AbrasiveMaterial_BrassNozzle_Eliminates()
     {
-        // Abrasive material (CF-PLA) + Brass nozzle → ELIMINATE (would destroy nozzle)
         Printer printer = CreateTestPrinter(currentMaterial: "CF-PLA");
-        Toolhead toolhead = CreateToolhead(printer.Id, nozzleType: NozzleType.Brass);
-        printer.Toolheads.Add(toolhead);
+        printer.Toolheads.Add(CreateToolhead(printer.Id, nozzleType: NozzleType.Brass));
+        PrintJob job = CreateTestJob(requiredMaterial: "CF-PLA");
+        _context.FilamentTypes.Add(new FilamentType
+        {
+            Id = Guid.NewGuid(),
+            Name = "CF-PLA",
+            IsAbrasive = true,
+            IsActive = true
+        });
 
-        bool isAbrasive = true; // FilamentType.IsAbrasive for CF-PLA
-        bool isHardened = toolhead.NozzleModel!.IsHardened;
+        DispatchScore score = await ScorePrinterAsync(printer, job);
 
-        int score = ScoreNozzleHardness(isAbrasive, isHardened);
-
-        score.Should().BeLessThan(0, "abrasive material on brass nozzle should eliminate");
-        isHardened.Should().BeFalse("brass nozzle is NOT hardened");
+        score.ScoreBreakdown["NozzleHardness"].Score.Should().Be(0);
+        score.Eliminated.Should().BeTrue();
     }
 
     [Fact]
     [Trait("Category", "Dispatch")]
-    public void ScorePrinter_AbrasiveMaterial_HardenedNozzle_Returns100()
+    public async Task ScorePrinter_AbrasiveMaterial_HardenedNozzle_Returns100()
     {
-        // Abrasive material (CF-PLA) + Hardened Steel nozzle → safe → 100
         Printer printer = CreateTestPrinter(currentMaterial: "CF-PLA");
-        Toolhead toolhead = CreateToolhead(printer.Id, nozzleType: NozzleType.HardenedSteel);
-        printer.Toolheads.Add(toolhead);
+        printer.Toolheads.Add(CreateToolhead(printer.Id, nozzleType: NozzleType.HardenedSteel));
+        PrintJob job = CreateTestJob(requiredMaterial: "CF-PLA");
+        _context.FilamentTypes.Add(new FilamentType
+        {
+            Id = Guid.NewGuid(),
+            Name = "CF-PLA",
+            IsAbrasive = true,
+            IsActive = true
+        });
 
-        bool isAbrasive = true;
-        bool isHardened = toolhead.NozzleModel!.IsHardened;
+        DispatchScore score = await ScorePrinterAsync(printer, job);
 
-        int score = ScoreNozzleHardness(isAbrasive, isHardened);
-
-        score.Should().Be(100, "abrasive material on hardened nozzle should score 100");
-        isHardened.Should().BeTrue("hardened steel nozzle IS hardened");
+        score.ScoreBreakdown["NozzleHardness"].Score.Should().Be(100);
+        score.Eliminated.Should().BeFalse();
     }
 
     // =========================================================================
@@ -499,28 +614,44 @@ public class DispatchScorerTests : IDisposable
 
     [Fact]
     [Trait("Category", "Dispatch")]
-    public void ScorePrinter_EnclosureRequired_NoEnclosure_Eliminates()
+    public async Task ScorePrinter_EnclosureRequired_NoEnclosure_Eliminates()
     {
-        // Material needs enclosure (ABS), printer has no enclosure → ELIMINATE
         Printer printer = CreateTestPrinter(hasEnclosure: false);
+        printer.Toolheads.Add(CreateToolhead(printer.Id));
+        PrintJob job = CreateTestJob(requiredMaterial: "ABS");
+        _context.FilamentTypes.Add(new FilamentType
+        {
+            Id = Guid.NewGuid(),
+            Name = "ABS",
+            NeedsEnclosure = true,
+            IsActive = true
+        });
 
-        bool needsEnclosure = true; // FilamentType.NeedsEnclosure for ABS
-        int score = ScoreEnclosure(needsEnclosure, printer.HasEnclosure);
+        DispatchScore score = await ScorePrinterAsync(printer, job);
 
-        score.Should().BeLessThan(0, "enclosure required but not available should eliminate");
+        score.ScoreBreakdown["Enclosure"].Score.Should().Be(0);
+        score.Eliminated.Should().BeTrue();
     }
 
     [Fact]
     [Trait("Category", "Dispatch")]
-    public void ScorePrinter_EnclosureRequired_HasEnclosure_Returns100()
+    public async Task ScorePrinter_EnclosureRequired_HasEnclosure_Returns100()
     {
-        // Material needs enclosure (ABS), printer HAS enclosure → OK → 100
         Printer printer = CreateTestPrinter(hasEnclosure: true);
+        printer.Toolheads.Add(CreateToolhead(printer.Id));
+        PrintJob job = CreateTestJob(requiredMaterial: "ABS");
+        _context.FilamentTypes.Add(new FilamentType
+        {
+            Id = Guid.NewGuid(),
+            Name = "ABS",
+            NeedsEnclosure = true,
+            IsActive = true
+        });
 
-        bool needsEnclosure = true;
-        int score = ScoreEnclosure(needsEnclosure, printer.HasEnclosure);
+        DispatchScore score = await ScorePrinterAsync(printer, job);
 
-        score.Should().Be(100, "enclosure required and available should score 100");
+        score.ScoreBreakdown["Enclosure"].Score.Should().Be(100);
+        score.Eliminated.Should().BeFalse();
     }
 
     // =========================================================================
@@ -529,28 +660,29 @@ public class DispatchScorerTests : IDisposable
 
     [Fact]
     [Trait("Category", "Dispatch")]
-    public void ScorePrinter_PreferredPrinter_ScoresHigher()
+    public async Task ScorePrinter_PreferredPrinter_Returns100()
     {
-        // Printer is in the job's preferred list → score 100
         Printer printer = CreateTestPrinter();
+        printer.Toolheads.Add(CreateToolhead(printer.Id));
         PrintJob job = CreateTestJob(preferredPrinterIds: [printer.Id]);
 
-        int score = ScorePreference(printer.Id, job.PreferredPrinterIds, job.ExcludedPrinterIds);
+        DispatchScore score = await ScorePrinterAsync(printer, job);
 
-        score.Should().Be(100, "preferred printer should score 100");
+        score.ScoreBreakdown["Preferred"].Score.Should().Be(100);
     }
 
     [Fact]
     [Trait("Category", "Dispatch")]
-    public void ScorePrinter_ExcludedPrinter_Eliminates()
+    public async Task ScorePrinter_ExcludedPrinter_Eliminates()
     {
-        // Printer is in the job's excluded list → ELIMINATE
         Printer printer = CreateTestPrinter();
+        printer.Toolheads.Add(CreateToolhead(printer.Id));
         PrintJob job = CreateTestJob(excludedPrinterIds: [printer.Id]);
 
-        int score = ScorePreference(printer.Id, job.PreferredPrinterIds, job.ExcludedPrinterIds);
+        DispatchScore score = await ScorePrinterAsync(printer, job);
 
-        score.Should().BeLessThan(0, "excluded printer should be eliminated");
+        score.ScoreBreakdown["Preferred"].Score.Should().Be(0);
+        score.Eliminated.Should().BeTrue();
     }
 
     // =========================================================================
@@ -559,53 +691,45 @@ public class DispatchScorerTests : IDisposable
 
     [Fact]
     [Trait("Category", "Dispatch")]
-    public void ScorePrinter_QueueEmpty_Returns100()
+    public async Task ScorePrinter_QueueEmpty_Returns100()
     {
-        // Printer has 0 queued jobs → 100
-        int queuedJobCount = 0;
-        int score = ScoreQueueDepth(queuedJobCount);
+        Printer printer = CreateTestPrinter();
+        printer.Toolheads.Add(CreateToolhead(printer.Id));
+        PrintJob job = CreateTestJob();
 
-        score.Should().Be(100, "empty queue should score 100");
+        DispatchScore score = await ScorePrinterAsync(printer, job);
+
+        score.ScoreBreakdown["QueueDepth"].Score.Should().Be(100);
     }
 
     [Fact]
     [Trait("Category", "Dispatch")]
-    public void ScorePrinter_QueueHeavy_Returns10()
+    public async Task ScorePrinter_QueueHeavy_Returns10()
     {
-        // Printer has 6+ queued jobs → 10 (heavy load, still viable)
-        int queuedJobCount = 6;
-        int score = ScoreQueueDepth(queuedJobCount);
-
-        score.Should().BeLessThanOrEqualTo(10, "heavy queue (6+) should score ≤10");
-    }
-
-    // =========================================================================
-    // WEIGHTED SCORE CALCULATION TESTS
-    // =========================================================================
-
-    [Fact]
-    [Trait("Category", "Dispatch")]
-    public void ScorePrinter_AllFactorsPass_CalculatesWeightedScore()
-    {
-        // All factors pass with varying scores → final is weighted average
-        var factorScores = new Dictionary<string, int>
+        Printer printer = CreateTestPrinter();
+        printer.Toolheads.Add(CreateToolhead(printer.Id));
+        PrintJob job = CreateTestJob();
+        List<PrintJob> queuedJobs = Enumerable.Range(0, 6)
+            .Select(_ => CreateTestJob(
+                requiredMaterial: null,
+                requiredNozzleDiameter: null,
+                jobId: Guid.NewGuid(),
+                gcodeFileId: Guid.NewGuid()))
+            .ToList();
+        for (int index = 0; index < queuedJobs.Count; index++)
         {
-            ["material"] = 100,      // weight: 30
-            ["nozzle"] = 100,        // weight: 25
-            ["buildVolume"] = 100,   // weight: 15
-            ["nozzleHardness"] = 100, // weight: 10
-            ["enclosure"] = 100,     // weight: 10
-            ["preference"] = 50,     // weight: 5 (not preferred, not excluded)
-            ["queueDepth"] = 80      // weight: 5
-        };
+            queuedJobs[index].AssignedPrinterId = printer.Id;
+            queuedJobs[index].QueuePosition = index + 1;
+        }
+        _ = await ScorePrinterAsync(printer, job);
+        _context.PrintJobs.AddRange(queuedJobs);
+        await _context.SaveChangesAsync();
 
-        int totalScore = CalculateWeightedScore(factorScores);
+        var scorer = new DispatchScorer(_context, NullLogger<DispatchScorer>.Instance);
+        List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(job.Id);
+        DispatchScore score = scores.Should().ContainSingle().Subject;
 
-        // With all 100 except preference=50 and queue=80:
-        // (100*30 + 100*25 + 100*15 + 100*10 + 100*10 + 50*5 + 80*5) / 100
-        // = (3000 + 2500 + 1500 + 1000 + 1000 + 250 + 400) / 100
-        // = 9650 / 100 = 96.5 → 96 or 97 depending on rounding
-        totalScore.Should().BeInRange(90, 100, "all-pass with minor deductions should score 90+");
+        score.ScoreBreakdown["QueueDepth"].Score.Should().Be(10);
     }
 
     // =========================================================================
@@ -614,50 +738,15 @@ public class DispatchScorerTests : IDisposable
 
     [Fact]
     [Trait("Category", "Dispatch")]
-    public void ScorePrinter_JobWithNoMaterialRequirement_MatchesAnyPrinter()
+    public async Task ScorePrinter_PrinterWithNoToolheads_UsesNeutralNozzleScore()
     {
-        // Job has no material requirement → any printer matches → 100
-        Printer printer = CreateTestPrinter(currentMaterial: "PETG");
-        Toolhead toolhead = CreateToolhead(printer.Id);
-        printer.Toolheads.Add(toolhead);
-
-        PrintJob job = CreateTestJob(requiredMaterial: null);
-
-        int score = ScoreMaterialMatch(printer, job);
-
-        score.Should().Be(100, "no material requirement means any printer matches");
-    }
-
-    [Fact]
-    [Trait("Category", "Dispatch")]
-    public void ScorePrinter_PrinterWithNoToolheads_Eliminates()
-    {
-        // Printer has no toolheads configured → ELIMINATE (can't validate nozzle/material)
         Printer printer = CreateTestPrinter();
-        // Deliberately NOT adding toolheads
-
         PrintJob job = CreateTestJob(requiredMaterial: "PLA", requiredNozzleDiameter: 0.4m);
 
-        bool hasToolheads = printer.Toolheads.Count > 0;
-        hasToolheads.Should().BeFalse("printer should have no toolheads");
+        DispatchScore score = await ScorePrinterAsync(printer, job);
 
-        // Scoring should eliminate a printer with no toolheads when material/nozzle is required
-        int score = ScoreToolheadPresence(printer, job);
-
-        score.Should().BeLessThan(0, "printer with no toolheads should be eliminated when material is required");
-    }
-
-    [Fact]
-    [Trait("Category", "Dispatch")]
-    public void ScorePrinter_GcodeFileWithNoDimensions_AssumesBuiltVolumeFits()
-    {
-        // Gcode file has no dimension metadata → assume it fits → 100
-        Printer printer = CreateTestPrinter(maxBuildX: 250, maxBuildY: 210, maxBuildZ: 210);
-
-        // No dimensions available (null/zero)
-        int score = ScoreBuildVolume(printer, null, null, null);
-
-        score.Should().Be(100, "no gcode dimensions should assume volume fits");
+        score.ScoreBreakdown["NozzleDiameter"].Score.Should().Be(50);
+        score.Eliminated.Should().BeFalse();
     }
 
     // =========================================================================
@@ -666,348 +755,79 @@ public class DispatchScorerTests : IDisposable
 
     [Fact]
     [Trait("Category", "Dispatch")]
-    public void ScoreColorMatch_ExactHexMatch_Returns100()
+    public async Task ScoreColorMatch_ExactHexMatch_Returns100()
     {
         Printer printer = CreateTestPrinter();
         Toolhead toolhead = CreateToolhead(printer.Id);
         toolhead.CurrentFilamentColor = "#FF0000";
         printer.Toolheads.Add(toolhead);
-
         PrintJob job = CreateTestJob();
         job.FilamentColor = "#FF0000";
 
-        int score = ScoreColorMatch(printer, job);
+        DispatchScore score = await ScorePrinterAsync(printer, job);
 
-        score.Should().Be(100, "exact hex match should score 100");
+        score.ScoreBreakdown["ColorMatch"].Score.Should().Be(100);
     }
 
     [Fact]
     [Trait("Category", "Dispatch")]
-    public void ScoreColorMatch_SameColorFamily_Returns80()
-    {
-        // Both are red family but different hex values
-        Printer printer = CreateTestPrinter();
-        Toolhead toolhead = CreateToolhead(printer.Id);
-        toolhead.CurrentFilamentColor = "#CC0000"; // Dark red
-        printer.Toolheads.Add(toolhead);
-
-        PrintJob job = CreateTestJob();
-        job.FilamentColor = "#FF0000"; // Bright red
-
-        int score = ScoreColorMatch(printer, job);
-
-        score.Should().Be(80, "same color family should score 80");
-    }
-
-    [Fact]
-    [Trait("Category", "Dispatch")]
-    public void ScoreColorMatch_DifferentFamily_Returns20()
+    public async Task ScoreColorMatch_SameColorFamily_Returns80()
     {
         Printer printer = CreateTestPrinter();
         Toolhead toolhead = CreateToolhead(printer.Id);
-        toolhead.CurrentFilamentColor = "#0000FF"; // Blue
+        toolhead.CurrentFilamentColor = "#CC0000";
         printer.Toolheads.Add(toolhead);
-
         PrintJob job = CreateTestJob();
-        job.FilamentColor = "#FF0000"; // Red
+        job.FilamentColor = "#FF0000";
 
-        int score = ScoreColorMatch(printer, job);
+        DispatchScore score = await ScorePrinterAsync(printer, job);
 
-        score.Should().Be(20, "different color family should score 20");
+        score.ScoreBreakdown["ColorMatch"].Score.Should().Be(80);
     }
 
     [Fact]
     [Trait("Category", "Dispatch")]
-    public void ScoreColorMatch_NoJobColor_ReturnsNeutral()
+    public async Task ScoreColorMatch_DifferentFamily_Returns20()
+    {
+        Printer printer = CreateTestPrinter();
+        Toolhead toolhead = CreateToolhead(printer.Id);
+        toolhead.CurrentFilamentColor = "#0000FF";
+        printer.Toolheads.Add(toolhead);
+        PrintJob job = CreateTestJob();
+        job.FilamentColor = "#FF0000";
+
+        DispatchScore score = await ScorePrinterAsync(printer, job);
+
+        score.ScoreBreakdown["ColorMatch"].Score.Should().Be(20);
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public async Task ScoreColorMatch_NoJobColor_ReturnsNeutral50()
     {
         Printer printer = CreateTestPrinter();
         Toolhead toolhead = CreateToolhead(printer.Id);
         toolhead.CurrentFilamentColor = "#FF0000";
         printer.Toolheads.Add(toolhead);
-
         PrintJob job = CreateTestJob();
         job.FilamentColor = null;
 
-        int score = ScoreColorMatch(printer, job);
+        DispatchScore score = await ScorePrinterAsync(printer, job);
 
-        score.Should().Be(50, "no job color should return neutral 50");
+        score.ScoreBreakdown["ColorMatch"].Score.Should().Be(50);
     }
 
     [Fact]
     [Trait("Category", "Dispatch")]
-    public void ScoreColorMatch_NoPrinterColor_ReturnsNeutral()
+    public async Task ScoreColorMatch_NoPrinterColor_ReturnsNeutral50()
     {
         Printer printer = CreateTestPrinter();
-        Toolhead toolhead = CreateToolhead(printer.Id);
-        toolhead.CurrentFilamentColor = null;
-        printer.Toolheads.Add(toolhead);
-
+        printer.Toolheads.Add(CreateToolhead(printer.Id));
         PrintJob job = CreateTestJob();
         job.FilamentColor = "#FF0000";
 
-        int score = ScoreColorMatch(printer, job);
+        DispatchScore score = await ScorePrinterAsync(printer, job);
 
-        score.Should().Be(50, "no printer color should return neutral 50");
-    }
-
-    // =========================================================================
-    // SCORING HELPER METHODS
-    // Test-local replicas of the original scoring specification. They are not
-    // DispatchScorer and diverge from it; replace them per issue #3866.
-    // =========================================================================
-
-    /// <summary>
-    /// Scores material compatibility between printer and job.
-    /// Returns 100 (exact match), 50 (supported but not loaded), or -1 (eliminate).
-    /// </summary>
-    private static int ScoreMaterialMatch(Printer printer, PrintJob job)
-    {
-        if (string.IsNullOrEmpty(job.RequiredMaterialType))
-        {
-            return 100; // No requirement → matches anything
-        }
-
-        // Check if currently loaded material matches
-        if (string.Equals(printer.CurrentMaterial, job.RequiredMaterialType, StringComparison.OrdinalIgnoreCase))
-        {
-            return 100;
-        }
-
-        // Check if any toolhead supports the required material
-        bool toolheadSupports = printer.Toolheads.Any(t =>
-            t.SupportedMaterials is not null &&
-            t.SupportedMaterials.Any(m =>
-                string.Equals(m, job.RequiredMaterialType, StringComparison.OrdinalIgnoreCase)));
-
-        return toolheadSupports ? 50 : -1; // Supported but not loaded = 50, not supported = eliminate
-    }
-
-    /// <summary>
-    /// Scores nozzle diameter compatibility.
-    /// Returns 100 (exact match ±0.01mm) or -1 (eliminate).
-    /// </summary>
-    private static int ScoreNozzleDiameter(Printer printer, PrintJob job)
-    {
-        if (!job.RequiredNozzleDiameter.HasValue)
-        {
-            return 100; // No requirement
-        }
-
-        Toolhead? primaryToolhead = printer.Toolheads.FirstOrDefault(t => t.IsPrimary)
-            ?? printer.Toolheads.FirstOrDefault();
-
-        if (primaryToolhead?.NozzleDiameter is not double storedDiameter)
-        {
-            return -1; // Can't verify nozzle → eliminate
-        }
-
-        double diff = Math.Abs(storedDiameter - (double)job.RequiredNozzleDiameter.Value);
-        return diff <= 0.01 ? 100 : -1;
-    }
-
-    /// <summary>
-    /// Checks if gcode dimensions exceed printer build volume.
-    /// </summary>
-    private static bool DoesBuildVolumeExceed(Printer printer, double? gcodeX, double? gcodeY, double? gcodeZ)
-    {
-        if (!gcodeX.HasValue && !gcodeY.HasValue && !gcodeZ.HasValue)
-        {
-            return false; // No dimensions → assume fits
-        }
-
-        if (gcodeX.HasValue && printer.MaxBuildVolumeX.HasValue && gcodeX > printer.MaxBuildVolumeX)
-        {
-            return true;
-        }
-
-        if (gcodeY.HasValue && printer.MaxBuildVolumeY.HasValue && gcodeY > printer.MaxBuildVolumeY)
-        {
-            return true;
-        }
-
-        if (gcodeZ.HasValue && printer.MaxBuildVolumeZ.HasValue && gcodeZ > printer.MaxBuildVolumeZ)
-        {
-            return true;
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Scores build volume compatibility.
-    /// Returns 100 (fits) or -1 (eliminate).
-    /// </summary>
-    private static int ScoreBuildVolume(Printer printer, double? gcodeX, double? gcodeY, double? gcodeZ)
-    {
-        return DoesBuildVolumeExceed(printer, gcodeX, gcodeY, gcodeZ) ? -1 : 100;
-    }
-
-    /// <summary>
-    /// Scores nozzle hardness vs material abrasiveness.
-    /// Returns 100 (safe) or -1 (eliminate).
-    /// </summary>
-    private static int ScoreNozzleHardness(bool isAbrasive, bool isHardened)
-    {
-        if (!isAbrasive)
-        {
-            return 100; // Non-abrasive material → any nozzle is fine
-        }
-
-        return isHardened ? 100 : -1; // Abrasive + not hardened → eliminate
-    }
-
-    /// <summary>
-    /// Scores enclosure compatibility.
-    /// Returns 100 (met) or -1 (eliminate).
-    /// </summary>
-    private static int ScoreEnclosure(bool needsEnclosure, bool hasEnclosure)
-    {
-        if (!needsEnclosure)
-        {
-            return 100;
-        }
-
-        return hasEnclosure ? 100 : -1;
-    }
-
-    /// <summary>
-    /// Scores printer preference.
-    /// Returns 100 (preferred), 50 (neutral), or -1 (excluded/eliminated).
-    /// </summary>
-    private static int ScorePreference(Guid printerId, Guid[]? preferredIds, Guid[]? excludedIds)
-    {
-        if (excludedIds is not null && excludedIds.Contains(printerId))
-        {
-            return -1; // Excluded → eliminate
-        }
-
-        if (preferredIds is not null && preferredIds.Contains(printerId))
-        {
-            return 100; // Preferred
-        }
-
-        return 50; // Neutral
-    }
-
-    /// <summary>
-    /// Scores queue depth (0 jobs → 100, 6+ jobs → 10).
-    /// Linear interpolation between those bounds.
-    /// </summary>
-    private static int ScoreQueueDepth(int queuedJobCount)
-    {
-        if (queuedJobCount <= 0)
-        {
-            return 100;
-        }
-
-        if (queuedJobCount >= 6)
-        {
-            return 10;
-        }
-
-        // Linear interpolation: 100 at 0, 10 at 6
-        return 100 - (int)(queuedJobCount * (90.0 / 6.0));
-    }
-
-    /// <summary>
-    /// Scores toolhead presence when material/nozzle requirements exist.
-    /// Returns 100 (has toolheads) or -1 (eliminate).
-    /// </summary>
-    private static int ScoreToolheadPresence(Printer printer, PrintJob job)
-    {
-        bool requiresToolhead = !string.IsNullOrEmpty(job.RequiredMaterialType)
-            || job.RequiredNozzleDiameter.HasValue;
-
-        if (!requiresToolhead)
-        {
-            return 100;
-        }
-
-        return printer.Toolheads.Count > 0 ? 100 : -1;
-    }
-
-    /// <summary>
-    /// Scores color match between printer's loaded filament and job's required color.
-    /// Returns 100 (exact hex), 80 (same family), 50 (neutral/no data), or 20 (different family).
-    /// </summary>
-    private static int ScoreColorMatch(Printer printer, PrintJob job)
-    {
-        if (string.IsNullOrWhiteSpace(job.FilamentColor))
-        {
-            return 50; // No job color — neutral
-        }
-
-        string? printerColor = printer.Toolheads
-            .Where(t => t.IsPrimary)
-            .Select(t => t.CurrentFilamentColor)
-            .FirstOrDefault()
-            ?? printer.Toolheads
-                .Select(t => t.CurrentFilamentColor)
-                .FirstOrDefault(c => !string.IsNullOrWhiteSpace(c));
-
-        if (string.IsNullOrWhiteSpace(printerColor))
-        {
-            return 50; // No printer color — neutral
-        }
-
-        string jobHex = job.FilamentColor.Trim().TrimStart('#').ToUpperInvariant();
-        string printerHex = printerColor.Trim().TrimStart('#').ToUpperInvariant();
-
-        if (string.Equals(jobHex, printerHex, StringComparison.Ordinal))
-        {
-            return 100; // Exact hex match
-        }
-
-        (string Name, string Hex)? jobFamily = AutoTagService.HexToColorFamily(job.FilamentColor);
-        (string Name, string Hex)? printerFamily = AutoTagService.HexToColorFamily(printerColor);
-
-        if (jobFamily is null || printerFamily is null)
-        {
-            return 50; // Unparseable color — neutral
-        }
-
-        if (string.Equals(jobFamily.Value.Name, printerFamily.Value.Name, StringComparison.OrdinalIgnoreCase))
-        {
-            return 80; // Same color family
-        }
-
-        return 20; // Different family — slight penalty
-    }
-
-    /// <summary>
-    /// Calculates weighted average score across all factors.
-    /// Weights: material=30, nozzle=25, buildVolume=15, nozzleHardness=10, enclosure=10, preference=5, queueDepth=5
-    /// </summary>
-    private static int CalculateWeightedScore(Dictionary<string, int> factorScores)
-    {
-        var weights = new Dictionary<string, int>
-        {
-            ["material"] = 30,
-            ["nozzle"] = 25,
-            ["buildVolume"] = 15,
-            ["nozzleHardness"] = 10,
-            ["enclosure"] = 10,
-            ["preference"] = 5,
-            ["queueDepth"] = 5
-        };
-
-        double weightedSum = 0;
-        int totalWeight = 0;
-
-        foreach (KeyValuePair<string, int> factor in factorScores)
-        {
-            if (factor.Value < 0)
-            {
-                return -1; // Any elimination kills the whole score
-            }
-
-            if (weights.TryGetValue(factor.Key, out int weight))
-            {
-                weightedSum += factor.Value * weight;
-                totalWeight += weight;
-            }
-        }
-
-        return totalWeight > 0 ? (int)(weightedSum / totalWeight) : 0;
+        score.ScoreBreakdown["ColorMatch"].Score.Should().Be(50);
     }
 }
