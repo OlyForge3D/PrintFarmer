@@ -1113,16 +1113,18 @@ export const NewSliceJobPage: React.FC = () => {
       ? p.id === machineSelection.customId
       : p.name === selectedMachineProfileId);
     if (custom) {
-      // Keep original profile name for compatibility queries; store printer_model separately for display
       let printerModel: string | undefined;
+      let inherits: string | undefined;
       let settings: Record<string, unknown> | undefined;
       if (custom.rawJson) {
         try {
           const parsed = JSON.parse(custom.rawJson) as Record<string, unknown>;
-          settings = parsed;
-          if (typeof parsed.printer_model === 'string' && parsed.printer_model) {
-            printerModel = parsed.printer_model;
-          }
+          const nested = parsed.settings;
+          settings = nested && typeof nested === 'object' && !Array.isArray(nested)
+            ? { ...parsed, ...nested }
+            : parsed;
+          if (typeof settings?.printer_model === 'string') printerModel = settings.printer_model;
+          if (typeof settings?.inherits === 'string') inherits = settings.inherits;
         } catch { /* ignore parse errors */ }
       }
       return {
@@ -1130,6 +1132,7 @@ export const NewSliceJobPage: React.FC = () => {
         manufacturer: '',
         description: custom.description,
         printerModel,
+        inherits,
         nozzleDiameter: getCustomProfileNozzleDiameter(custom),
         settings,
       };
@@ -1137,11 +1140,33 @@ export const NewSliceJobPage: React.FC = () => {
     return null;
   }, [selectedMachineProfileId, machineSelection.customId, machineProfilesData, customProfilesData]);
 
+  // Clones retain the source JSON name; Orca exports may instead name their
+  // parent in `inherits`. Only reuse a preset from this model's worker catalog
+  // if the custom machine hasn't changed its declared model or nozzle.
+  const inheritedMachine = useMemo(() => {
+    if (!selectedMachineProfile || machineProfilesData.includes(selectedMachineProfile)) return undefined;
+    const rawName = selectedMachineProfile.settings?.name;
+    const source = (rawName !== selectedMachineProfile.name
+      ? machineProfilesData.find(profile => profile.name === rawName)
+      : undefined)
+      ?? machineProfilesData.find(profile => profile.name === selectedMachineProfile.inherits);
+    if (!source) return undefined;
+    const sourceModel = source.printerModel ?? source.printer_model;
+    if (selectedMachineProfile.printerModel
+      && sourceModel?.toLowerCase() !== selectedMachineProfile.printerModel.toLowerCase()) return undefined;
+    if (selectedMachineProfile.nozzleDiameter !== undefined
+      && getMachineProfileNozzleDiameter(source) !== selectedMachineProfile.nozzleDiameter) return undefined;
+    return source;
+  }, [machineProfilesData, selectedMachineProfile]);
+
   // Machine names for filament/process queries (just the selected machine)
   const selectedMachineNames = useMemo(() => {
     if (!selectedMachineProfile?.name) return [];
     return [selectedMachineProfile.name];
   }, [selectedMachineProfile]);
+  const processMachineNames = useMemo(() =>
+    inheritedMachine ? [...selectedMachineNames, inheritedMachine.name] : selectedMachineNames,
+  [inheritedMachine, selectedMachineNames]);
 
   const {
     filamentProfilesQuery: {
@@ -1155,6 +1180,7 @@ export const NewSliceJobPage: React.FC = () => {
   } = useMachineCompatibleProfiles(selectedMachineNames, {
     enabled: selectedMachineNames.length > 0,
     engineVersion: selectedEngineVersion ?? latestAvailableForEngine,
+    processMachineNames,
   });
 
   // Filter custom profiles by type for each selector.
@@ -1333,7 +1359,7 @@ export const NewSliceJobPage: React.FC = () => {
   const processProfilesBySource = useMemo(() => {
     const profiles = processProfilesData ?? [];
     const filtered = profiles.filter((profile) =>
-      isProcessProfileCompatibleWithMachine(profile, selectedMachineProfile));
+      isProcessProfileCompatibleWithMachine(profile, inheritedMachine ?? selectedMachineProfile, processMachineNames));
 
     const user: typeof profiles = [];
     const system: typeof profiles = [];
@@ -1359,7 +1385,7 @@ export const NewSliceJobPage: React.FC = () => {
     system.sort(byLayerHeightThenName);
 
     return { user, system };
-  }, [processProfilesData, selectedMachineProfile]);
+  }, [processProfilesData, inheritedMachine, selectedMachineProfile, processMachineNames]);
 
   const defaultProcessPresetId = useMemo(() => {
     const firstSystemPreset = processProfilesBySource.user[0] ?? processProfilesBySource.system[0];
@@ -1816,7 +1842,7 @@ export const NewSliceJobPage: React.FC = () => {
   }, [allFilamentProfiles, customProfilesData]);
 
   const [bedSurfaceSelection, setBedSurfaceSelection] = useState({ machine: '', value: '' });
-  const selectedBedType = bedSurfaceSelection.machine === selectedMachineProfileId ? bedSurfaceSelection.value : '';
+  const bedTypeOverride = bedSurfaceSelection.machine === selectedMachineProfileId ? bedSurfaceSelection.value : '';
   const processOverrides = useMemo(() => buildProcessOverrides({
     slicerSettings,
     originalProcessSettings,
@@ -1825,11 +1851,12 @@ export const NewSliceJobPage: React.FC = () => {
     engineVersion: selectedEngineVersion ?? latestAvailableForEngine,
   }), [slicerSettings, originalProcessSettings, advancedProcessSettings, slicerMode, selectedEngineVersion, latestAvailableForEngine]);
   const filamentBedContext = getFilamentBedContext(
-    selectedMachineProfile?.settings,
+    { ...inheritedMachine?.settings, ...selectedMachineProfile?.settings },
     { ...resolvedProcessProfile?.settings, ...processOverrides },
-    selectedBedType,
-    selectedMachineProfile?.manufacturer,
+    bedTypeOverride,
+    selectedMachineProfile?.manufacturer || inheritedMachine?.manufacturer,
   );
+  const selectedBedType = filamentBedContext.supportMultiBedTypes === false ? '' : bedTypeOverride;
 
   // Per-kg filament cost from the selected profile, for best-effort material cost.
   const filamentCostPerKg = useMemo(
@@ -3212,12 +3239,7 @@ export const NewSliceJobPage: React.FC = () => {
             id="slice-bed-type"
             selectedBedType={selectedBedType}
             onChange={value => setBedSurfaceSelection({ machine: selectedMachineProfileId, value })}
-            machineSettings={selectedMachineProfile?.settings}
-            manufacturer={selectedMachineProfile?.manufacturer}
-            processSettings={{ ...resolvedProcessProfile?.settings, ...processOverrides }}
-            filaments={printerIsMultiToolhead
-              ? physicalToolheads.map((_, index) => allFilamentProfiles.find(profile => profile.name === extruderFilamentProfileIds[index]))
-              : [selectedFilamentProfile]}
+            context={filamentBedContext}
           />
 
           {/* PROCESS PROFILE - with Reset, Save-as, and profile management menu */}

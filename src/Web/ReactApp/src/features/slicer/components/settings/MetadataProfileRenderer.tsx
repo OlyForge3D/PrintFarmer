@@ -205,7 +205,9 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
       if (next === null) return;
       e.preventDefault();
       setActiveTabIdx(next);
-      tabRefs.current[next]?.focus();
+      const tab = tabRefs.current[next];
+      tab?.focus();
+      tab?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
     },
     [visibleTabs.length],
   );
@@ -242,7 +244,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
       )}
       {/* Tab bar + Advanced toggle */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-pf-border">
-        <div className="flex gap-3 overflow-x-auto" role="tablist" aria-label="Profile settings sections">
+        <div className="flex min-w-0 gap-3 overflow-x-auto p-0.5" role="tablist" aria-label="Profile settings sections">
           {visibleTabs.map((tab, idx) => {
             const isActive = idx === clampedActiveTabIdx;
             const dirty = isTabDirty(tab);
@@ -262,7 +264,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
                 disabled={disabled}
                 aria-selected={isActive}
                 className={clsx(
-                  'px-1 pb-1 -mb-2 text-xs whitespace-nowrap rounded-none border-b-2 transition-colors',
+                  'shrink-0 px-1 pb-1 text-xs whitespace-nowrap rounded-none border-b-2 transition-colors',
                   isActive ? 'font-bold border-pf-accent-2' : 'font-normal border-transparent',
                   dirty
                     ? 'text-pf-warning'

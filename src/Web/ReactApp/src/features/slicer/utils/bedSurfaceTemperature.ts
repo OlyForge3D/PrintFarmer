@@ -16,6 +16,8 @@ export interface FilamentBedContext {
 }
 
 function readNativeBoolean(value: unknown): boolean | undefined {
+  if (Array.isArray(value) && value.length === 1) [value] = value;
+  if (typeof value === 'string') value = value.trim().toLowerCase();
   if (value === true || value === 'true' || value === '1' || value === 1) return true;
   if (value === false || value === 'false' || value === '0' || value === 0) return false;
   return undefined;
@@ -28,9 +30,10 @@ export function getFilamentBedContext(
   const model = machine?.printer_model;
   const isBambu = ['bbl', 'bambu', 'bambu lab', 'bambulab'].includes(vendor ?? '')
     || (!vendor && typeof model === 'string' && model.trimStart().toLowerCase().startsWith('bambu lab'));
+  const supportMultiBedTypes = isBambu || readNativeBoolean(machine?.support_multi_bed_types);
   return {
-    bedType: resolveBedType(selectedBedType, process, machine),
-    supportMultiBedTypes: isBambu || readNativeBoolean(machine?.support_multi_bed_types),
+    bedType: resolveBedType(supportMultiBedTypes === false ? '' : selectedBedType, process, machine),
+    supportMultiBedTypes,
   };
 }
 

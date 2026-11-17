@@ -94,17 +94,11 @@ current worker release.
 
 ### Bed surfaces and filament temperatures
 
-The web slicer and Quick Slice preserve the profile's bed surface unless the
-operator explicitly chooses another **Bed Type**. That choice is submitted as
+The web slicer and Quick Slice hide **Bed Type** for single-bed machine profiles
+and preserve the profile's bed surface. Where the selector is available, an
+explicit choice is submitted as
 `overrides.curr_bed_type` and included in the native process configuration; it
 does not rewrite the filament's temperature arrays.
-
-Bed summaries read the selected surface's native first-layer and other-layer
-keys, not the legacy hot-plate summary. Zero stays zero, missing/unsupported
-values appear as **Unknown**, and each extruder's profile values remain separate.
-These are profile values, not proof of the generated heating commands:
-OrcaSlicer's active-filament selection, `bed_temperature_formula`, and custom
-start G-code still determine what reaches the printer.
 
 The filament editor honors the selected machine's resolved
 `support_multi_bed_types`. When false and the active `curr_bed_type` is known,

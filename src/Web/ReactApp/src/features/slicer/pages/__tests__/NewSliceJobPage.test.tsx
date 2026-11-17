@@ -1277,6 +1277,41 @@ describe('NewSliceJobPage', () => {
   });
 
   describe('Bed-surface temperatures', () => {
+    it.each([
+      { origin: { inherits: 'Qidi X-Plus 4 0.4 nozzle' }, nozzle: '0.4', compatible: true },
+      { origin: { name: 'Qidi X-Plus 4 0.4 nozzle' }, nozzle: '0.4', compatible: true },
+      { origin: { inherits: 'Qidi X-Plus 4 0.4 nozzle' }, nozzle: '0.6', compatible: false },
+    ])('only offers the QIDI source presets for a compatible nozzle: $origin $nozzle', async ({ origin, nozzle, compatible }) => {
+      const machine = { name: 'Qidi X-Plus 4 0.4 nozzle', manufacturer: 'Qidi', printerModel: 'Qidi X-Plus 4', nozzleDiameter: 0.4,
+        settings: { support_multi_bed_types: ['0'], curr_bed_type: 'Textured PEI Plate' } };
+      const custom = { id: 'qidi-custom', name: 'qp4-1-Qidi X-Plus 4', profileType: 'machine' as const,
+        printerModelId: 'model-1', isOwnedByCurrentUser: true, isSystem: false, createdAt: '2026-01-01',
+        rawJson: JSON.stringify({ ...origin, printer_model: machine.printerModel, nozzle_diameter: [nozzle] }) };
+      const preset = { ...mockProcessProfiles[0], name: '0.20mm Standard @Qidi XPlus4', compatible_printers: [machine.name] };
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([machine]);
+      vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
+        profiles: [custom], totalCount: 1, machineProfileCount: 1, processProfileCount: 0, filamentProfileCount: 0,
+      });
+      vi.mocked(slicerProfilesService.getProcessProfilesForMachines).mockImplementation(async (names) =>
+        names.includes(machine.name) ? [preset, { ...preset, name: 'Wrong nozzle', compatible_printers: ['Qidi X-Plus 4 0.6 nozzle'] }] : []);
+      localStorage.setItem('sliceJob.selectedPrinterId', 'printer-1');
+      localStorage.setItem('sliceJob.selectedMachineProfileId', custom.name);
+      localStorage.setItem('sliceJob.selectedMachineProfileId.customId', custom.id);
+      renderWithProviders(<NewSliceJobPage />);
+
+      if (compatible) {
+        expect(await screen.findByRole('option', { name: /0\.20mm Standard @Qidi XPlus4/ })).toBeInTheDocument();
+        expect(screen.queryByRole('option', { name: /Wrong nozzle/ })).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('Bed Type')).not.toBeInTheDocument();
+      } else {
+        expect(await screen.findByText('No process profiles available')).toBeInTheDocument();
+        expect(screen.queryByRole('option', { name: /0\.20mm Standard @Qidi XPlus4/ })).not.toBeInTheDocument();
+      }
+      expect(slicerProfilesService.getProcessProfilesForMachines).toHaveBeenLastCalledWith(
+        compatible ? [custom.name, machine.name] : [custom.name], expect.anything(),
+      );
+    });
+
     it.each([false, true])('submits source-qualified same-name selections (multi-toolhead: %s)', async multi => {
       const machine = {
         id: 'owned-machine-id', name: mockMachineProfiles[0].name, profileType: 'machine' as const,
@@ -1483,9 +1518,9 @@ describe('NewSliceJobPage', () => {
       expect(slicerProfilesService.uploadProfile).not.toHaveBeenCalled();
     });
 
-    it('sends the explicitly selected native surface and shows its values instead of the hot-plate summary', async () => {
+    it('sends the explicitly selected native surface for a multi-bed machine', async () => {
       vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
-        { ...mockMachineProfiles[0], settings: { curr_bed_type: 'High Temp Plate', support_multi_bed_types: '0' } },
+        { ...mockMachineProfiles[0], settings: { curr_bed_type: 'High Temp Plate', support_multi_bed_types: '1' } },
       ]);
       vi.mocked(slicerProfilesService.getFilamentProfilesForMachines).mockResolvedValue([
         { ...mockFilamentProfiles[0], bedTemperature: 0, settings: {
@@ -1494,9 +1529,9 @@ describe('NewSliceJobPage', () => {
         } },
       ]);
       renderWithProviders(<NewSliceJobPage />, { route: '/slicer?modelId=model-3d-1' });
-      await screen.findByText('Bed first layer: 0°C; other layers: 0°C');
+      await screen.findByRole('option', { name: 'Inherit from profile (High Temp Plate)' });
       fireEvent.change(screen.getByLabelText('Bed Type'), { target: { value: 'Textured PEI Plate' } });
-      expect(screen.getByText('Bed first layer: 65°C; other layers: 60°C')).toBeInTheDocument();
+      expect(screen.queryByText(/Bed first layer/)).not.toBeInTheDocument();
       await waitFor(() => {
         expect(Array.from(document.querySelectorAll('select')).some(select => select.value.startsWith('system:'))).toBe(true);
       });
@@ -1522,7 +1557,8 @@ describe('NewSliceJobPage', () => {
         } },
       ]);
       renderWithProviders(<NewSliceJobPage />);
-      await screen.findByText('Bed first layer: 65°C; other layers: 60°C');
+      await screen.findByRole('button', { name: /Generic PLA @MK4/ });
+      await waitFor(() => expect(screen.queryByLabelText('Bed Type')).not.toBeInTheDocument());
       fireEvent.click(screen.getByRole('button', { name: 'Filament profile options menu' }));
       fireEvent.click(screen.getByRole('button', { name: 'Edit settings' }));
       await waitFor(() => expect(screen.getByTitle('Textured Plate first layer')).toHaveValue(65));
