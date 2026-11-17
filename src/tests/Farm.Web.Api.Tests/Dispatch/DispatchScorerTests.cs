@@ -24,6 +24,14 @@ namespace Farm.Web.Api.Tests.Dispatch;
 ///
 /// Each factor returns 0–100 or ELIMINATE (represented as null/negative).
 /// The final score is a weighted average of non-eliminated factors.
+///
+/// WARNING: Only the tests before the "MATERIAL MATCH FACTOR TESTS" section call the
+/// production <see cref="DispatchScorer"/>. The tests from that section onward call
+/// private test-local scoring replicas (see "SCORING HELPER METHODS"), not
+/// <see cref="DispatchScorer"/>, and are NOT production regression coverage. Known
+/// divergences: with no material requirement the replica scores 100 where production
+/// returns a neutral 70; an oversized build volume eliminates in the replica where
+/// production returns a soft score of 20. Tracked in issue #3866.
 /// </summary>
 public class DispatchScorerTests : IDisposable
 {
@@ -338,6 +346,8 @@ public class DispatchScorerTests : IDisposable
 
     // =========================================================================
     // MATERIAL MATCH FACTOR TESTS
+    // WARNING: Tests from here onward exercise test-local replicas, not
+    // DispatchScorer. See the class summary and issue #3866.
     // =========================================================================
 
     [Fact]
@@ -437,8 +447,7 @@ public class DispatchScorerTests : IDisposable
         Printer printer = CreateTestPrinter(maxBuildX: 250, maxBuildY: 210, maxBuildZ: 210);
 
         // Simulate a gcode file that exceeds build volume
-        // TODO: When Lambert's implementation lands, this will use actual gcode dimensions
-        // For now, we test the scoring logic directly
+        // Replica check: production DispatchScorer gives a soft score of 20, not elimination (#3866).
         bool exceeds = DoesBuildVolumeExceed(printer, 300, 200, 200);
 
         exceeds.Should().BeTrue("gcode exceeding build volume should be eliminated");
@@ -743,9 +752,8 @@ public class DispatchScorerTests : IDisposable
 
     // =========================================================================
     // SCORING HELPER METHODS
-    // These implement the scoring logic from the specification.
-    // When Lambert's IDispatchScorer lands, these tests should be adapted
-    // to call the real implementation instead.
+    // Test-local replicas of the original scoring specification. They are not
+    // DispatchScorer and diverge from it; replace them per issue #3866.
     // =========================================================================
 
     /// <summary>
