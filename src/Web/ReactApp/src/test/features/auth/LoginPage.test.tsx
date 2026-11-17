@@ -1,14 +1,20 @@
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { LoginPage } from '@/features/auth/pages/LoginPage';
+
+const authMocks = vi.hoisted(() => ({
+  login: vi.fn(),
+  loginWithPasskey: vi.fn(),
+  register: vi.fn(),
+}));
 
 vi.mock('@/features/auth/hooks/useAuth', () => ({
   useAuth: () => ({
-    login: vi.fn().mockResolvedValue(false),
-    loginWithPasskey: vi.fn().mockResolvedValue(false),
-    register: vi.fn().mockResolvedValue(false),
+    login: authMocks.login,
+    loginWithPasskey: authMocks.loginWithPasskey,
+    register: authMocks.register,
     error: null,
   }),
 }));
@@ -100,17 +106,30 @@ vi.mock('@/common/components/ui', () => ({
   ),
 }));
 
-function renderLoginPage() {
+function CurrentLocation() {
+  const location = useLocation();
+  return <output data-testid="current-location">{location.pathname}{location.search}</output>;
+}
+
+function renderLoginPage(state?: unknown) {
+  const initialEntry = state === undefined ? '/login' : { pathname: '/login', state };
   return render(
-    <MemoryRouter initialEntries={['/login']}>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="*" element={<CurrentLocation />} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
 describe('LoginPage', () => {
+  beforeEach(() => {
+    authMocks.login.mockReset().mockResolvedValue(false);
+    authMocks.loginWithPasskey.mockReset().mockResolvedValue(false);
+    authMocks.register.mockReset().mockResolvedValue(false);
+  });
+
   it('renders the login route as a page card instead of a modal dialog', () => {
     renderLoginPage();
 
@@ -127,4 +146,32 @@ describe('LoginPage', () => {
     expect(screen.getByRole('heading', { name: /create account/i, level: 1 })).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
+
+  it.each([
+    { pathname: '/printQueue/history', search: '', expected: '/printQueue/history' },
+    { pathname: '/files', search: '?source=printers', expected: '/files?source=printers' },
+  ])('returns to the requested internal route after sign-in: $expected', async ({ pathname, search, expected }) => {
+    authMocks.login.mockResolvedValue(true);
+    renderLoginPage({ from: { pathname, search } });
+
+    fireEvent.change(screen.getByLabelText('Username or Email'), { target: { value: 'operator' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'synthetic-password' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
+
+    expect(await screen.findByTestId('current-location')).toHaveTextContent(expected);
+  });
+
+  it.each(['https://external.example/path', '//external.example/path'])(
+    'falls back to the dashboard for an unsafe return destination: %s',
+    async (pathname) => {
+      authMocks.login.mockResolvedValue(true);
+      renderLoginPage({ from: { pathname, search: '?source=printers' } });
+
+      fireEvent.change(screen.getByLabelText('Username or Email'), { target: { value: 'operator' } });
+      fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'synthetic-password' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
+
+      expect(await screen.findByTestId('current-location')).toHaveTextContent('/');
+    },
+  );
 });

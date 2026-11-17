@@ -11,6 +11,7 @@ interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSwitchToRegister: () => void;
+  onLoginSuccess?: () => void;
   surface?: AuthSurfaceVariant;
 }
 
@@ -18,6 +19,7 @@ export function LoginModal({
   isOpen,
   onClose,
   onSwitchToRegister,
+  onLoginSuccess,
   surface = 'modal',
 }: LoginModalProps) {
   const [username, setUsername] = useState('');
@@ -38,9 +40,13 @@ export function LoginModal({
     try {
       const success = await login({ username, password, rememberMe });
       if (success) {
-        onClose();
         setUsername('');
         setPassword('');
+        if (onLoginSuccess) {
+          onLoginSuccess();
+        } else {
+          onClose();
+        }
       }
     } finally {
       setIsLoading(false);
@@ -55,9 +61,13 @@ export function LoginModal({
     try {
       const success = await loginWithPasskey(username);
       if (success) {
-        onClose();
         setUsername('');
         setPassword('');
+        if (onLoginSuccess) {
+          onLoginSuccess();
+        } else {
+          onClose();
+        }
       }
     } catch (err: unknown) {
       const apiErr = err as { details?: string; message?: string };
