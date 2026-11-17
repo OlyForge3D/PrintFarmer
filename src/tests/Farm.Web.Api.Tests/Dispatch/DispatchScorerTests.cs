@@ -448,6 +448,15 @@ public class DispatchScorerTests : IDisposable
         DispatchScore score = await ScorePrinterAsync(printer, job);
 
         score.ScoreBreakdown["MaterialMatch"].Score.Should().Be(70);
+        score.ScoreBreakdown["NozzleDiameter"].Score.Should().Be(100);
+        score.ScoreBreakdown["BuildVolume"].Score.Should().Be(70);
+        score.ScoreBreakdown["Enclosure"].Score.Should().Be(100);
+        score.ScoreBreakdown["NozzleHardness"].Score.Should().Be(100);
+        score.ScoreBreakdown["ModelMatch"].Score.Should().Be(70);
+        score.ScoreBreakdown["QueueDepth"].Score.Should().Be(100);
+        score.ScoreBreakdown["Preferred"].Score.Should().Be(70);
+        score.ScoreBreakdown["ColorMatch"].Score.Should().Be(50);
+        score.TotalScore.Should().Be(84.82);
     }
 
     // =========================================================================
