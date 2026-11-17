@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
@@ -9,7 +8,6 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.AutoTagging;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Tests.Builders;
-using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -27,9 +25,13 @@ namespace Farm.Web.Api.Tests.Dispatch;
 /// Each factor returns 0–100 or ELIMINATE (represented as null/negative).
 /// The final score is a weighted average of non-eliminated factors.
 ///
-/// NOTE: These tests are written from the SPECIFICATION. The implementation
-/// (IDispatchScorer / DispatchScorerService) is being built by Lambert in parallel.
-/// Tests that reference not-yet-existing types are clearly marked.
+/// WARNING: Only the tests before the "MATERIAL MATCH FACTOR TESTS" section call the
+/// production <see cref="DispatchScorer"/>. The tests from that section onward call
+/// private test-local scoring replicas (see "SCORING HELPER METHODS"), not
+/// <see cref="DispatchScorer"/>, and are NOT production regression coverage. Known
+/// divergences: with no material requirement the replica scores 100 where production
+/// returns a neutral 70; an oversized build volume eliminates in the replica where
+/// production returns a soft score of 20. Tracked in issue #3866.
 /// </summary>
 public class DispatchScorerTests : IDisposable
 {
@@ -344,6 +346,8 @@ public class DispatchScorerTests : IDisposable
 
     // =========================================================================
     // MATERIAL MATCH FACTOR TESTS
+    // WARNING: Tests from here onward exercise test-local replicas, not
+    // DispatchScorer. See the class summary and issue #3866.
     // =========================================================================
 
     [Fact]
@@ -443,8 +447,7 @@ public class DispatchScorerTests : IDisposable
         Printer printer = CreateTestPrinter(maxBuildX: 250, maxBuildY: 210, maxBuildZ: 210);
 
         // Simulate a gcode file that exceeds build volume
-        // TODO: When Lambert's implementation lands, this will use actual gcode dimensions
-        // For now, we test the scoring logic directly
+        // Replica check: production DispatchScorer gives a soft score of 20, not elimination (#3866).
         bool exceeds = DoesBuildVolumeExceed(printer, 300, 200, 200);
 
         exceeds.Should().BeTrue("gcode exceeding build volume should be eliminated");
@@ -749,9 +752,8 @@ public class DispatchScorerTests : IDisposable
 
     // =========================================================================
     // SCORING HELPER METHODS
-    // These implement the scoring logic from the specification.
-    // When Lambert's IDispatchScorer lands, these tests should be adapted
-    // to call the real implementation instead.
+    // Test-local replicas of the original scoring specification. They are not
+    // DispatchScorer and diverge from it; replace them per issue #3866.
     // =========================================================================
 
     /// <summary>
@@ -1007,96 +1009,5 @@ public class DispatchScorerTests : IDisposable
         }
 
         return totalWeight > 0 ? (int)(weightedSum / totalWeight) : 0;
-    }
-}
-
-/// <summary>
-/// Integration tests for the dispatch API endpoints.
-/// These require the DispatchController to exist (being built by Lambert).
-/// Tests use CustomWebApplicationFactory for full HTTP testing.
-/// </summary>
-[Trait("Category", "Integration")]
-public class DispatchEndpointIntegrationTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
-{
-    private readonly CustomWebApplicationFactory _factory;
-
-    public DispatchEndpointIntegrationTests(CustomWebApplicationFactory factory)
-    {
-        _factory = factory;
-    }
-
-    public async Task InitializeAsync()
-    {
-        await _factory.ResetDataAsync();
-    }
-
-    public Task DisposeAsync()
-    {
-        return Task.CompletedTask;
-    }
-
-    // TODO: These endpoint tests require Lambert's DispatchController to be implemented.
-    // Endpoints expected:
-    //   GET  /api/dispatch/candidates?jobId={id} → ranked list of printers
-    //   POST /api/dispatch/assign → assign job to specific printer
-
-    [Fact]
-    [Trait("Category", "Dispatch")]
-    public async Task GetCandidates_ReturnsRankedList()
-    {
-        // Arrange: Create printers and a queued job via the API
-        HttpClient client = await _factory.CreateAdminClientAsync();
-
-        // Seed test data: create a location, printer, and job
-        // TODO: When DispatchController exists, POST to /api/dispatch/candidates
-        // For now, verify the factory and auth flow work
-        System.Net.Http.HttpResponseMessage healthResponse = await client.GetAsync("/healthz");
-        healthResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
-
-    }
-
-    [Fact]
-    [Trait("Category", "Dispatch")]
-    public async Task GetCandidates_NoPrintersAvailable_ReturnsEmpty()
-    {
-        // No printers in the system → should return empty list
-        HttpClient client = await _factory.CreateAdminClientAsync();
-
-        // TODO: When DispatchController exists:
-        // For now, verify the test infrastructure works
-        System.Net.Http.HttpResponseMessage healthResponse = await client.GetAsync("/healthz");
-        healthResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
-    }
-
-    [Fact]
-    [Trait("Category", "Dispatch")]
-    public async Task DispatchJob_ValidPrinter_AssignsAndStarts()
-    {
-        // Dispatch a job to a valid printer → should assign and return 200
-        HttpClient client = await _factory.CreateAdminClientAsync();
-
-        // TODO: When DispatchController exists:
-        // 1. Create a printer via POST /api/printers
-        // 2. Create a print job via POST /api/printjobs
-        // 3. POST /api/dispatch/assign { jobId, printerId }
-        // 4. Verify job status changes to Assigned
-
-        System.Net.Http.HttpResponseMessage healthResponse = await client.GetAsync("/healthz");
-        healthResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
-    }
-
-    [Fact]
-    [Trait("Category", "Dispatch")]
-    public async Task DispatchJob_PrinterBusy_Returns409()
-    {
-        // Dispatch to a printer that's already printing → 409 Conflict
-        HttpClient client = await _factory.CreateAdminClientAsync();
-
-        // TODO: When DispatchController exists:
-        // 1. Create printer, assign an active job so it's busy
-        // 2. Try to dispatch another job to same printer
-
-        System.Net.Http.HttpResponseMessage healthResponse = await client.GetAsync("/healthz");
-        healthResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
     }
 }
