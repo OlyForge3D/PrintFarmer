@@ -158,7 +158,7 @@ describe('App unauthenticated auth routes', () => {
     render(<App />);
     fireEvent.click(await screen.findByRole('link', { name: /forgot password\?/i }));
 
-    expect(await screen.findByPlaceholderText('your.email@example.com')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Email Address')).toBeInTheDocument();
     expect(window.location.pathname).toBe('/forgot-password');
   });
 

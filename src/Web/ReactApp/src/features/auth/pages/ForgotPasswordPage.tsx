@@ -136,6 +136,7 @@ export function ForgotPasswordPage() {
 
             <FormField
               label="Email Address"
+              htmlFor="email"
               inline={false}
             >
               <Input
