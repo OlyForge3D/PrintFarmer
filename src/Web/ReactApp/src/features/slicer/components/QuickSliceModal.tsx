@@ -128,9 +128,7 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
     || (machineProfiles.length > 0 ? machineProfiles[0].name : '');
   const effectiveMachineProfile = machineProfiles.find(profile => profile.name === effectiveMachineProfileId);
 
-  const machineNames = useMemo(() => {
-    return effectiveMachineProfileId ? [effectiveMachineProfileId] : [];
-  }, [effectiveMachineProfileId]);
+  const machineNames = effectiveMachineProfileId ? [effectiveMachineProfileId] : [];
 
   // Fetch filament profiles
   const { data: filamentProfiles = [] } = useQuery<OrcaFilamentProfile[]>({
