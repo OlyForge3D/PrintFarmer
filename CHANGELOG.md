@@ -83,6 +83,10 @@
 
 ### Fixes
 
+- Restore compatible process presets for renamed Orca machine profiles, hide
+  Bed Type for single-bed machines, and remove vertical overflow from the web
+  slicer's settings tabs.
+
 - Keep Printer Dashboard maintenance/configuration banner dismissals across
   refresh without hiding newer catalog revisions; respect dismissed
   profile-import tasks on periodic scans. Clarify missing-import tasks and use a

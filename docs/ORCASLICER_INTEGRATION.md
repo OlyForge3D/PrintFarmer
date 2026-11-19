@@ -94,8 +94,9 @@ current worker release.
 
 ### Bed surfaces and filament temperatures
 
-The web slicer and Quick Slice preserve the profile's bed surface unless the
-operator explicitly chooses another **Bed Type**. That choice is submitted as
+The web slicer and Quick Slice hide **Bed Type** for single-bed machine profiles
+and preserve the profile's bed surface. Where the selector is available, an
+explicit choice is submitted as
 `overrides.curr_bed_type` and included in the native process configuration; it
 does not rewrite the filament's temperature arrays.
 

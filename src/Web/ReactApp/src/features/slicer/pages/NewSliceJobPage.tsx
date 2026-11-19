@@ -145,6 +145,22 @@ function getCustomProfileNozzleDiameter(profile: { rawJson?: string }): number |
   }
 }
 
+function getCustomProfileSettings(rawJson?: string): Record<string, unknown> | undefined {
+  if (!rawJson) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(rawJson);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const raw = parsed as Record<string, unknown>;
+    const settings = raw.settings;
+    return settings && typeof settings === 'object' && !Array.isArray(settings)
+      ? settings as Record<string, unknown>
+      : raw;
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    return undefined;
+  }
+}
+
 function getMachineProfileNozzleDiameter(profile: OrcaMachineProfile | CustomProfile): number | undefined {
   if ('profileType' in profile) {
     return getCustomProfileNozzleDiameter(profile);
@@ -1113,16 +1129,18 @@ export const NewSliceJobPage: React.FC = () => {
       ? p.id === machineSelection.customId
       : p.name === selectedMachineProfileId);
     if (custom) {
-      // Keep original profile name for compatibility queries; store printer_model separately for display
       let printerModel: string | undefined;
+      let inherits: string | undefined;
       let settings: Record<string, unknown> | undefined;
       if (custom.rawJson) {
         try {
           const parsed = JSON.parse(custom.rawJson) as Record<string, unknown>;
-          settings = parsed;
-          if (typeof parsed.printer_model === 'string' && parsed.printer_model) {
-            printerModel = parsed.printer_model;
-          }
+          const nested = parsed.settings;
+          settings = nested && typeof nested === 'object' && !Array.isArray(nested)
+            ? { ...parsed, ...nested }
+            : parsed;
+          if (typeof settings?.printer_model === 'string') printerModel = settings.printer_model;
+          if (typeof settings?.inherits === 'string') inherits = settings.inherits;
         } catch { /* ignore parse errors */ }
       }
       return {
@@ -1130,6 +1148,7 @@ export const NewSliceJobPage: React.FC = () => {
         manufacturer: '',
         description: custom.description,
         printerModel,
+        inherits,
         nozzleDiameter: getCustomProfileNozzleDiameter(custom),
         settings,
       };
@@ -1137,11 +1156,39 @@ export const NewSliceJobPage: React.FC = () => {
     return null;
   }, [selectedMachineProfileId, machineSelection.customId, machineProfilesData, customProfilesData]);
 
+  // Clones retain the source JSON name; Orca exports may instead name their
+  // parent in `inherits`. Only reuse a preset from this model's worker catalog
+  // if the custom machine hasn't changed its declared model or nozzle.
+  const inheritedMachine = useMemo(() => {
+    if (!selectedMachineProfile || machineProfilesData.includes(selectedMachineProfile)) return undefined;
+    const rawName = selectedMachineProfile.settings?.name;
+    // Orca resolves non-system custom profiles through their declared parent.
+    const sourceName = selectedMachineProfile.settings?.from === 'system'
+      ? rawName ?? selectedMachineProfile.name
+      : selectedMachineProfile.inherits;
+    const source = sourceName
+      ? machineProfilesData.find(profile => profile.name === sourceName)
+      : undefined;
+    if (!source) return undefined;
+    const sourceModel = source.printerModel ?? source.printer_model;
+    if (selectedMachineProfile.printerModel
+      && sourceModel?.toLowerCase() !== selectedMachineProfile.printerModel.toLowerCase()) return undefined;
+    if (selectedMachineProfile.nozzleDiameter !== undefined) {
+      const sourceNozzleDiameter = getMachineProfileNozzleDiameter(source);
+      if (sourceNozzleDiameter === undefined
+        || Math.abs(sourceNozzleDiameter - selectedMachineProfile.nozzleDiameter) >= NOZZLE_MATCH_TOLERANCE) return undefined;
+    }
+    return source;
+  }, [machineProfilesData, selectedMachineProfile]);
+
   // Machine names for filament/process queries (just the selected machine)
   const selectedMachineNames = useMemo(() => {
     if (!selectedMachineProfile?.name) return [];
     return [selectedMachineProfile.name];
   }, [selectedMachineProfile]);
+  const processMachineNames = useMemo(() =>
+    inheritedMachine ? [...selectedMachineNames, inheritedMachine.name] : selectedMachineNames,
+  [inheritedMachine, selectedMachineNames]);
 
   const {
     filamentProfilesQuery: {
@@ -1155,6 +1202,7 @@ export const NewSliceJobPage: React.FC = () => {
   } = useMachineCompatibleProfiles(selectedMachineNames, {
     enabled: selectedMachineNames.length > 0,
     engineVersion: selectedEngineVersion ?? latestAvailableForEngine,
+    processMachineNames,
   });
 
   // Filter custom profiles by type for each selector.
@@ -1333,7 +1381,7 @@ export const NewSliceJobPage: React.FC = () => {
   const processProfilesBySource = useMemo(() => {
     const profiles = processProfilesData ?? [];
     const filtered = profiles.filter((profile) =>
-      isProcessProfileCompatibleWithMachine(profile, selectedMachineProfile));
+      isProcessProfileCompatibleWithMachine(profile, inheritedMachine ?? selectedMachineProfile, processMachineNames));
 
     const user: typeof profiles = [];
     const system: typeof profiles = [];
@@ -1359,7 +1407,7 @@ export const NewSliceJobPage: React.FC = () => {
     system.sort(byLayerHeightThenName);
 
     return { user, system };
-  }, [processProfilesData, selectedMachineProfile]);
+  }, [processProfilesData, inheritedMachine, selectedMachineProfile, processMachineNames]);
 
   const defaultProcessPresetId = useMemo(() => {
     const firstSystemPreset = processProfilesBySource.user[0] ?? processProfilesBySource.system[0];
@@ -1794,29 +1842,36 @@ export const NewSliceJobPage: React.FC = () => {
       allFilamentProfiles.find((p: OrcaFilamentProfile) => p.name === selectedFilamentProfileId);
   }, [allFilamentProfiles, selectedFilamentProfileId, filamentSelection.customId]);
 
+  const getBedSurfaceFilament = useCallback((selection: ProfileSelection) => {
+    if (!selection.name) return undefined;
+    if (!selection.customId) {
+      return allFilamentProfiles.find(profile => profile.name === selection.name);
+    }
+    const profile = customProfilesData?.profiles.find(candidate =>
+      candidate.id === selection.customId && candidate.profileType === 'filament');
+    return profile
+      ? { name: profile.name, settings: getCustomProfileSettings(profile.rawJson) }
+      : undefined;
+  }, [allFilamentProfiles, customProfilesData]);
+
+  const bedSurfaceFilaments = useMemo(() => printerIsMultiToolhead
+    ? physicalToolheads.map((_, index) =>
+      getBedSurfaceFilament(extruderFilamentSelections[index] ?? { name: '' }))
+    : [getBedSurfaceFilament(filamentSelection)],
+  [extruderFilamentSelections, filamentSelection, getBedSurfaceFilament, physicalToolheads, printerIsMultiToolhead]);
+
   const getSelectionColour = useCallback((selection: ProfileSelection): string => {
     if (!selection.customId) {
       return getFilamentProfileColour(allFilamentProfiles.find(p => p.name === selection.name));
     }
     const profile = customProfilesData?.profiles.find(p =>
       p.id === selection.customId && p.profileType === 'filament');
-    if (!profile?.rawJson) return DEFAULT_FILAMENT_COLOUR;
-    try {
-      const parsed: unknown = JSON.parse(profile.rawJson);
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return DEFAULT_FILAMENT_COLOUR;
-      const raw = parsed as Record<string, unknown>;
-      const settings = raw.settings && typeof raw.settings === 'object' && !Array.isArray(raw.settings)
-        ? raw.settings as Record<string, unknown> : raw;
-      return getFilamentProfileColour({ settings });
-    } catch (error) {
-      if (!(error instanceof SyntaxError)) throw error;
-      // Display only; the server rejects invalid native JSON before queuing.
-      return DEFAULT_FILAMENT_COLOUR;
-    }
+    const settings = getCustomProfileSettings(profile?.rawJson);
+    return settings ? getFilamentProfileColour({ settings }) : DEFAULT_FILAMENT_COLOUR;
   }, [allFilamentProfiles, customProfilesData]);
 
   const [bedSurfaceSelection, setBedSurfaceSelection] = useState({ machine: '', value: '' });
-  const selectedBedType = bedSurfaceSelection.machine === selectedMachineProfileId ? bedSurfaceSelection.value : '';
+  const bedTypeOverride = bedSurfaceSelection.machine === selectedMachineProfileId ? bedSurfaceSelection.value : '';
   const processOverrides = useMemo(() => buildProcessOverrides({
     slicerSettings,
     originalProcessSettings,
@@ -1825,11 +1880,12 @@ export const NewSliceJobPage: React.FC = () => {
     engineVersion: selectedEngineVersion ?? latestAvailableForEngine,
   }), [slicerSettings, originalProcessSettings, advancedProcessSettings, slicerMode, selectedEngineVersion, latestAvailableForEngine]);
   const filamentBedContext = getFilamentBedContext(
-    selectedMachineProfile?.settings,
+    { ...inheritedMachine?.settings, ...selectedMachineProfile?.settings },
     { ...resolvedProcessProfile?.settings, ...processOverrides },
-    selectedBedType,
-    selectedMachineProfile?.manufacturer,
+    bedTypeOverride,
+    selectedMachineProfile?.manufacturer || inheritedMachine?.manufacturer,
   );
+  const selectedBedType = filamentBedContext.supportMultiBedTypes === false ? '' : bedTypeOverride;
 
   // Per-kg filament cost from the selected profile, for best-effort material cost.
   const filamentCostPerKg = useMemo(
@@ -3212,12 +3268,8 @@ export const NewSliceJobPage: React.FC = () => {
             id="slice-bed-type"
             selectedBedType={selectedBedType}
             onChange={value => setBedSurfaceSelection({ machine: selectedMachineProfileId, value })}
-            machineSettings={selectedMachineProfile?.settings}
-            manufacturer={selectedMachineProfile?.manufacturer}
-            processSettings={{ ...resolvedProcessProfile?.settings, ...processOverrides }}
-            filaments={printerIsMultiToolhead
-              ? physicalToolheads.map((_, index) => allFilamentProfiles.find(profile => profile.name === extruderFilamentProfileIds[index]))
-              : [selectedFilamentProfile]}
+            context={filamentBedContext}
+            filaments={bedSurfaceFilaments}
           />
 
           {/* PROCESS PROFILE - with Reset, Save-as, and profile management menu */}
@@ -3473,7 +3525,7 @@ export const NewSliceJobPage: React.FC = () => {
             />
           )}
 
-          {/* ADVANCED MODE: full OrcaSlicer parameter editor behind collapsible disclosure */}
+          {/* ADVANCED MODE: metadata process editor with Basic/Advanced views */}
           {slicerMode === 'Advanced' && (
             <div className="bg-pf-panel border border-pf-border rounded-lg overflow-hidden">
               <SlicerSettingsPanel
