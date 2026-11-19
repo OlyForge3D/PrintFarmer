@@ -1542,26 +1542,37 @@ describe('NewSliceJobPage', () => {
       }
       renderWithProviders(<NewSliceJobPage />);
       await waitFor(() => expect(slicerProfilesService.getFilamentProfilesForMachines).toHaveBeenCalled());
-      const container = multi ? await screen.findByTestId('extruder-filament-1') : await screen.findByTestId('single-filament-section');
+      const containers = multi
+        ? [await screen.findByTestId('extruder-filament-0'), await screen.findByTestId('extruder-filament-1')]
+        : [await screen.findByTestId('single-filament-section')];
       for (const owned of [true, false]) {
-        const trigger = within(container).getAllByRole('button').find(button => button.getAttribute('aria-haspopup') === 'dialog')!;
-        fireEvent.click(trigger);
-        const picker = await screen.findByRole('dialog', { name: 'Filament selector' });
-        fireEvent.change(within(picker).getByPlaceholderText('Search filaments...'), { target: { value: custom.name } });
-        const row = within(picker).getByRole('button', { name: owned ? /★.*Generic PLA @MK4/ : 'Generic PLA @MK4' });
-        if (!multi && owned) {
-          expect(row).toHaveAttribute('aria-current', 'true');
+        for (const container of containers) {
+          const trigger = within(container).getAllByRole('button').find(button => button.getAttribute('aria-haspopup') === 'dialog')!;
+          fireEvent.click(trigger);
+          const picker = await screen.findByRole('dialog', { name: 'Filament selector' });
+          fireEvent.change(within(picker).getByPlaceholderText('Search filaments...'), { target: { value: custom.name } });
+          const row = within(picker).getByRole('button', { name: owned ? /★.*Generic PLA @MK4/ : 'Generic PLA @MK4' });
+          if (!multi && owned) {
+            expect(row).toHaveAttribute('aria-current', 'true');
+          }
+          fireEvent.click(row);
+          if (!multi) {
+            expect(localStorage.getItem('sliceJob.selectedFilamentProfileId.customId')).toBe(owned ? custom.id : null);
+          }
         }
-        fireEvent.click(row);
         if (owned) {
-          expect(await screen.findByText((_, element) =>
+          const customSummaries = await screen.findAllByText((_, element) =>
             element?.tagName === 'P'
             && element.textContent?.includes('Bed first layer: 0°C') === true
-            && element.textContent?.includes('62°C / 57°C') === true)).toBeInTheDocument();
-          expect(screen.getByText(/Profile specifies 0°C/)).toBeInTheDocument();
-        }
-        if (!multi) {
-          expect(localStorage.getItem('sliceJob.selectedFilamentProfileId.customId')).toBe(owned ? custom.id : null);
+            && element.textContent?.includes('62°C / 57°C') === true);
+          expect(customSummaries).toHaveLength(multi ? 2 : 1);
+          expect(screen.getAllByText(/Profile specifies 0°C/)).toHaveLength(multi ? 2 : 1);
+        } else {
+          const systemSummaries = await screen.findAllByText((_, element) =>
+            element?.tagName === 'P'
+            && element.textContent?.includes('other layers: 51°C') === true);
+          expect(systemSummaries).toHaveLength(multi ? 2 : 1);
+          expect(screen.queryAllByText(/Profile specifies 0°C/)).toHaveLength(0);
         }
         if (multi) {
           fireEvent.click(screen.getByRole('button', { name: 'Edit Extruder 2 filament settings' }));

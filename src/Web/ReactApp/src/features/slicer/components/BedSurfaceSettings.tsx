@@ -35,7 +35,7 @@ export function BedSurfaceSettings({
           return (
             <div key={`${filament?.name ?? 'unselected'}-${index}`}>
               {filaments.length > 1 && <p>Extruder {index + 1}: {filament?.name ?? 'No filament selected'}</p>}
-              <p className="tabular-nums">
+              <p className="font-mono tabular-nums">
                 Bed first layer: {formatBedTemperatures(temperatures.firstLayer)};
                 {' '}other layers: {formatBedTemperatures(temperatures.otherLayers)}
               </p>

@@ -293,7 +293,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
                 disabled={disabled}
                 aria-selected={isActive}
                 className={clsx(
-                  'shrink-0 px-1 pb-1 text-xs whitespace-nowrap rounded-none border-b-2 transition-colors',
+                  'shrink-0 px-1 pb-1 text-xs whitespace-nowrap rounded-none border-b transition-colors',
                   isActive ? 'font-bold border-pf-accent-2' : 'font-normal border-transparent',
                   dirty
                     ? 'text-pf-warning'
