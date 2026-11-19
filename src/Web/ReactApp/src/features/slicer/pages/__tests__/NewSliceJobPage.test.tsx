@@ -576,7 +576,9 @@ vi.mock('@/features/slicer/components/settings', async () => {
           Settings Panel
           <button
             type="button"
-            aria-label={`Switch to ${viewMode === 'simple' ? 'Advanced' : 'Basic'} mode`}
+            role="switch"
+            aria-checked={viewMode === 'advanced'}
+            aria-label={`${viewMode === 'advanced' ? 'Advanced' : 'Basic'} metadata view`}
             onClick={() => {
               slicerViewModeRef.value = nextMode;
               slicerViewModeRef.listeners.forEach((listener) => listener());
@@ -1350,15 +1352,17 @@ describe('NewSliceJobPage', () => {
 
       expect(screen.getAllByRole('radio')).toHaveLength(2);
       expect(screen.getByRole('radio', { name: 'Simple' })).toHaveAttribute('aria-checked', 'true');
-      expect(screen.queryByRole('button', { name: /switch to (simple|advanced) mode/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('switch', { name: /metadata view/i })).not.toBeInTheDocument();
 
       fireEvent.click(screen.getByRole('radio', { name: 'Advanced' }));
       expect(await screen.findByTestId('slicer-settings-panel')).toHaveAttribute('data-view-mode', 'Basic');
       expect(screen.getByRole('radio', { name: 'Advanced' })).toHaveAttribute('aria-checked', 'true');
-      fireEvent.click(screen.getByRole('button', { name: 'Switch to Advanced mode' }));
+      fireEvent.click(screen.getByRole('switch', { name: 'Basic metadata view' }));
       expect(screen.getByTestId('slicer-settings-panel')).toHaveAttribute('data-view-mode', 'Advanced');
-      fireEvent.click(screen.getByRole('button', { name: 'Switch to Basic mode' }));
+      expect(screen.getByRole('switch', { name: 'Advanced metadata view' })).toHaveAttribute('aria-checked', 'true');
+      fireEvent.click(screen.getByRole('switch', { name: 'Advanced metadata view' }));
       expect(screen.getByTestId('slicer-settings-panel')).toHaveAttribute('data-view-mode', 'Basic');
+      expect(screen.getByRole('switch', { name: 'Basic metadata view' })).toHaveAttribute('aria-checked', 'false');
 
       fireEvent.click(screen.getByRole('radio', { name: 'Simple' }));
       expect(await screen.findByRole('slider', { name: /infill density/i })).toHaveValue('35');
@@ -1366,7 +1370,9 @@ describe('NewSliceJobPage', () => {
 
     it.each([
       { origin: { inherits: 'Qidi X-Plus 4 0.4 nozzle' }, nozzle: '0.4', compatible: true },
-      { origin: { name: 'Qidi X-Plus 4 0.4 nozzle' }, nozzle: '0.4', compatible: true },
+      { origin: { name: 'Qidi X-Plus 4 0.4 nozzle', from: 'system' }, nozzle: '0.4', compatible: true },
+      { origin: { name: 'Qidi X-Plus 4 0.4 nozzle' }, nozzle: '0.4', compatible: false },
+      { origin: { inherits: 'Qidi X-Plus 4 0.4 nozzle' }, nozzle: '0.405', compatible: true },
       { origin: { inherits: 'Qidi X-Plus 4 0.4 nozzle' }, nozzle: '0.6', compatible: false },
     ])('only offers the QIDI source presets for a compatible nozzle: $origin $nozzle', async ({ origin, nozzle, compatible }) => {
       const machine = { name: 'Qidi X-Plus 4 0.4 nozzle', manufacturer: 'Qidi', printerModel: 'Qidi X-Plus 4', nozzleDiameter: 0.4,
@@ -1617,8 +1623,18 @@ describe('NewSliceJobPage', () => {
       ]);
       renderWithProviders(<NewSliceJobPage />, { route: '/slicer?modelId=model-3d-1' });
       await screen.findByRole('option', { name: 'Inherit from profile (High Temp Plate)' });
+      const filamentSection = await screen.findByTestId('single-filament-section');
+      fireEvent.click(within(filamentSection).getAllByRole('button')
+        .find(button => button.getAttribute('aria-haspopup') === 'dialog')!);
+      const filamentPicker = await screen.findByRole('dialog', { name: 'Filament selector' });
+      fireEvent.change(within(filamentPicker).getByPlaceholderText('Search filaments...'), {
+        target: { value: 'Generic PLA @MK4' },
+      });
+      fireEvent.click(await within(filamentPicker).findByRole('button', { name: 'Generic PLA @MK4' }));
       fireEvent.change(screen.getByLabelText('Bed Type'), { target: { value: 'Textured PEI Plate' } });
-      expect(screen.queryByText(/Bed first layer/)).not.toBeInTheDocument();
+      const summary = await screen.findByText((_, element) =>
+        element?.tagName === 'P' && element.textContent?.includes('Bed first layer:') === true);
+      expect(summary).toHaveTextContent(/Bed first layer:\s*65°C;\s*other layers:\s*60°C/);
       await waitFor(() => {
         expect(Array.from(document.querySelectorAll('select')).some(select => select.value.startsWith('system:'))).toBe(true);
       });
@@ -1646,6 +1662,9 @@ describe('NewSliceJobPage', () => {
       renderWithProviders(<NewSliceJobPage />);
       await screen.findByRole('button', { name: /Generic PLA @MK4/ });
       await waitFor(() => expect(screen.queryByLabelText('Bed Type')).not.toBeInTheDocument());
+      const summary = await screen.findByText((_, element) =>
+        element?.tagName === 'P' && element.textContent?.includes('Bed first layer:') === true);
+      expect(summary).toHaveTextContent(/Bed first layer:\s*65°C;\s*other layers:\s*60°C/);
       fireEvent.click(screen.getByRole('button', { name: 'Filament profile options menu' }));
       fireEvent.click(screen.getByRole('button', { name: 'Edit settings' }));
       await waitFor(() => expect(screen.getByTitle('Textured Plate first layer')).toHaveValue(65));

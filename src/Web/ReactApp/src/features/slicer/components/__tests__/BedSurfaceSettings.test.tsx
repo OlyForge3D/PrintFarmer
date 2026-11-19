@@ -4,22 +4,44 @@ import { describe, expect, it, vi } from 'vitest';
 import { BedSurfaceSettings } from '@/features/slicer/components/BedSurfaceSettings';
 
 describe('BedSurfaceSettings', () => {
-  it('keeps the labeled selector and inherited option for multi-bed profiles without helper text', () => {
+  it('keeps the labeled selector and shows profile values for multi-bed profiles', () => {
     const props = {
       id: 'test-bed',
       selectedBedType: '',
       onChange: vi.fn(),
       context: { bedType: 'Textured PEI Plate', supportMultiBedTypes: true },
+      filaments: [{
+        name: 'PLA',
+        settings: {
+          textured_plate_temp_initial_layer: ['65'],
+          textured_plate_temp: ['60'],
+        },
+      }],
     };
-    const { container } = render(<BedSurfaceSettings {...props} />);
+    render(<BedSurfaceSettings {...props} />);
     expect(screen.getByRole('option', { name: 'Inherit from profile (Textured PEI Plate)' })).toBeInTheDocument();
-    expect(container.querySelector('p')).toBeNull();
+    expect(screen.getByText('Bed first layer: 65°C; other layers: 60°C')).toBeInTheDocument();
+    expect(screen.getByText(/Profile values only/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Bed Type'), { target: { value: 'High Temp Plate' } });
     expect(props.onChange).toHaveBeenCalledWith('High Temp Plate');
   });
 
-  it('does not render a label or control for a single-bed profile', () => {
-    const { container } = render(<BedSurfaceSettings id="single-bed" selectedBedType="" onChange={vi.fn()} context={{ supportMultiBedTypes: false }} />);
-    expect(container).toBeEmptyDOMElement();
+  it('hides the selector for single-bed profiles but retains the temperature summary and warning', () => {
+    render(
+      <BedSurfaceSettings
+        id="single-bed"
+        selectedBedType=""
+        onChange={vi.fn()}
+        context={{ bedType: 'Textured PEI Plate', supportMultiBedTypes: false }}
+        filaments={[{ name: 'PLA', settings: {
+          textured_plate_temp_initial_layer: ['0'],
+          textured_plate_temp: ['0'],
+        } }]}
+      />,
+    );
+    expect(screen.queryByLabelText('Bed Type')).not.toBeInTheDocument();
+    expect(screen.getByText(/Bed first layer: 0°C; other layers: 0°C/)).toBeInTheDocument();
+    expect(screen.getByText(/Profile specifies 0°C/)).toBeInTheDocument();
+    expect(screen.getByText(/unknown values are not replaced/)).toBeInTheDocument();
   });
 });

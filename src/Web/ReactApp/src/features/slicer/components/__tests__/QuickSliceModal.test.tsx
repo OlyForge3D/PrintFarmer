@@ -277,12 +277,14 @@ describe('QuickSliceModal', () => {
       vi.mocked(slicerProfilesService.getFilamentProfilesForMachines).mockResolvedValueOnce([
         { name: 'PLA', material: 'PLA', nozzleTemperature: 210, bedTemperature: 0, printSpeed: 60, settings: {
           hot_plate_temp_initial_layer: ['0'], hot_plate_temp: ['0'],
-          textured_plate_temp_initial_layer: ['65'], textured_plate_temp: ['60'],
+          textured_plate_temp_initial_layer: ['0'], textured_plate_temp: ['0'],
         } },
       ]);
       renderModal();
       await waitFor(() => expect(screen.getByRole('button', { name: /^Slice$/ })).toBeEnabled());
       expect(screen.queryByLabelText('Bed Type')).not.toBeInTheDocument();
+      expect(screen.getByText(/Bed first layer: 0°C; other layers: 0°C/)).toBeInTheDocument();
+      expect(screen.getByText(/Profile specifies 0°C/)).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: /^Slice$/ }));
       await waitFor(() => expect(mockSubmitJob).toHaveBeenCalledOnce());
       expect(JSON.parse(mockSubmitJob.mock.calls[0][0].slicerProfileJson).overrides)

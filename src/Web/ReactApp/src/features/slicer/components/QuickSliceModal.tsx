@@ -366,6 +366,7 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
           selectedBedType={selectedBedType}
           onChange={setSelectedBedType}
           context={bedContext}
+          filaments={[filamentProfiles.find(profile => profile.name === effectiveFilamentProfileId)]}
         />
 
         {error && <Alert type="error">{error}</Alert>}

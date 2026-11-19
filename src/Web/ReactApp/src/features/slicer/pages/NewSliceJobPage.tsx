@@ -1146,16 +1146,22 @@ export const NewSliceJobPage: React.FC = () => {
   const inheritedMachine = useMemo(() => {
     if (!selectedMachineProfile || machineProfilesData.includes(selectedMachineProfile)) return undefined;
     const rawName = selectedMachineProfile.settings?.name;
-    const source = (rawName !== selectedMachineProfile.name
-      ? machineProfilesData.find(profile => profile.name === rawName)
-      : undefined)
-      ?? machineProfilesData.find(profile => profile.name === selectedMachineProfile.inherits);
+    // Orca resolves non-system custom profiles through their declared parent.
+    const sourceName = selectedMachineProfile.settings?.from === 'system'
+      ? rawName ?? selectedMachineProfile.name
+      : selectedMachineProfile.inherits;
+    const source = sourceName
+      ? machineProfilesData.find(profile => profile.name === sourceName)
+      : undefined;
     if (!source) return undefined;
     const sourceModel = source.printerModel ?? source.printer_model;
     if (selectedMachineProfile.printerModel
       && sourceModel?.toLowerCase() !== selectedMachineProfile.printerModel.toLowerCase()) return undefined;
-    if (selectedMachineProfile.nozzleDiameter !== undefined
-      && getMachineProfileNozzleDiameter(source) !== selectedMachineProfile.nozzleDiameter) return undefined;
+    if (selectedMachineProfile.nozzleDiameter !== undefined) {
+      const sourceNozzleDiameter = getMachineProfileNozzleDiameter(source);
+      if (sourceNozzleDiameter === undefined
+        || Math.abs(sourceNozzleDiameter - selectedMachineProfile.nozzleDiameter) >= NOZZLE_MATCH_TOLERANCE) return undefined;
+    }
     return source;
   }, [machineProfilesData, selectedMachineProfile]);
 
@@ -3240,6 +3246,10 @@ export const NewSliceJobPage: React.FC = () => {
             selectedBedType={selectedBedType}
             onChange={value => setBedSurfaceSelection({ machine: selectedMachineProfileId, value })}
             context={filamentBedContext}
+            filaments={printerIsMultiToolhead
+              ? physicalToolheads.map((_, index) =>
+                allFilamentProfiles.find(profile => profile.name === extruderFilamentProfileIds[index]))
+              : [selectedFilamentProfile]}
           />
 
           {/* PROCESS PROFILE - with Reset, Save-as, and profile management menu */}

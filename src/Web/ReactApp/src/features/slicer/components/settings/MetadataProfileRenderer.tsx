@@ -249,9 +249,11 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
           type="button"
           onClick={toggleViewMode}
           disabled={disabled}
-          className="shrink-0 p-0.5 rounded transition-colors hover:bg-pf-bg-2 disabled:opacity-50"
-          title={viewMode === 'simple' ? 'Show advanced parameters' : 'Hide advanced parameters'}
-          aria-label={`Switch to ${viewMode === 'simple' ? 'Advanced' : 'Basic'} mode`}
+          role="switch"
+          aria-checked={viewMode === 'advanced'}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded p-0.5 text-xs text-pf-text-secondary transition-colors hover:bg-pf-bg-2 disabled:opacity-50"
+          title="Toggle metadata view between Basic and Advanced"
+          aria-label={`${viewMode === 'advanced' ? 'Advanced' : 'Basic'} metadata view`}
         >
           <span className="inline-flex items-center gap-1.5">
             <img src="/icons/orcaslicer-advanced.svg" alt="" className="w-4 h-4" />
@@ -267,6 +269,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
                 }`}
               />
             </span>
+            <span>{viewMode === 'advanced' ? 'Advanced' : 'Basic'}</span>
           </span>
         </Button>
 
