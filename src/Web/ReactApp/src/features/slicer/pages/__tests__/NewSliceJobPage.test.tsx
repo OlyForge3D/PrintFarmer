@@ -578,7 +578,7 @@ vi.mock('@/features/slicer/components/settings', async () => {
             type="button"
             role="switch"
             aria-checked={viewMode === 'advanced'}
-            aria-label={`${viewMode === 'advanced' ? 'Advanced' : 'Basic'} metadata view`}
+            aria-label="Basic/Advanced metadata view"
             onClick={() => {
               slicerViewModeRef.value = nextMode;
               slicerViewModeRef.listeners.forEach((listener) => listener());
@@ -1357,12 +1357,12 @@ describe('NewSliceJobPage', () => {
       fireEvent.click(screen.getByRole('radio', { name: 'Advanced' }));
       expect(await screen.findByTestId('slicer-settings-panel')).toHaveAttribute('data-view-mode', 'Basic');
       expect(screen.getByRole('radio', { name: 'Advanced' })).toHaveAttribute('aria-checked', 'true');
-      fireEvent.click(screen.getByRole('switch', { name: 'Basic metadata view' }));
+      fireEvent.click(screen.getByRole('switch', { name: 'Basic/Advanced metadata view' }));
       expect(screen.getByTestId('slicer-settings-panel')).toHaveAttribute('data-view-mode', 'Advanced');
-      expect(screen.getByRole('switch', { name: 'Advanced metadata view' })).toHaveAttribute('aria-checked', 'true');
-      fireEvent.click(screen.getByRole('switch', { name: 'Advanced metadata view' }));
+      expect(screen.getByRole('switch', { name: 'Basic/Advanced metadata view' })).toHaveAttribute('aria-checked', 'true');
+      fireEvent.click(screen.getByRole('switch', { name: 'Basic/Advanced metadata view' }));
       expect(screen.getByTestId('slicer-settings-panel')).toHaveAttribute('data-view-mode', 'Basic');
-      expect(screen.getByRole('switch', { name: 'Basic metadata view' })).toHaveAttribute('aria-checked', 'false');
+      expect(screen.getByRole('switch', { name: 'Basic/Advanced metadata view' })).toHaveAttribute('aria-checked', 'false');
 
       fireEvent.click(screen.getByRole('radio', { name: 'Simple' }));
       expect(await screen.findByRole('slider', { name: /infill density/i })).toHaveValue('35');
@@ -1512,11 +1512,18 @@ describe('NewSliceJobPage', () => {
       const custom = {
         id: 'same-name-filament-id', name: mockFilamentProfiles[0].name, profileType: 'filament' as const,
         isSystem: false, createdAt: '2026-11-03T00:00:00Z',
-        rawJson: JSON.stringify({ compatible_printers: ['Prusa MK4 0.4 nozzle'], textured_plate_temp: ['62', '57'] }),
+        rawJson: JSON.stringify({
+          compatible_printers: ['Prusa MK4 0.4 nozzle'],
+          textured_plate_temp_initial_layer: ['0'],
+          textured_plate_temp: ['62', '57'],
+        }),
       };
       vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
         profiles: [custom], totalCount: 1, machineProfileCount: 0, filamentProfileCount: 1, processProfileCount: 0,
       });
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
+        { ...mockMachineProfiles[0], settings: { curr_bed_type: 'Textured PEI Plate', support_multi_bed_types: '1' } },
+      ]);
       vi.mocked(slicerProfilesService.getFilamentProfilesForMachines).mockResolvedValue([
         { ...mockFilamentProfiles[0], settings: { textured_plate_temp: ['51'] } },
       ]);
@@ -1546,6 +1553,13 @@ describe('NewSliceJobPage', () => {
           expect(row).toHaveAttribute('aria-current', 'true');
         }
         fireEvent.click(row);
+        if (owned) {
+          expect(await screen.findByText((_, element) =>
+            element?.tagName === 'P'
+            && element.textContent?.includes('Bed first layer: 0°C') === true
+            && element.textContent?.includes('62°C / 57°C') === true)).toBeInTheDocument();
+          expect(screen.getByText(/Profile specifies 0°C/)).toBeInTheDocument();
+        }
         if (!multi) {
           expect(localStorage.getItem('sliceJob.selectedFilamentProfileId.customId')).toBe(owned ? custom.id : null);
         }

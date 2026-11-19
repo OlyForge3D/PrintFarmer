@@ -253,7 +253,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
           aria-checked={viewMode === 'advanced'}
           className="inline-flex shrink-0 items-center gap-1.5 rounded p-0.5 text-xs text-pf-text-secondary transition-colors hover:bg-pf-bg-2 disabled:opacity-50"
           title="Toggle metadata view between Basic and Advanced"
-          aria-label={`${viewMode === 'advanced' ? 'Advanced' : 'Basic'} metadata view`}
+          aria-label="Basic/Advanced metadata view"
         >
           <span className="inline-flex items-center gap-1.5">
             <img src="/icons/orcaslicer-advanced.svg" alt="" className="w-4 h-4" />

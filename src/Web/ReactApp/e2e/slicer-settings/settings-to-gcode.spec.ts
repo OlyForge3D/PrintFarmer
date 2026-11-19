@@ -262,7 +262,7 @@ async function applySetting(page: Page, row: CoverageRow, baseline: string | und
   await page.getByRole('button', { name: process ? 'Edit in modal' : 'Edit settings', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('tablist')).toBeVisible();
-  const toggle = dialog.getByRole('switch', { name: /metadata view/ });
+  const toggle = dialog.getByRole('switch', { name: 'Basic/Advanced metadata view' });
   await expect(toggle).toBeVisible();
   await expect(toggle).toBeEnabled();
   if (await toggle.getAttribute('aria-checked') === 'false') await toggle.click();

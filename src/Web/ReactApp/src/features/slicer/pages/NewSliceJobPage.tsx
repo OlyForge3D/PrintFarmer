@@ -145,6 +145,22 @@ function getCustomProfileNozzleDiameter(profile: { rawJson?: string }): number |
   }
 }
 
+function getCustomProfileSettings(rawJson?: string): Record<string, unknown> | undefined {
+  if (!rawJson) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(rawJson);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const raw = parsed as Record<string, unknown>;
+    const settings = raw.settings;
+    return settings && typeof settings === 'object' && !Array.isArray(settings)
+      ? settings as Record<string, unknown>
+      : raw;
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    return undefined;
+  }
+}
+
 function getMachineProfileNozzleDiameter(profile: OrcaMachineProfile | CustomProfile): number | undefined {
   if ('profileType' in profile) {
     return getCustomProfileNozzleDiameter(profile);
@@ -1826,25 +1842,32 @@ export const NewSliceJobPage: React.FC = () => {
       allFilamentProfiles.find((p: OrcaFilamentProfile) => p.name === selectedFilamentProfileId);
   }, [allFilamentProfiles, selectedFilamentProfileId, filamentSelection.customId]);
 
+  const getBedSurfaceFilament = useCallback((selection: ProfileSelection) => {
+    if (!selection.name) return undefined;
+    if (!selection.customId) {
+      return allFilamentProfiles.find(profile => profile.name === selection.name);
+    }
+    const profile = customProfilesData?.profiles.find(candidate =>
+      candidate.id === selection.customId && candidate.profileType === 'filament');
+    return profile
+      ? { name: profile.name, settings: getCustomProfileSettings(profile.rawJson) }
+      : undefined;
+  }, [allFilamentProfiles, customProfilesData]);
+
+  const bedSurfaceFilaments = useMemo(() => printerIsMultiToolhead
+    ? physicalToolheads.map((_, index) =>
+      getBedSurfaceFilament(extruderFilamentSelections[index] ?? { name: '' }))
+    : [getBedSurfaceFilament(filamentSelection)],
+  [extruderFilamentSelections, filamentSelection, getBedSurfaceFilament, physicalToolheads, printerIsMultiToolhead]);
+
   const getSelectionColour = useCallback((selection: ProfileSelection): string => {
     if (!selection.customId) {
       return getFilamentProfileColour(allFilamentProfiles.find(p => p.name === selection.name));
     }
     const profile = customProfilesData?.profiles.find(p =>
       p.id === selection.customId && p.profileType === 'filament');
-    if (!profile?.rawJson) return DEFAULT_FILAMENT_COLOUR;
-    try {
-      const parsed: unknown = JSON.parse(profile.rawJson);
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return DEFAULT_FILAMENT_COLOUR;
-      const raw = parsed as Record<string, unknown>;
-      const settings = raw.settings && typeof raw.settings === 'object' && !Array.isArray(raw.settings)
-        ? raw.settings as Record<string, unknown> : raw;
-      return getFilamentProfileColour({ settings });
-    } catch (error) {
-      if (!(error instanceof SyntaxError)) throw error;
-      // Display only; the server rejects invalid native JSON before queuing.
-      return DEFAULT_FILAMENT_COLOUR;
-    }
+    const settings = getCustomProfileSettings(profile?.rawJson);
+    return settings ? getFilamentProfileColour({ settings }) : DEFAULT_FILAMENT_COLOUR;
   }, [allFilamentProfiles, customProfilesData]);
 
   const [bedSurfaceSelection, setBedSurfaceSelection] = useState({ machine: '', value: '' });
@@ -3246,10 +3269,7 @@ export const NewSliceJobPage: React.FC = () => {
             selectedBedType={selectedBedType}
             onChange={value => setBedSurfaceSelection({ machine: selectedMachineProfileId, value })}
             context={filamentBedContext}
-            filaments={printerIsMultiToolhead
-              ? physicalToolheads.map((_, index) =>
-                allFilamentProfiles.find(profile => profile.name === extruderFilamentProfileIds[index]))
-              : [selectedFilamentProfile]}
+            filaments={bedSurfaceFilaments}
           />
 
           {/* PROCESS PROFILE - with Reset, Save-as, and profile management menu */}
