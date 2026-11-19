@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NewSliceJobPage } from '../NewSliceJobPage';
 import { AuthProvider } from '../../../../common/contexts/AuthContext';
 import type { OrcaMachineProfile, OrcaFilamentProfile, OrcaProcessProfile } from '../../../../services/slicerProfilesService';
+import type { SlicerSettings } from '../../components/job';
 
 // Import the mocked services - these will be the vi.mock versions
 import { apiClient } from '../../../../services/api';
@@ -17,9 +18,17 @@ import { toast } from 'sonner';
 import { binaryStl, modelTextBuffer, threeMfBuffer } from '@/features/slicer/utils/__tests__/model-response-fixtures';
 import { MotionType, PrinterBackend, type Printer } from '@/types/api';
 
-// Mutable slicer-mode ref so individual describes can opt into Advanced mode.
+// Mutable slicer-mode refs so the page tab and metadata view toggle can be
+// driven independently in the combination-state regression test.
 // Hoisted because vi.mock factories run before module-body initialization.
-const slicerModeRef = vi.hoisted(() => ({ value: 'Simple' as 'Simple' | 'Advanced' }));
+const slicerModeRef = vi.hoisted(() => ({
+  value: 'Simple' as 'Simple' | 'Advanced',
+  listeners: new Set<() => void>(),
+}));
+const slicerViewModeRef = vi.hoisted(() => ({
+  value: 'simple' as 'simple' | 'advanced',
+  listeners: new Set<() => void>(),
+}));
 
 // Mutable real-time job progress ref (issue #2214). The real hook subscribes
 // to SignalR + REST reconciliation; none of that plumbing is meaningful in
@@ -345,16 +354,32 @@ vi.mock('@/services/sliceJobService', async () => {
   };
 });
 
-// Force Advanced mode when needed so advanced-only sections render in tests.
-vi.mock('@/features/slicer/hooks/useSlicerMode', () => ({
-  useSlicerMode: () => ({
-    mode: slicerModeRef.value,
-    enabledModes: ['Simple', 'Advanced'],
-    canToggle: false,
-    setMode: vi.fn(),
-  }),
-  SLICER_MODE_STORAGE_KEY: 'pf.slicerMode',
-}));
+// Force both page modes as available so tests can cover their interaction.
+vi.mock('@/features/slicer/hooks/useSlicerMode', async () => {
+  const React = await vi.importActual<typeof import('react')>('react');
+  return {
+    useSlicerMode: () => {
+      const mode = React.useSyncExternalStore(
+        (listener) => {
+          slicerModeRef.listeners.add(listener);
+          return () => slicerModeRef.listeners.delete(listener);
+        },
+        () => slicerModeRef.value,
+        () => slicerModeRef.value,
+      );
+      return {
+        mode,
+        enabledModes: ['Simple', 'Advanced'],
+        canToggle: true,
+        setMode: (next: typeof mode) => {
+          slicerModeRef.value = next;
+          slicerModeRef.listeners.forEach((listener) => listener());
+        },
+      };
+    },
+    SLICER_MODE_STORAGE_KEY: 'pf.slicerMode',
+  };
+});
 
 // Mock sonner toast (used by the "Use URL" reachability check, issue #1910)
 vi.mock('sonner', () => ({
@@ -457,9 +482,17 @@ vi.mock('../../components/job', () => ({
       </div>
     );
   },
-  SlicerSettingsPanel: (props: { onValidationChange?: (isValid: boolean) => void }) => (
-    <div data-testid="slicer-settings-panel">
+  SlicerSettingsPanel: (props: { onValidationChange?: (isValid: boolean) => void; settings: SlicerSettings; onSettingsChange: (settings: SlicerSettings) => void }) => (
+    <div data-testid="slicer-settings-panel" data-slicer-mode="Simple">
       Settings Panel
+      <input
+        type="range"
+        min="0"
+        max="100"
+        aria-label="Infill Density"
+        value={props.settings.infillPercent}
+        onChange={(event) => props.onSettingsChange({ ...props.settings, infillPercent: Number(event.target.value) })}
+      />
       {/* Lets submit-guard tests simulate an uncommitted invalid Simple-mode
           field (issue #2223) without depending on the real component's
           internals — mirrors the pin-engine-version button pattern above. */}
@@ -523,10 +556,39 @@ vi.mock('@/features/models3d/components/3d/ViewerSkeleton', () => ({
   ViewerSkeleton: () => <div data-testid="viewer-skeleton">Loading...</div>
 }));
 
-// Mock SlicerSettingsPanel
-vi.mock('@/features/slicer/components/settings', () => ({
-  SlicerSettingsPanel: () => <div data-testid="slicer-settings-panel">Settings Panel</div>,
-}));
+// Mock the metadata editor while keeping its persisted Basic/Advanced toggle
+// observable to the page-level combination-state regression test.
+vi.mock('@/features/slicer/components/settings', async () => {
+  const React = await vi.importActual<typeof import('react')>('react');
+  return {
+    SlicerSettingsPanel: () => {
+      const viewMode = React.useSyncExternalStore(
+        (listener) => {
+          slicerViewModeRef.listeners.add(listener);
+          return () => slicerViewModeRef.listeners.delete(listener);
+        },
+        () => slicerViewModeRef.value,
+        () => slicerViewModeRef.value,
+      );
+      const nextMode = viewMode === 'simple' ? 'advanced' : 'simple';
+      return (
+        <div data-testid="slicer-settings-panel" data-view-mode={viewMode === 'simple' ? 'Basic' : 'Advanced'}>
+          Settings Panel
+          <button
+            type="button"
+            aria-label={`Switch to ${viewMode === 'simple' ? 'Advanced' : 'Basic'} mode`}
+            onClick={() => {
+              slicerViewModeRef.value = nextMode;
+              slicerViewModeRef.listeners.forEach((listener) => listener());
+            }}
+          >
+            Advanced view
+          </button>
+        </div>
+      );
+    },
+  };
+});
 
 // Mock useSTLFile hook
 vi.mock('@/common/hooks/useSTLFile', () => ({
@@ -567,6 +629,10 @@ const renderWithProviders = (ui: React.ReactElement, { route = '/slicer' } = {})
 // === Tests ===
 describe('NewSliceJobPage', () => {
   beforeEach(() => {
+    slicerModeRef.value = 'Simple';
+    slicerModeRef.listeners.clear();
+    slicerViewModeRef.value = 'simple';
+    slicerViewModeRef.listeners.clear();
     // #1028: several tests queue one-shot behaviour with `mockResolvedValueOnce`
     // / `mockRejectedValueOnce` (L393, L501-502, L655, L666). `clearAllMocks`
     // only wipes call history — it leaves an unconsumed one-shot on the queue,
@@ -1277,6 +1343,27 @@ describe('NewSliceJobPage', () => {
   });
 
   describe('Bed-surface temperatures', () => {
+    it('supports Simple, Advanced-tab Basic, and Advanced-toggle views without losing Simple edits', async () => {
+      renderWithProviders(<NewSliceJobPage />);
+      const infill = await screen.findByRole('slider', { name: /infill density/i });
+      fireEvent.change(infill, { target: { value: '35' } });
+
+      expect(screen.getAllByRole('radio')).toHaveLength(2);
+      expect(screen.getByRole('radio', { name: 'Simple' })).toHaveAttribute('aria-checked', 'true');
+      expect(screen.queryByRole('button', { name: /switch to (simple|advanced) mode/i })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('radio', { name: 'Advanced' }));
+      expect(await screen.findByTestId('slicer-settings-panel')).toHaveAttribute('data-view-mode', 'Basic');
+      expect(screen.getByRole('radio', { name: 'Advanced' })).toHaveAttribute('aria-checked', 'true');
+      fireEvent.click(screen.getByRole('button', { name: 'Switch to Advanced mode' }));
+      expect(screen.getByTestId('slicer-settings-panel')).toHaveAttribute('data-view-mode', 'Advanced');
+      fireEvent.click(screen.getByRole('button', { name: 'Switch to Basic mode' }));
+      expect(screen.getByTestId('slicer-settings-panel')).toHaveAttribute('data-view-mode', 'Basic');
+
+      fireEvent.click(screen.getByRole('radio', { name: 'Simple' }));
+      expect(await screen.findByRole('slider', { name: /infill density/i })).toHaveValue('35');
+    });
+
     it.each([
       { origin: { inherits: 'Qidi X-Plus 4 0.4 nozzle' }, nozzle: '0.4', compatible: true },
       { origin: { name: 'Qidi X-Plus 4 0.4 nozzle' }, nozzle: '0.4', compatible: true },

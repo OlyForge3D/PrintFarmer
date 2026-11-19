@@ -3495,7 +3495,7 @@ export const NewSliceJobPage: React.FC = () => {
             />
           )}
 
-          {/* ADVANCED MODE: full OrcaSlicer parameter editor behind collapsible disclosure */}
+          {/* ADVANCED MODE: metadata process editor with Basic/Advanced views */}
           {slicerMode === 'Advanced' && (
             <div className="bg-pf-panel border border-pf-border rounded-lg overflow-hidden">
               <SlicerSettingsPanel

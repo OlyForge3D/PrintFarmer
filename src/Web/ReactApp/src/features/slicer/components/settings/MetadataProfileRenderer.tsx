@@ -243,8 +243,34 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
         </p>
       )}
       {/* Tab bar + Advanced toggle */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-pf-border">
-        <div className="flex min-w-0 gap-3 overflow-x-auto p-0.5" role="tablist" aria-label="Profile settings sections">
+      <div className="flex items-center gap-3 px-4 py-2 border-b border-pf-border">
+        <Button
+          variant="unstyled"
+          type="button"
+          onClick={toggleViewMode}
+          disabled={disabled}
+          className="shrink-0 p-0.5 rounded transition-colors hover:bg-pf-bg-2 disabled:opacity-50"
+          title={viewMode === 'simple' ? 'Show advanced parameters' : 'Hide advanced parameters'}
+          aria-label={`Switch to ${viewMode === 'simple' ? 'Advanced' : 'Basic'} mode`}
+        >
+          <span className="inline-flex items-center gap-1.5">
+            <img src="/icons/orcaslicer-advanced.svg" alt="" className="w-4 h-4" />
+            <span
+              data-pf-radius="full"
+              className={`relative inline-block w-7 h-3.5 rounded-full transition-colors ${
+                viewMode === 'advanced' ? 'bg-pf-accent-2' : 'bg-pf-border'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white shadow-sm transition-all ${
+                  viewMode === 'advanced' ? 'left-3.5' : 'left-0.5'
+                }`}
+              />
+            </span>
+          </span>
+        </Button>
+
+        <div className="flex min-w-0 flex-1 gap-3 overflow-x-auto p-0.5" role="tablist" aria-label="Profile settings sections">
           {visibleTabs.map((tab, idx) => {
             const isActive = idx === clampedActiveTabIdx;
             const dirty = isTabDirty(tab);
@@ -279,32 +305,6 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
           })}
         </div>
 
-        {/* Advanced toggle */}
-        <Button
-          variant="unstyled"
-          type="button"
-          onClick={toggleViewMode}
-          disabled={disabled}
-          className="shrink-0 ml-2 p-0.5 rounded transition-colors hover:bg-pf-bg-2 disabled:opacity-50"
-          title={viewMode === 'simple' ? 'Show advanced parameters' : 'Hide advanced parameters'}
-          aria-label={`Switch to ${viewMode === 'simple' ? 'Advanced' : 'Simple'} mode`}
-        >
-          <span className="inline-flex items-center gap-1.5">
-            <img src="/icons/orcaslicer-advanced.svg" alt="" className="w-4 h-4" />
-            <span
-              data-pf-radius="full"
-              className={`relative inline-block w-7 h-3.5 rounded-full transition-colors ${
-                viewMode === 'advanced' ? 'bg-pf-accent-2' : 'bg-pf-border'
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white shadow-sm transition-all ${
-                  viewMode === 'advanced' ? 'left-3.5' : 'left-0.5'
-                }`}
-              />
-            </span>
-          </span>
-        </Button>
       </div>
 
       {/* Active tab content */}

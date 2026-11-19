@@ -59,6 +59,7 @@ describe('useSlicerMode', () => {
     mockSettings({ slicerMode: 'Simple', enabledModes: ['Simple', 'Advanced'] });
     const { result } = renderHook(() => useSlicerMode());
     expect(result.current.canToggle).toBe(true);
+    expect(result.current.enabledModes).toEqual(['Simple', 'Advanced']);
     expect(result.current.mode).toBe('Simple');
   });
 
