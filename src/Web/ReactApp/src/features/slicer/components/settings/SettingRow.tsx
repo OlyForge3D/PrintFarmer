@@ -175,7 +175,7 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
       <div className="flex items-center gap-1.5">
         {/* Left: icon + label */}
         {label && (
-        <div className="flex items-center gap-1.5 min-w-0 w-[46%] shrink-0">
+        <div className="flex items-center gap-1.5 min-w-0 w-[46%] max-sm:w-[34%] shrink-0">
           <span className="text-pf-accent-2 shrink-0">{icon}</span>
           <div className="min-w-0">
             <label 
