@@ -1647,6 +1647,37 @@ describe('NewSliceJobPage', () => {
       expect(screen.queryByTitle('Smooth PEI / High Temp Plate first layer')).not.toBeInTheDocument();
     });
 
+    it('keeps all surfaces for a partial custom machine even when its catalog parent is resolved', async () => {
+      const machine = {
+        name: 'Qidi X-Plus 4 0.4 nozzle', manufacturer: 'Qidi', printerModel: 'Qidi X-Plus 4',
+        nozzleDiameter: 0.4, inheritanceResolved: true,
+        settings: { support_multi_bed_types: ['0'], curr_bed_type: 'Textured PEI Plate' },
+      };
+      const custom = {
+        id: 'qidi-custom', name: 'qp4-1-Qidi X-Plus 4', profileType: 'machine' as const,
+        printerModelId: 'model-1', isOwnedByCurrentUser: true, isSystem: false, createdAt: '2026-01-01',
+        rawJson: JSON.stringify({ inherits: machine.name, printer_model: machine.printerModel, nozzle_diameter: ['0.4'] }),
+      };
+      const process = { ...mockProcessProfiles[0], name: '0.20mm Standard @Qidi XPlus4',
+        compatible_printers: [machine.name], inheritanceResolved: true, settings: {} };
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([machine]);
+      vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
+        profiles: [custom], totalCount: 1, machineProfileCount: 1, processProfileCount: 0, filamentProfileCount: 0,
+      });
+      vi.mocked(slicerProfilesService.getProcessProfilesForMachines).mockResolvedValue([process]);
+      localStorage.setItem('sliceJob.selectedPrinterId', 'printer-1');
+      localStorage.setItem('sliceJob.selectedMachineProfileId', custom.name);
+      localStorage.setItem('sliceJob.selectedMachineProfileId.customId', custom.id);
+      renderWithProviders(<NewSliceJobPage />, { route: '/slicer?modelId=model-stl-1' });
+      await screen.findByRole('option', { name: /0\.20mm Standard @Qidi XPlus4/ });
+      await screen.findByRole('button', { name: /Generic PLA @MK4/ });
+      await waitFor(() => expect(slicerWorkspaceSpy.mock.calls.at(-1)?.[0].models).toHaveLength(1));
+      fireEvent.click(screen.getByRole('button', { name: 'Filament profile options menu' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Edit settings' }));
+      expect(await screen.findByTitle('Cool Plate first layer')).toBeInTheDocument();
+      expect(screen.getByTitle('Textured Plate first layer')).toBeInTheDocument();
+    });
+
     it.each([
       { machineResolved: true, modelId: 'model-stl-1', hidden: true },
       { machineResolved: false, modelId: 'model-stl-1', hidden: false },
@@ -2299,6 +2330,42 @@ describe('NewSliceJobPage', () => {
         expect(models).toHaveLength(1);
         expect(models[0].fileType).toBe('3mf');
       });
+    });
+
+    it('keeps all filament bed surfaces for an extensionless stored 3MF URL without overriding the slice plate', async () => {
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
+        { ...mockMachineProfiles[0], inheritanceResolved: true, settings: {} },
+      ]);
+      vi.mocked(slicerProfilesService.getProcessProfilesForMachines).mockResolvedValue(
+        mockProcessProfiles.map(profile => ({ ...profile, inheritanceResolved: true, settings: {} })),
+      );
+      await renderAndOpenUrlTab();
+      vi.mocked(apiClient.get).mockResolvedValueOnce({ data: await threeMfBuffer() } as never);
+      fireEvent.change(screen.getByLabelText('File URL'), {
+        target: { value: '/api/3d-models/file/model-3d-1' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
+      await waitFor(() => {
+        const models = slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? [];
+        expect(models).toHaveLength(1);
+        expect(models[0].fileName).toBe('model-3d-1');
+        expect(models[0].fileType).toBe('3mf');
+      });
+      await screen.findByRole('button', { name: /Generic PLA @MK4/ });
+      fireEvent.click(screen.getByRole('button', { name: 'Filament profile options menu' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Edit settings' }));
+      expect(await screen.findByTitle('Cool Plate first layer')).toBeInTheDocument();
+      expect(screen.getByTitle('Textured Plate first layer')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(Array.from(document.querySelectorAll('select')).some(select => select.value.startsWith('system:'))).toBe(true);
+      });
+      await act(async () => {
+        const props = slicerWorkspaceSpy.mock.calls.at(-1)?.[0] as { onSlice: () => void };
+        props.onSlice();
+      });
+      await waitFor(() => expect(sliceJobService.submitJob).toHaveBeenCalled());
+      const request = vi.mocked(sliceJobService.submitJob).mock.calls.at(-1)![0];
+      expect(JSON.parse(request.slicerProfileJson).overrides).not.toHaveProperty('curr_bed_type');
     });
 
     it('still resolves the correct file type when the model list query has not settled yet at submit time (race window)', async () => {

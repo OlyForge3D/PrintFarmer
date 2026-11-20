@@ -319,6 +319,27 @@ public sealed class OrcaProfilesServiceInheritanceTests : IDisposable
     }
 
     [Fact]
+    public async Task NonStringParent_MachineProfileIsUnresolved()
+    {
+        WriteManufacturerBundle("TestMfg", machineEntries: [
+            ("Invalid Parent 0.4 nozzle", "machine/invalid_parent.json"),
+        ]);
+        WriteProfile("TestMfg", "machine/invalid_parent.json", """
+            {
+              "name": "Invalid Parent 0.4 nozzle",
+              "inherits": 42,
+              "instantiation": "true",
+              "nozzle_diameter": ["0.4"]
+            }
+            """);
+
+        var service = new OrcaProfilesService(NullLogger.Instance, _profilesRoot);
+        var profiles = await service.ListAvailableMachineProfilesAsync();
+
+        profiles.Should().ContainSingle().Which.InheritanceResolved.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task MissingParent_CustomBundle_ExcludesProfileAndReportsFailure()
     {
         WriteManufacturerBundle("Custom", machineEntries: [
@@ -525,6 +546,27 @@ public sealed class OrcaProfilesServiceInheritanceTests : IDisposable
         // Inherited from parent
         profile.InfillPercentage.Should().Be(20);
         profile.Supports.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task MissingParent_ProcessProfileIsUnresolved()
+    {
+        WriteManufacturerBundle("TestMfg", processEntries: [
+            ("Orphan Process", "process/orphan.json"),
+        ]);
+        WriteProfile("TestMfg", "process/orphan.json", """
+            {
+              "name": "Orphan Process",
+              "inherits": "missing_process",
+              "instantiation": "true",
+              "layer_height": "0.2"
+            }
+            """);
+
+        var service = new OrcaProfilesService(NullLogger.Instance, _profilesRoot);
+        var profiles = await service.ListAvailableProcessProfilesAsync();
+
+        profiles.Should().ContainSingle().Which.InheritanceResolved.Should().BeFalse();
     }
 
     [Fact]

@@ -1908,12 +1908,9 @@ export const NewSliceJobPage: React.FC = () => {
     selectedBedType,
     selectedMachineProfile?.manufacturer || inheritedMachine?.manufacturer,
     {
-      machineResolved: !!selectedMachineProfile?.settings && (
-        selectedMachineProfile.inheritanceResolved === true
-        || (!!inheritedMachine && inheritedMachine.inheritanceResolved === true)
-      ),
+      machineResolved: !!selectedMachineProfile?.settings && selectedMachineProfile.inheritanceResolved === true,
       processResolved: !!resolvedProcessProfile?.settings && resolvedProcessProfile.inheritanceResolved === true,
-      projectMayOverride: bedModels.some(model => !model.fileName || model.fileName.toLowerCase().endsWith('.3mf'))
+      projectMayOverride: bedModels.some(model => model.fileType === '3mf' || !model.fileName || model.fileName.toLowerCase().endsWith('.3mf'))
         || (!!modelFileUrl && (!modelFileName || modelFileName.toLowerCase().endsWith('.3mf'))),
     },
   );
