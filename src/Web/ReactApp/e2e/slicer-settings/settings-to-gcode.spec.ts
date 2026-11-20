@@ -262,11 +262,11 @@ async function applySetting(page: Page, row: CoverageRow, baseline: string | und
   await page.getByRole('button', { name: process ? 'Edit in modal' : 'Edit settings', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('tablist')).toBeVisible();
-  const toggle = dialog.getByRole('switch', { name: 'Basic/Advanced metadata view' });
+  const toggle = dialog.getByRole('button', { name: /^Settings view:/ });
   await expect(toggle).toBeVisible();
   await expect(toggle).toBeEnabled();
-  if (await toggle.getAttribute('aria-checked') === 'false') await toggle.click();
-  await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  if (await dialog.getByRole('button', { name: 'Settings view: Basic' }).isVisible()) await toggle.click();
+  await expect(toggle).toHaveAccessibleName('Settings view: Advanced');
   if (row.profile === 'process' && row.key === 'enable_prime_tower') {
     // Orca 2.4.2 disables single-filament towers unless clumping detection
     // has a machine exclusion area. Exercise that supported editor dependency

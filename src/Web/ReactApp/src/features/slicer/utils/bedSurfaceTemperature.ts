@@ -59,27 +59,3 @@ export function readBedType(value: unknown): string | undefined {
 export function resolveBedType(selectedBedType: string, process: Settings, machine: Settings): string | undefined {
   return selectedBedType || readBedType(process?.curr_bed_type) || readBedType(machine?.curr_bed_type);
 }
-
-function temperatures(value: unknown): Array<number | null> {
-  const values: unknown[] = Array.isArray(value) ? value : [value];
-  return values.length === 0 ? [null] : values.map(item => {
-    if (typeof item !== 'number' && (typeof item !== 'string' || !/^\d+(?:\.\d+)?$/.test(item.trim()))) {
-      return null;
-    }
-    const number = Number(item);
-    return Number.isFinite(number) && number >= 0 ? number : null;
-  });
-}
-
-/** Per-filament profile values only, not a prediction of start-G-code heating. */
-export function getBedSurfaceTemperatures(bedType: string | undefined, settings: Settings) {
-  const key = bedType ? BED_TEMPERATURE_KEYS.get(bedType) : undefined;
-  return {
-    firstLayer: temperatures(key ? settings?.[`${key}_initial_layer`] : undefined),
-    otherLayers: temperatures(key ? settings?.[key] : undefined),
-  };
-}
-
-export function formatBedTemperatures(values: Array<number | null>): string {
-  return values.map(value => value === null ? 'Unknown' : `${value}°C`).join(' / ');
-}

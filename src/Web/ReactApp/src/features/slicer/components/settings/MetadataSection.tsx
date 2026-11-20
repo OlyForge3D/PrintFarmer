@@ -103,14 +103,14 @@ const CompoundRow: React.FC<CompoundRowProps> = ({
           );
         })}
       </div>
-      <div className="w-6 shrink-0 flex justify-center">
+      <div className="w-6 h-6 max-sm:w-11 max-sm:h-11 pointer-coarse:w-11 pointer-coarse:h-11 shrink-0 flex items-center justify-center">
         {anyModified && (
           <Button
             variant="subtle"
             type="button"
             onClick={handleReset}
             disabled={disabled}
-            className="p-0 text-pf-warning-text transition-colors
+            className="h-6 w-6 max-sm:h-11 max-sm:w-11 pointer-coarse:h-11 pointer-coarse:w-11 p-0! text-pf-warning-text transition-colors
                        enabled:hover:bg-pf-warning/10 rounded"
             title="Reset to original values"
             aria-label={`Reset ${label} to original values`}

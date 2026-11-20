@@ -58,6 +58,8 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSTLFile } from '@/common/hooks/useSTLFile';
 import { useSliceJobProgress } from '@/features/slicer/hooks/useSliceJobProgress';
 import { useSlicerMode } from '@/features/slicer/hooks/useSlicerMode';
+import { useSlicerViewMode } from '@/features/slicer/hooks/useSlicerViewMode';
+import { SlicerModeToggle, type SlicerSettingsLevel } from '@/features/slicer/components/settings/SlicerModeToggle';
 import { SliceProgressOverlay } from '@/features/slicer/components/SliceProgressOverlay';
 import { GcodePreviewModal } from '@/features/slicer/components/GcodePreviewModal';
 import { downloadGcodeArtifact } from '@/features/slicer/utils/sliceArtifactActions';
@@ -269,16 +271,44 @@ export const NewSliceJobPage: React.FC = () => {
   } as const;
 
   const { user } = useAuth();
-  const { mode: slicerMode, canToggle: canToggleSlicerMode, setMode: setSlicerMode } = useSlicerMode();
+  const { mode: slicerMode, enabledModes, setMode: setSlicerMode } = useSlicerMode();
+  const [metadataViewMode, , setMetadataViewMode] = useSlicerViewMode();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const modelIdFromUrl = searchParams.get('modelId') || '';
-  const slicerModeOptions = ['Simple', 'Advanced'] as const;
-  const slicerModeRefs = React.useRef<Record<(typeof slicerModeOptions)[number], HTMLButtonElement | null>>({
-    Simple: null,
-    Advanced: null,
-  });
+  const settingsLevels: SlicerSettingsLevel[] = [
+    ...(enabledModes.includes('Simple') ? ['Simple' as const] : []),
+    ...(enabledModes.includes('Advanced') ? ['Basic' as const, 'Advanced' as const] : []),
+  ];
+  const settingsLevel: SlicerSettingsLevel = slicerMode === 'Advanced'
+    ? metadataViewMode === 'advanced' ? 'Advanced' : 'Basic'
+    : 'Simple';
+  const settingsToggleRef = useRef<HTMLButtonElement>(null);
+  const restoreSettingsToggleFocus = useRef(false);
+  useEffect(() => {
+    if (restoreSettingsToggleFocus.current) {
+      settingsToggleRef.current?.focus();
+      restoreSettingsToggleFocus.current = false;
+    }
+  }, [settingsLevel]);
+  const settingsViewControl = (
+    <SlicerModeToggle
+      ref={settingsToggleRef}
+      levels={settingsLevels}
+      value={settingsLevel}
+      onChange={(next) => {
+        // Simple and metadata panels remount; keep keyboard focus on the control.
+        restoreSettingsToggleFocus.current = true;
+        if (next === 'Simple') {
+          setSlicerMode('Simple');
+        } else {
+          setMetadataViewMode(next === 'Advanced' ? 'advanced' : 'simple');
+          setSlicerMode('Advanced');
+        }
+      }}
+    />
+  );
 
   // Check if ANY machine profiles exist in the system (for onboarding detection).
   // This only reflects profiles that have been imported into the database
@@ -1842,24 +1872,6 @@ export const NewSliceJobPage: React.FC = () => {
       allFilamentProfiles.find((p: OrcaFilamentProfile) => p.name === selectedFilamentProfileId);
   }, [allFilamentProfiles, selectedFilamentProfileId, filamentSelection.customId]);
 
-  const getBedSurfaceFilament = useCallback((selection: ProfileSelection) => {
-    if (!selection.name) return undefined;
-    if (!selection.customId) {
-      return allFilamentProfiles.find(profile => profile.name === selection.name);
-    }
-    const profile = customProfilesData?.profiles.find(candidate =>
-      candidate.id === selection.customId && candidate.profileType === 'filament');
-    return profile
-      ? { name: profile.name, settings: getCustomProfileSettings(profile.rawJson) }
-      : undefined;
-  }, [allFilamentProfiles, customProfilesData]);
-
-  const bedSurfaceFilaments = useMemo(() => printerIsMultiToolhead
-    ? physicalToolheads.map((_, index) =>
-      getBedSurfaceFilament(extruderFilamentSelections[index] ?? { name: '' }))
-    : [getBedSurfaceFilament(filamentSelection)],
-  [extruderFilamentSelections, filamentSelection, getBedSurfaceFilament, physicalToolheads, printerIsMultiToolhead]);
-
   const getSelectionColour = useCallback((selection: ProfileSelection): string => {
     if (!selection.customId) {
       return getFilamentProfileColour(allFilamentProfiles.find(p => p.name === selection.name));
@@ -3210,49 +3222,40 @@ export const NewSliceJobPage: React.FC = () => {
             />
             
             {allFilamentProfiles.length > 0 || customFilamentProfiles.length > 0 ? (
-              <>
-                <div className="flex items-center gap-1.5">
-                  <ColorPicker
-                    swatchOnly
-                    swatchClassName="w-7 h-7"
-                    value={extruderFilamentColours[0] ?? getSelectionColour(filamentSelection)}
-                    onChange={(hex) => setExtruderFilamentColours(prev => ({ ...prev, 0: hex }))}
-                    aria-label="Filament colour"
+              <div className="flex items-center gap-1.5">
+                <ColorPicker
+                  swatchOnly
+                  swatchClassName="w-7 h-7"
+                  value={extruderFilamentColours[0] ?? getSelectionColour(filamentSelection)}
+                  onChange={(hex) => setExtruderFilamentColours(prev => ({ ...prev, 0: hex }))}
+                  aria-label="Filament colour"
+                />
+                <div className="flex-1 min-w-0">
+                  <FilamentProfileDropdown
+                    profiles={allFilamentProfiles}
+                    customProfiles={customFilamentProfiles.map(p => ({ id: p.id, name: p.name }))}
+                    selectedProfileName={selectedFilamentProfileId}
+                    selectedCustomProfileId={filamentSelection.customId}
+                    disabled={allFilamentProfiles.length === 0 && customFilamentProfiles.length === 0}
+                    filterConfig={filamentFilterConfig}
+                    onFilterConfigChange={handleFilamentFilterChange}
+                    onSelect={(name, source, customId) => {
+                      setSelectedFilamentProfileId(name, customId);
+                      const sp = source === 'system' ? allFilamentProfiles.find(p => p.name === name) : undefined;
+                      setExtruderFilamentColours(prev => {
+                        const next = { ...prev };
+                        delete next[0];
+                        return next;
+                      });
+                      if (source === 'system') {
+                        setSelectedFilamentMaterial(sp?.material || '');
+                      } else {
+                        setSelectedFilamentMaterial('');
+                      }
+                    }}
                   />
-                  <div className="flex-1 min-w-0">
-                    <FilamentProfileDropdown
-                      profiles={allFilamentProfiles}
-                      customProfiles={customFilamentProfiles.map(p => ({ id: p.id, name: p.name }))}
-                      selectedProfileName={selectedFilamentProfileId}
-                      selectedCustomProfileId={filamentSelection.customId}
-                      disabled={allFilamentProfiles.length === 0 && customFilamentProfiles.length === 0}
-                      filterConfig={filamentFilterConfig}
-                      onFilterConfigChange={handleFilamentFilterChange}
-                      onSelect={(name, source, customId) => {
-                        setSelectedFilamentProfileId(name, customId);
-                        const sp = source === 'system' ? allFilamentProfiles.find(p => p.name === name) : undefined;
-                        setExtruderFilamentColours(prev => {
-                          const next = { ...prev };
-                          delete next[0];
-                          return next;
-                        });
-                        if (source === 'system') {
-                          setSelectedFilamentMaterial(sp?.material || '');
-                        } else {
-                          setSelectedFilamentMaterial('');
-                        }
-                      }}
-                    />
-                  </div>
                 </div>
-
-                {/* Show selected profile's temperature info */}
-                {selectedFilamentProfile && (
-                  <div className="text-xs text-pf-text-muted">
-                    {selectedFilamentProfile.nozzleTemperature ?? 210}°C nozzle
-                  </div>
-                )}
-              </>
+              </div>
             ) : (
               <div className="text-sm text-pf-text-muted p-2">
                 {isMachineProfilesLoading ? <span className="italic">Loading...</span> : 
@@ -3269,7 +3272,6 @@ export const NewSliceJobPage: React.FC = () => {
             selectedBedType={selectedBedType}
             onChange={value => setBedSurfaceSelection({ machine: selectedMachineProfileId, value })}
             context={filamentBedContext}
-            filaments={bedSurfaceFilaments}
           />
 
           {/* PROCESS PROFILE - with Reset, Save-as, and profile management menu */}
@@ -3459,69 +3461,14 @@ export const NewSliceJobPage: React.FC = () => {
             )}
           </div>
 
-          {/* PER-USER MODE TOGGLE — compact and colocated with the settings it controls */}
-          {canToggleSlicerMode && slicerMode && (
-            <div
-              className="flex items-center gap-1 rounded-md border border-pf-border bg-pf-panel p-1"
-              role="radiogroup"
-              aria-label="Slicer mode"
-            >
-              {slicerModeOptions.map((m, index) => {
-                const active = slicerMode === m;
-                return (
-                  <Button
-                    key={m}
-                    ref={(element) => {
-                      slicerModeRefs.current[m] = element;
-                    }}
-                    type="button"
-                    variant="unstyled"
-                    role="radio"
-                    aria-checked={active}
-                    tabIndex={active ? 0 : -1}
-                    onKeyDown={(event) => {
-                      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
-                        event.preventDefault();
-                        const next = slicerModeOptions[(index + 1) % slicerModeOptions.length];
-                        setSlicerMode(next);
-                        slicerModeRefs.current[next]?.focus();
-                        return;
-                      }
-
-                      if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
-                        event.preventDefault();
-                        const next = slicerModeOptions[(index - 1 + slicerModeOptions.length) % slicerModeOptions.length];
-                        setSlicerMode(next);
-                        slicerModeRefs.current[next]?.focus();
-                        return;
-                      }
-
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        setSlicerMode(m);
-                      }
-                    }}
-                    onClick={() => setSlicerMode(m)}
-                    className={`flex-1 rounded px-2.5 py-1 text-xs font-semibold transition-colors ${
-                      active
-                        ? 'bg-pf-accent text-pf-bg-1'
-                        : 'text-pf-text-secondary hover:text-pf-text-primary'
-                    }`}
-                  >
-                    {m}
-                  </Button>
-                );
-              })}
-            </div>
-          )}
-
-          {/* SIMPLE MODE: supports + bed adhesion overrides (layer height and infill hidden) */}
+          {/* SIMPLE MODE: curated print settings */}
           {slicerMode !== 'Advanced' && (
             <SimpleSlicerSettingsPanel
               settings={simpleSlicerSettings}
               onSettingsChange={handleSimpleSettingsChange}
               onValidationChange={setIsSimpleSlicerSettingsValid}
               simpleMode
+              headerAction={settingsViewControl}
             />
           )}
 
@@ -3535,6 +3482,7 @@ export const NewSliceJobPage: React.FC = () => {
                 onAdvancedSettingsChange={setAdvancedProcessSettings}
                 originalSettings={originalProcessSettings}
                 engineVersion={effectiveEngineVersion}
+                viewModeControl={settingsViewControl}
               />
             </div>
           )}

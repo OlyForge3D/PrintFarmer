@@ -283,8 +283,7 @@ describe('QuickSliceModal', () => {
       renderModal();
       await waitFor(() => expect(screen.getByRole('button', { name: /^Slice$/ })).toBeEnabled());
       expect(screen.queryByLabelText('Bed Type')).not.toBeInTheDocument();
-      expect(screen.getByText(/Bed first layer: 0°C; other layers: 0°C/)).toBeInTheDocument();
-      expect(screen.getByText(/Profile specifies 0°C/)).toBeInTheDocument();
+      expect(screen.queryByText(/\d+°C/)).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: /^Slice$/ }));
       await waitFor(() => expect(mockSubmitJob).toHaveBeenCalledOnce());
       expect(JSON.parse(mockSubmitJob.mock.calls[0][0].slicerProfileJson).overrides)

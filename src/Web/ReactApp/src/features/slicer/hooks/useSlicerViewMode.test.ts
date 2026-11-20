@@ -1,6 +1,6 @@
 import { StrictMode, createElement, type PropsWithChildren } from 'react';
 import { act, renderHook } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSlicerViewMode } from '@/features/slicer/hooks/useSlicerViewMode';
 
 const storageKey = 'printfarmer-slicer-viewmode';
@@ -8,6 +8,7 @@ const wrapper = ({ children }: PropsWithChildren) => createElement(StrictMode, n
 
 describe('useSlicerViewMode', () => {
   beforeEach(() => localStorage.clear());
+  afterEach(() => vi.restoreAllMocks());
 
   it('switches both directions exactly once in StrictMode and synchronizes mounted editors', () => {
     const { result } = renderHook(() => ({
@@ -31,5 +32,38 @@ describe('useSlicerViewMode', () => {
     const { result } = renderHook(useSlicerViewMode, { wrapper });
     expect(result.current[0]).toBe('advanced');
     expect(localStorage.getItem(storageKey)).toBe('advanced');
+  });
+
+  it('mounts in Basic view when storage cannot be read', () => {
+    vi.spyOn(localStorage, 'getItem').mockImplementation(() => {
+      throw new DOMException('Storage denied', 'SecurityError');
+    });
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { result } = renderHook(useSlicerViewMode, { wrapper });
+
+    expect(result.current[0]).toBe('simple');
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining('could not be read'));
+  });
+
+  it('switches and synchronizes open editors even when persistence fails', () => {
+    vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new DOMException('Storage full', 'QuotaExceededError');
+    });
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { result } = renderHook(() => ({
+      first: useSlicerViewMode(),
+      second: useSlicerViewMode(),
+    }), { wrapper });
+
+    act(() => result.current.first[2]('advanced'));
+    expect(result.current.first[0]).toBe('advanced');
+    expect(result.current.second[0]).toBe('advanced');
+
+    act(() => result.current.second[1]());
+    expect(result.current.first[0]).toBe('simple');
+    expect(result.current.second[0]).toBe('simple');
+    expect(warning).toHaveBeenCalledTimes(2);
+    expect(localStorage.getItem(storageKey)).toBeNull();
   });
 });

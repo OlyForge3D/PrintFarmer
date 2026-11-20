@@ -18,15 +18,9 @@ import { toast } from 'sonner';
 import { binaryStl, modelTextBuffer, threeMfBuffer } from '@/features/slicer/utils/__tests__/model-response-fixtures';
 import { MotionType, PrinterBackend, type Printer } from '@/types/api';
 
-// Mutable slicer-mode refs so the page tab and metadata view toggle can be
-// driven independently in the combination-state regression test.
-// Hoisted because vi.mock factories run before module-body initialization.
+// The farm mode is mocked; the metadata level uses its real persisted hook.
 const slicerModeRef = vi.hoisted(() => ({
   value: 'Simple' as 'Simple' | 'Advanced',
-  listeners: new Set<() => void>(),
-}));
-const slicerViewModeRef = vi.hoisted(() => ({
-  value: 'simple' as 'simple' | 'advanced',
   listeners: new Set<() => void>(),
 }));
 
@@ -482,9 +476,10 @@ vi.mock('../../components/job', () => ({
       </div>
     );
   },
-  SlicerSettingsPanel: (props: { onValidationChange?: (isValid: boolean) => void; settings: SlicerSettings; onSettingsChange: (settings: SlicerSettings) => void }) => (
+  SlicerSettingsPanel: (props: { headerAction?: React.ReactNode; onValidationChange?: (isValid: boolean) => void; settings: SlicerSettings; onSettingsChange: (settings: SlicerSettings) => void }) => (
     <div data-testid="slicer-settings-panel" data-slicer-mode="Simple">
       Settings Panel
+      {props.headerAction}
       <input
         type="range"
         min="0"
@@ -556,41 +551,14 @@ vi.mock('@/features/models3d/components/3d/ViewerSkeleton', () => ({
   ViewerSkeleton: () => <div data-testid="viewer-skeleton">Loading...</div>
 }));
 
-// Mock the metadata editor while keeping its persisted Basic/Advanced toggle
-// observable to the page-level combination-state regression test.
-vi.mock('@/features/slicer/components/settings', async () => {
-  const React = await vi.importActual<typeof import('react')>('react');
-  return {
-    SlicerSettingsPanel: () => {
-      const viewMode = React.useSyncExternalStore(
-        (listener) => {
-          slicerViewModeRef.listeners.add(listener);
-          return () => slicerViewModeRef.listeners.delete(listener);
-        },
-        () => slicerViewModeRef.value,
-        () => slicerViewModeRef.value,
-      );
-      const nextMode = viewMode === 'simple' ? 'advanced' : 'simple';
-      return (
-        <div data-testid="slicer-settings-panel" data-view-mode={viewMode === 'simple' ? 'Basic' : 'Advanced'}>
-          Settings Panel
-          <button
-            type="button"
-            role="switch"
-            aria-checked={viewMode === 'advanced'}
-            aria-label="Basic/Advanced metadata view"
-            onClick={() => {
-              slicerViewModeRef.value = nextMode;
-              slicerViewModeRef.listeners.forEach((listener) => listener());
-            }}
-          >
-            Advanced view
-          </button>
-        </div>
-      );
-    },
-  };
-});
+vi.mock('@/features/slicer/components/settings', () => ({
+  SlicerSettingsPanel: ({ viewModeControl }: { viewModeControl?: React.ReactNode }) => (
+    <div data-testid="slicer-settings-panel">
+      Settings Panel
+      {viewModeControl}
+    </div>
+  ),
+}));
 
 // Mock useSTLFile hook
 vi.mock('@/common/hooks/useSTLFile', () => ({
@@ -633,8 +601,7 @@ describe('NewSliceJobPage', () => {
   beforeEach(() => {
     slicerModeRef.value = 'Simple';
     slicerModeRef.listeners.clear();
-    slicerViewModeRef.value = 'simple';
-    slicerViewModeRef.listeners.clear();
+    localStorage.removeItem('printfarmer-slicer-viewmode');
     // #1028: several tests queue one-shot behaviour with `mockResolvedValueOnce`
     // / `mockRejectedValueOnce` (L393, L501-502, L655, L666). `clearAllMocks`
     // only wipes call history — it leaves an unconsumed one-shot on the queue,
@@ -1345,26 +1312,21 @@ describe('NewSliceJobPage', () => {
   });
 
   describe('Bed-surface temperatures', () => {
-    it('supports Simple, Advanced-tab Basic, and Advanced-toggle views without losing Simple edits', async () => {
+    it('cycles one settings control through Simple, Basic and Advanced without losing Simple edits or focus', async () => {
       renderWithProviders(<NewSliceJobPage />);
       const infill = await screen.findByRole('slider', { name: /infill density/i });
       fireEvent.change(infill, { target: { value: '35' } });
 
-      expect(screen.getAllByRole('radio')).toHaveLength(2);
-      expect(screen.getByRole('radio', { name: 'Simple' })).toHaveAttribute('aria-checked', 'true');
-      expect(screen.queryByRole('switch', { name: /metadata view/i })).not.toBeInTheDocument();
-
-      fireEvent.click(screen.getByRole('radio', { name: 'Advanced' }));
-      expect(await screen.findByTestId('slicer-settings-panel')).toHaveAttribute('data-view-mode', 'Basic');
-      expect(screen.getByRole('radio', { name: 'Advanced' })).toHaveAttribute('aria-checked', 'true');
-      fireEvent.click(screen.getByRole('switch', { name: 'Basic/Advanced metadata view' }));
-      expect(screen.getByTestId('slicer-settings-panel')).toHaveAttribute('data-view-mode', 'Advanced');
-      expect(screen.getByRole('switch', { name: 'Basic/Advanced metadata view' })).toHaveAttribute('aria-checked', 'true');
-      fireEvent.click(screen.getByRole('switch', { name: 'Basic/Advanced metadata view' }));
-      expect(screen.getByTestId('slicer-settings-panel')).toHaveAttribute('data-view-mode', 'Basic');
-      expect(screen.getByRole('switch', { name: 'Basic/Advanced metadata view' })).toHaveAttribute('aria-checked', 'false');
-
-      fireEvent.click(screen.getByRole('radio', { name: 'Simple' }));
+      expect(screen.queryByRole('radiogroup', { name: 'Slicer mode' })).not.toBeInTheDocument();
+      for (const [current, next] of [['Simple', 'Basic'], ['Basic', 'Advanced'], ['Advanced', 'Simple']]) {
+        expect(screen.getAllByRole('button', { name: /^Settings view:/ })).toHaveLength(1);
+        const toggle = screen.getByRole('button', { name: `Settings view: ${current}` });
+        expect(toggle).not.toHaveTextContent(current);
+        fireEvent.focus(toggle);
+        expect(toggle).toHaveAccessibleDescription(`${current} settings · Switch to ${next}`);
+        fireEvent.click(toggle);
+        expect(await screen.findByRole('button', { name: `Settings view: ${next}` })).toHaveFocus();
+      }
       expect(await screen.findByRole('slider', { name: /infill density/i })).toHaveValue('35');
     });
 
@@ -1560,19 +1522,9 @@ describe('NewSliceJobPage', () => {
             expect(localStorage.getItem('sliceJob.selectedFilamentProfileId.customId')).toBe(owned ? custom.id : null);
           }
         }
-        if (owned) {
-          const customSummaries = await screen.findAllByText((_, element) =>
-            element?.tagName === 'P'
-            && element.textContent?.includes('Bed first layer: 0°C') === true
-            && element.textContent?.includes('62°C / 57°C') === true);
-          expect(customSummaries).toHaveLength(multi ? 2 : 1);
-          expect(screen.getAllByText(/Profile specifies 0°C/)).toHaveLength(multi ? 2 : 1);
-        } else {
-          const systemSummaries = await screen.findAllByText((_, element) =>
-            element?.tagName === 'P'
-            && element.textContent?.includes('other layers: 51°C') === true);
-          expect(systemSummaries).toHaveLength(multi ? 2 : 1);
-          expect(screen.queryAllByText(/Profile specifies 0°C/)).toHaveLength(0);
+        expect(screen.queryByText(/\d+°C/)).not.toBeInTheDocument();
+        for (const container of containers) {
+          expect(container).not.toHaveTextContent(/°C/);
         }
         if (multi) {
           fireEvent.click(screen.getByRole('button', { name: 'Edit Extruder 2 filament settings' }));
@@ -1657,9 +1609,7 @@ describe('NewSliceJobPage', () => {
       });
       fireEvent.click(await within(filamentPicker).findByRole('button', { name: 'Generic PLA @MK4' }));
       fireEvent.change(screen.getByLabelText('Bed Type'), { target: { value: 'Textured PEI Plate' } });
-      const summary = await screen.findByText((_, element) =>
-        element?.tagName === 'P' && element.textContent?.includes('Bed first layer:') === true);
-      expect(summary).toHaveTextContent(/Bed first layer:\s*65°C;\s*other layers:\s*60°C/);
+      expect(screen.queryByText(/\d+°C/)).not.toBeInTheDocument();
       await waitFor(() => {
         expect(Array.from(document.querySelectorAll('select')).some(select => select.value.startsWith('system:'))).toBe(true);
       });
@@ -1687,9 +1637,7 @@ describe('NewSliceJobPage', () => {
       renderWithProviders(<NewSliceJobPage />);
       await screen.findByRole('button', { name: /Generic PLA @MK4/ });
       await waitFor(() => expect(screen.queryByLabelText('Bed Type')).not.toBeInTheDocument());
-      const summary = await screen.findByText((_, element) =>
-        element?.tagName === 'P' && element.textContent?.includes('Bed first layer:') === true);
-      expect(summary).toHaveTextContent(/Bed first layer:\s*65°C;\s*other layers:\s*60°C/);
+      expect(screen.queryByText(/\d+°C/)).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Filament profile options menu' }));
       fireEvent.click(screen.getByRole('button', { name: 'Edit settings' }));
       await waitFor(() => expect(screen.getByTitle('Textured Plate first layer')).toHaveValue(65));
