@@ -83,6 +83,18 @@
 
 ### Fixes
 
+- The web slicer uses one right-aligned control for Simple, Basic and Advanced
+  settings. Filament selection no longer shows nozzle or bed temperature text,
+  and modifying a setting no longer changes its row height (#3880).
+- Restore compatible process presets for renamed Orca machine profiles, hide
+  Bed Type for single-bed machines, and remove vertical overflow from the web
+  slicer's settings tabs.
+
+- Keep Printer Dashboard maintenance/configuration banner dismissals across
+  refresh without hiding newer catalog revisions; respect dismissed
+  profile-import tasks on periodic scans. Clarify missing-import tasks and use a
+  consistent responsive three-column widget grid (#3837).
+
 - Gate web jog and coordinate entry on affirmative per-axis homing telemetry.
   Discover PrusaLink motion support per printer without sending motion, disable
   unsupported CORE One L/Buddy Home and jog controls, and distinguish explicit

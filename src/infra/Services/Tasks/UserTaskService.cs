@@ -96,6 +96,12 @@ public class UserTaskService(
 
             if (existingTask is null)
             {
+                UserTask? dismissed = await GetCoveringDismissalAsync(dto, ct);
+                if (dismissed is not null)
+                {
+                    return MapToDto(dismissed);
+                }
+
                 UserTaskDto? created = await TryInsertProfileImportTaskAsync(dto, recoverySource: null, ct);
                 if (created is not null)
                 {
@@ -114,6 +120,12 @@ public class UserTaskService(
             // The failed OCC update may have observed a terminal row or a newer open
             // snapshot. The same insert/reconcile flow handles both cases and also
             // covers a concurrent recovery insert.
+            UserTask? dismissedDuringMerge = await GetCoveringDismissalAsync(dto, ct);
+            if (dismissedDuringMerge is not null)
+            {
+                return MapToDto(dismissedDuringMerge);
+            }
+
             UserTaskDto? recovered = await TryInsertProfileImportTaskAsync(dto, existingTask, ct);
             if (recovered is not null)
             {
@@ -123,6 +135,26 @@ public class UserTaskService(
 
         throw new DbUpdateConcurrencyException(
             $"Could not merge profile import task for printer model {dto.PrinterModelId} after {MaxProfileImportWriteAttempts} attempts.");
+    }
+
+    private async Task<UserTask?> GetCoveringDismissalAsync(CreateProfileImportTaskBatchDto dto, CancellationToken ct)
+    {
+        IReadOnlyList<UserTask> dismissals = await _taskRepository.GetDismissedByEntityAsync(
+            UserTaskType.ProfileImport,
+            ProfileImportEntityType,
+            dto.PrinterModelId,
+            ct);
+        HashSet<Guid> dismissedPrinterIds = [];
+        foreach (UserTask dismissed in dismissals)
+        {
+            dismissedPrinterIds.UnionWith(ParseRelatedEntityIds(dismissed.RelatedEntityIdsJson));
+            if (dto.PrinterIds.All(dismissedPrinterIds.Contains))
+            {
+                return dismissed;
+            }
+        }
+
+        return null;
     }
 
     private async Task<UserTaskDto?> TryMergeProfileImportTaskAsync(

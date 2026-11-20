@@ -379,6 +379,35 @@ describe('ProfileEditorModal machine profiles', () => {
     expect(screen.queryByText('Settings modified')).not.toBeInTheDocument();
   });
 
+  it('reserves mobile numeric width while keeping units and reset target available', () => {
+    renderMachineEditor({
+      name: 'CoreXY',
+      manufacturer: 'Test',
+      buildVolumeZ: 100,
+      maxBedTemperature: 60,
+      settings: {},
+    });
+
+    const heightInput = screen.getByRole('spinbutton', { name: 'Printable height' });
+    const bedTemperatureInput = screen.getByRole('spinbutton', { name: 'Maximum bed temperature' });
+    expect(heightInput).toHaveValue(100);
+    expect(bedTemperatureInput).toHaveValue(60);
+    expect(heightInput.parentElement?.parentElement?.lastElementChild).toHaveTextContent('mm');
+    expect(bedTemperatureInput.parentElement?.parentElement?.lastElementChild).toHaveTextContent('°C');
+
+    const heightLabel = document.querySelector(`label[for="${heightInput.id}"]`);
+    const labelColumn = heightLabel?.parentElement?.parentElement;
+    expect(labelColumn).toHaveClass('max-sm:w-[34%]');
+    const heightRow = labelColumn?.parentElement;
+    const resetSlot = heightRow?.lastElementChild;
+    expect(resetSlot).toHaveClass('max-sm:w-11', 'max-sm:h-11');
+
+    fireEvent.change(heightInput, { target: { value: '110' } });
+    expect(screen.getByRole('button', { name: 'Reset Printable height to original value' }))
+      .toHaveClass('max-sm:w-11', 'max-sm:h-11');
+    expect(labelColumn).toHaveClass('max-sm:w-[34%]');
+  });
+
   it('saves edited fields under Orca keys while preserving unrelated raw settings', async () => {
     const user = userEvent.setup();
     renderMachineEditor({

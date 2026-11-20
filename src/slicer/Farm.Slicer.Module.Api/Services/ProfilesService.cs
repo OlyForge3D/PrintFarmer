@@ -938,7 +938,8 @@ public class ProfilesService(
         Guid? printerModelId,
         string? orcaVersion,
         bool checkDuplicates,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool attributeToCatalogManufacturer = false)
     {
         string profileJson = JsonSerializer.Serialize(machineProfile, CaseInsensitiveCompactJsonOptions);
         (string sanitizedRaw, string settingsJson, string profileHash) = _parsingService.ParseAndPrepare(profileJson);
@@ -967,7 +968,7 @@ public class ProfilesService(
         {
             Id = Guid.NewGuid(),
             Name = machineProfile.Name ?? string.Empty,
-            Manufacturer = machineProfile.Manufacturer ?? manufacturerName,
+            Manufacturer = attributeToCatalogManufacturer ? manufacturerName : machineProfile.Manufacturer ?? manufacturerName,
             Description = $"OrcaSlicer machine profile for {modelDisplayName}",
             SlicerType = SlicerType.OrcaSlicer,
             SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
@@ -1331,13 +1332,28 @@ public class ProfilesService(
                 return result;
             }
 
-            // Find the manufacturer's profiles (case-insensitive lookup)
-            string? matchedManufacturerKey = allProfiles.ByHierarchy.Keys
-                .FirstOrDefault(k => string.Equals(k, request.ManufacturerName, StringComparison.OrdinalIgnoreCase));
+            // The worker keys its hierarchy by OrcaSlicer vendor directory, which need not equal the
+            // catalog manufacturer name: rendered custom profile families live under
+            // "PrintFarmer-{familyId}" bundles (e.g. Micron 180 for catalog manufacturer
+            // "PrintersForAnts"). Select every vendor bucket that holds an alias-matched machine,
+            // plus the bucket named after the catalog manufacturer, rather than requiring the
+            // catalog name to be a raw worker key. The alias and compatible_printers guards below
+            // still decide which profiles may be imported.
+            List<(string Key, ManufacturerProfilesDto Profiles)> manufacturerBuckets = allProfiles.ByHierarchy
+                .Where(entry => entry.Value?.Models != null &&
+                    (string.Equals(entry.Key, request.ManufacturerName, StringComparison.OrdinalIgnoreCase) ||
+                     entry.Value.Models.Values.Any(model => model?.MachineProfiles?.Any(machine =>
+                         aliasMatchedMachineNames.Contains(machine.Name ?? string.Empty)) == true)))
+                .Select(entry => (entry.Key, entry.Value))
 
-            if (matchedManufacturerKey == null ||
-                !allProfiles.ByHierarchy.TryGetValue(matchedManufacturerKey, out ManufacturerProfilesDto? manufacturerProfiles) ||
-                manufacturerProfiles?.Models == null)
+                // Prefer the exact catalog bucket; when multiple alias buckets qualify, use a
+                // stable ordinal order so duplicate profile names resolve consistently.
+                .OrderBy(bucket => string.Equals(bucket.Key, request.ManufacturerName, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenBy(bucket => bucket.Key, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(bucket => bucket.Key, StringComparer.Ordinal)
+                .ToList();
+
+            if (manufacturerBuckets.Count == 0)
             {
                 result.Error = $"Manufacturer '{request.ManufacturerName}' not found in worker profiles";
                 return result;
@@ -1347,20 +1363,33 @@ public class ProfilesService(
             HashSet<string> selectedMachines = new(request.SelectedMachineProfiles, StringComparer.OrdinalIgnoreCase);
             HashSet<string> selectedProcesses = new(request.SelectedProcessProfiles, StringComparer.OrdinalIgnoreCase);
             HashSet<string> selectedFilaments = new(request.SelectedFilamentProfiles, StringComparer.OrdinalIgnoreCase);
+            HashSet<string> importedMachineNames = new(StringComparer.OrdinalIgnoreCase);
+            HashSet<string> importedProcessIdentities = new(StringComparer.OrdinalIgnoreCase);
+            HashSet<string> importedFilamentIdentities = new(StringComparer.OrdinalIgnoreCase);
 
             static bool IsCompatibleWithAliasMatchedMachine(IEnumerable<string> compatiblePrinters, HashSet<string> aliasMatchedMachineNames)
             {
                 return compatiblePrinters.Any(aliasMatchedMachineNames.Contains);
             }
 
-            // Iterate through all models to find matching profiles
-            foreach ((string? _, PrinterModelProfilesDto? modelProfiles) in manufacturerProfiles.Models)
+            // Sort model groups too: worker dictionary enumeration order must not decide which
+            // conflicting profile wins inside a manufacturer bucket.
+            foreach ((string bucketKey, PrinterModelProfilesDto? modelProfiles) in manufacturerBuckets
+                         .SelectMany(bucket => bucket.Profiles.Models
+                             .OrderBy(model => model.Key, StringComparer.OrdinalIgnoreCase)
+                             .ThenBy(model => model.Key, StringComparer.Ordinal)
+                             .Select(model => (bucket.Key, model.Value))))
             {
                 if (modelProfiles == null)
                 {
                     continue;
                 }
 
+                // Rows from a vendor bucket other than the catalog manufacturer (e.g. a rendered
+                // custom family) are attributed to the catalog manufacturer, as
+                // ProfileManufacturerMaintenanceService does for family variants.
+                bool attributeToCatalogManufacturer =
+                    !string.Equals(bucketKey, request.ManufacturerName, StringComparison.OrdinalIgnoreCase);
                 string modelDisplayName = modelProfiles.Name ?? "Unknown";
 
                 // Import selected machine profiles
@@ -1381,12 +1410,22 @@ public class ProfilesService(
                             continue;
                         }
 
+                        string machineIdentity = machineProfile.Name ?? string.Empty;
+                        if (importedMachineNames.Contains(machineIdentity))
+                        {
+                            _logger.LogDebug("[ImportSelectedProfilesForModel] Skipping duplicate machine profile '{MachineProfileName}' from bucket '{BucketKey}' and model '{ModelDisplayName}'", machineProfile.Name, bucketKey, modelDisplayName);
+                            result.Skipped++;
+                            continue;
+                        }
+
                         try
                         {
                             bool imported = await PersistMachineProfileAsync(
                                 machineProfile, request.ManufacturerName, modelDisplayName,
-                                printerModelId, orcaVersion, checkDuplicates: true, ct);
+                                printerModelId, orcaVersion, checkDuplicates: true, ct,
+                                attributeToCatalogManufacturer);
 
+                            importedMachineNames.Add(machineIdentity);
                             if (imported)
                             {
                                 result.MachineProfilesImported++;
@@ -1422,12 +1461,21 @@ public class ProfilesService(
                             continue;
                         }
 
+                        string filamentIdentity = FilamentIdentity(filamentProfile.Name, filamentProfile.Material);
+                        if (importedFilamentIdentities.Contains(filamentIdentity))
+                        {
+                            _logger.LogDebug("[ImportSelectedProfilesForModel] Skipping duplicate filament profile '{FilamentProfileName}' with material '{Material}' from bucket '{BucketKey}' and model '{ModelDisplayName}'", filamentProfile.Name, filamentProfile.Material, bucketKey, modelDisplayName);
+                            result.Skipped++;
+                            continue;
+                        }
+
                         try
                         {
                             bool imported = await PersistFilamentProfileAsync(
                                 filamentProfile, request.ManufacturerName, modelDisplayName,
                                 orcaVersion, checkDuplicates: true, ct);
 
+                            importedFilamentIdentities.Add(filamentIdentity);
                             if (imported)
                             {
                                 result.FilamentProfilesImported++;
@@ -1463,6 +1511,14 @@ public class ProfilesService(
                             continue;
                         }
 
+                        string processIdentity = ProcessIdentity(processProfile.Name, printerModelId);
+                        if (importedProcessIdentities.Contains(processIdentity))
+                        {
+                            _logger.LogDebug("[ImportSelectedProfilesForModel] Skipping duplicate process profile '{ProcessProfileName}' from bucket '{BucketKey}' and model '{ModelDisplayName}'", processProfile.Name, bucketKey, modelDisplayName);
+                            result.Skipped++;
+                            continue;
+                        }
+
                         try
                         {
                             bool imported = await PersistProcessProfileAsync(
@@ -1471,6 +1527,9 @@ public class ProfilesService(
 
                             if (imported)
                             {
+                                // A matching hash can belong to another printer model; only claim
+                                // this model-scoped identity after this candidate is imported.
+                                importedProcessIdentities.Add(processIdentity);
                                 result.ProcessProfilesImported++;
                             }
                             else

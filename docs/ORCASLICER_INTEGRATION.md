@@ -92,19 +92,28 @@ current worker release.
 2. The bundled compose template `scripts/docker/compose-templates/docker-compose.orcaslicer-worker-previous.yml` configures the previous engine and its service name. Enable it in generated stacks with `ENABLE_ORCA_WORKER_PREVIOUS=yes` when running `scripts/docker/compose-generator.sh` (default is off, so single-engine installs are unchanged).
 3. The Dockerfile (`scripts/docker/dockerfiles/Dockerfile.multistage`) restores and publishes both `Farm.Slicers.OrcaSlicer.v2_4_0` and `Farm.Slicers.OrcaSlicer.v2_3_1` plugins into the shared plugin drop that the host loads via `Slicer:PluginsPath`.
 
+### Settings views
+
+Use the control on the right of the web slicer's settings header to cycle
+**Simple → Basic → Advanced → Simple**. Hover or focus the control to see the
+current and next view. Simple shows curated print settings;
+Basic and Advanced show the profile editor with different levels of detail.
+If the farm enables only Advanced mode, the control cycles between Basic and
+Advanced. If only Simple is enabled, no control is shown.
+
 ### Bed surfaces and filament temperatures
 
-The web slicer and Quick Slice preserve the profile's bed surface unless the
-operator explicitly chooses another **Bed Type**. That choice is submitted as
+The web slicer and Quick Slice hide **Bed Type** for single-bed machine profiles
+and preserve the profile's bed surface. Where the selector is available, an
+explicit choice is submitted as
 `overrides.curr_bed_type` and included in the native process configuration; it
 does not rewrite the filament's temperature arrays.
 
-Bed summaries read the selected surface's native first-layer and other-layer
-keys, not the legacy hot-plate summary. Zero stays zero, missing/unsupported
-values appear as **Unknown**, and each extruder's profile values remain separate.
-These are profile values, not proof of the generated heating commands:
-OrcaSlicer's active-filament selection, `bed_temperature_formula`, and custom
-start G-code still determine what reaches the printer.
+The slicer sidebar and Quick Slice show no nozzle or bed temperature text under
+filament selection. Review or change temperatures in the filament editor. Those
+are profile values, not proof of heating commands: OrcaSlicer's active-filament
+selection, `bed_temperature_formula`, and custom start G-code still determine
+what reaches the printer.
 
 The filament editor honors the selected machine's resolved
 `support_multi_bed_types`. When false and the active `curr_bed_type` is known,
@@ -208,6 +217,17 @@ Content-Type: application/json
 ```
 
 `DELETE /api/profiles/custom-bundles/{bundleName}` removes a bundle.
+
+Rendered bundles appear in the worker hierarchy under their bundle name
+(`PrintFarmer-{familyId}`), not the catalog manufacturer. Selective import and
+`POST /api/slicer/profiles/resolve-for-model/{modelId}` (used when saving a
+default process profile as custom) therefore select every worker vendor bucket
+that holds a machine matched by the model's OrcaSlicer aliases, in addition to
+a bucket named after the catalog manufacturer. Only alias-matched machines and
+processes or filaments whose `compatible_printers` name such a machine are
+imported. Machine rows imported from a non-catalog bucket are attributed to the
+catalog manufacturer.
+
 `POST /api/profiles/cache/reload` performs a full in-process reload. Install and
 remove already perform that reload; callers do not need a second request.
 

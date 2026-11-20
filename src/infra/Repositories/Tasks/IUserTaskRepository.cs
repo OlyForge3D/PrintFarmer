@@ -37,6 +37,11 @@ public interface IUserTaskRepository
     Task<UserTask?> GetByEntityAsync(UserTaskType taskType, string entityType, Guid entityId, CancellationToken ct = default);
 
     /// <summary>
+    /// Gets farm-wide dismissals for an entity, newest first, so generators can respect previously covered printers.
+    /// </summary>
+    Task<IReadOnlyList<UserTask>> GetDismissedByEntityAsync(UserTaskType taskType, string entityType, Guid entityId, CancellationToken ct = default);
+
+    /// <summary>
     /// Gets the open (Pending or InProgress) task matching a canonical shift-plan
     /// source. Returns <c>null</c> when no such task exists. Used by the
     /// shift-plan compiler to dedupe by (<see cref="UserTaskSourceKind"/>,

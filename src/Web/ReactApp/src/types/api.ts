@@ -813,6 +813,8 @@ export interface PrinterSummary {
   inMaintenance: boolean;
   isEnabled: boolean;
   hasCatalogUpdate: boolean;
+  /** Catalog model revision; absent on older servers, so unknown updates must not be persistently hidden. */
+  catalogUpdateRevision?: string | null;
 }
 
 /**

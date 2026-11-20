@@ -73,12 +73,17 @@ test.describe('Printer Responsive Layout — Moonraker', () => {
     await tableToggle.focus();
     await expect(tableToggle).toBeFocused();
     await page.keyboard.press('Enter');
-    await expect(page.locator('table')).toBeVisible();
+    const fleetTable = page.getByRole('table').filter({
+      has: page.getByRole('columnheader', { name: 'Printer', exact: true }),
+    });
+    await expect(fleetTable).toBeVisible();
+    await expect(tableToggle).toHaveAttribute('aria-pressed', 'true');
 
     const cardsToggle = page.getByRole('button', { name: 'Detailed Cards' });
     await cardsToggle.focus();
     await page.keyboard.press('Enter');
-    await expect(page.locator('table')).toHaveCount(0);
+    await expect(fleetTable).toHaveCount(0);
+    await expect(cardsToggle).toHaveAttribute('aria-pressed', 'true');
     await expect(getPrinterCardByName(page, MOONRAKER_PRINTERS.ready)).toBeVisible();
   });
 });

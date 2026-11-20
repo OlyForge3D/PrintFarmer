@@ -285,7 +285,7 @@ export async function prepareVisualScene(context: BrowserContext, page: Page, sc
       await page.locator('main').getByRole('button', { name: 'New role' }).first().click();
       const dialog = page.getByRole('dialog', { name: 'New role' });
       await expect(dialog).toBeVisible();
-      if (scene.overlayMutation === 'role-create-error') {
+      if (scene.overlayMutation === 'role-create-error' || scene.overlayMutation === 'role-create-success') {
         await dialog.getByRole('textbox', { name: 'Name', exact: true }).fill('coverage_role');
         await dialog.getByLabel('Display name').fill('Coverage role');
         const responsePromise = page.waitForResponse(response =>
@@ -293,31 +293,134 @@ export async function prepareVisualScene(context: BrowserContext, page: Page, sc
         );
         await dialog.getByRole('button', { name: 'Create role', exact: true }).click();
         const response = await responsePromise;
-        expect(response.status()).toBe(503);
+        expect(response.status()).toBe(scene.overlayMutation === 'role-create-error' ? 503 : 201);
         expect(response.request().postDataJSON()).toEqual({ name: 'coverage_role', displayName: 'Coverage role' });
-        await expect(dialog.getByRole('alert')).toHaveText('Synthetic role creation failure.');
-        await expect(dialog.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('coverage_role');
+        if (scene.overlayMutation === 'role-create-error') {
+          await expect(dialog.getByRole('alert')).toHaveText('Synthetic role creation failure.');
+          await expect(dialog.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('coverage_role');
+        } else {
+          await expect(dialog).toBeHidden();
+        }
+      }
+    }
+    if (scene.overlay === 'edit-role' || scene.overlay === 'delete-role' || scene.overlay === 'role-members') {
+      const roleRow = page.getByRole('row').filter({ hasText: 'Coverage role' });
+      if (scene.overlay === 'role-members') {
+        await roleRow.click();
+        await expect(page.getByText('Printers', { exact: true }).last()).toBeVisible();
+        const grantView = page.getByRole('checkbox', { name: 'Grant View', exact: true });
+        await expect(grantView).toBeChecked();
+        await grantView.uncheck({ force: true });
+        const saveBar = page.getByTestId('admin-save-bar');
+        await expect(saveBar).toBeVisible();
+        await saveBar.getByRole('button', { name: 'Save changes', exact: true }).click();
+        const confirmation = page.getByRole('dialog', { name: 'Save permission changes' });
+        await expect(confirmation).toBeVisible();
+        const responsePromise = page.waitForResponse(response =>
+          response.request().method() === 'PUT' &&
+          new URL(response.url()).pathname === '/api/admin/roles/fixture-role/permissions',
+        );
+        await confirmation.getByRole('button', { name: 'Save changes', exact: true }).click();
+        const response = await responsePromise;
+        expect(response.status()).toBe(200);
+        expect(response.request().postDataJSON()).toEqual({
+          updatedAt: captureTime,
+          permissions: [],
+        });
+        await expect(page.getByText('Permissions saved.', { exact: true })).toBeVisible();
+        await expect(grantView).not.toBeChecked();
+        await expect(page.getByText('Not granted', { exact: true })).toBeVisible();
+      } else if (scene.overlay === 'edit-role') {
+        await roleRow.click();
+        await roleRow.getByRole('button', { name: 'Edit Coverage role' }).click();
+        const dialog = page.getByRole('dialog', { name: 'Edit role' });
+        await expect(dialog).toBeVisible();
+        await dialog.getByLabel('Display name').fill('Edited coverage role');
+        const responsePromise = page.waitForResponse(response =>
+          response.request().method() === 'PUT' &&
+          new URL(response.url()).pathname === '/api/admin/roles/fixture-role',
+        );
+        await dialog.getByRole('button', { name: 'Save changes', exact: true }).click();
+        const response = await responsePromise;
+        expect(response.status()).toBe(200);
+        expect(response.request().postDataJSON()).toEqual({
+          displayName: 'Edited coverage role',
+          description: 'Synthetic role for admin coverage.',
+          isActive: true,
+        });
+        await expect(page.getByText('Role "Edited coverage role" updated.', { exact: true })).toBeVisible();
+        await expect(dialog).toBeHidden();
+      } else {
+        await roleRow.getByRole('button', { name: 'Delete Coverage role' }).click();
+        const dialog = page.getByRole('dialog', { name: 'Delete role' });
+        await expect(dialog).toBeVisible();
+        const responsePromise = page.waitForResponse(response =>
+          response.request().method() === 'DELETE' &&
+          new URL(response.url()).pathname === '/api/admin/roles/fixture-role',
+        );
+        await dialog.getByRole('button', { name: 'Confirm', exact: true }).click();
+        const response = await responsePromise;
+        expect(response.status()).toBe(409);
+        const conflictDialog = page.getByRole('dialog', { name: 'Role has members' });
+        await expect(conflictDialog).toBeVisible();
+        await expect(conflictDialog.getByText('This role still has 2 member(s).', { exact: true })).toBeVisible();
       }
     }
     if (scene.overlay === 'new-tag') {
       await page.getByTestId('add-tag-action').click();
       const dialog = page.getByRole('dialog', { name: 'Create New Tag' });
       await expect(dialog).toBeVisible();
-      if (scene.overlayMutation === 'tag-create-error') {
+      if (scene.overlayMutation === 'tag-create-error' || scene.overlayMutation === 'tag-create-success') {
         await dialog.getByLabel('Tag Name').fill('Synthetic coverage tag');
         const responsePromise = page.waitForResponse(response =>
           response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/tags',
         );
         await dialog.getByRole('button', { name: 'Create tag', exact: true }).click();
         const response = await responsePromise;
-        expect(response.status()).toBe(503);
+        expect(response.status()).toBe(scene.overlayMutation === 'tag-create-error' ? 503 : 201);
         expect(response.request().postDataJSON()).toEqual({
           name: 'Synthetic coverage tag',
-          color: '#d74242',
+          color: scene.overlayMutation === 'tag-create-error' ? '#d74242' : '#42d76e',
           description: '',
         });
-        await expect(dialog.getByText("Couldn't create tag", { exact: true })).toBeVisible();
-        await expect(dialog.getByLabel('Tag Name')).toHaveValue('Synthetic coverage tag');
+        if (scene.overlayMutation === 'tag-create-error') {
+          await expect(dialog.getByText("Couldn't create tag", { exact: true })).toBeVisible();
+          await expect(dialog.getByLabel('Tag Name')).toHaveValue('Synthetic coverage tag');
+        } else {
+          await expect(dialog).toBeHidden();
+        }
+      }
+    }
+    if (scene.overlay === 'edit-tag') {
+      const editButton = page.locator('button[title="Edit tag (E)"]');
+      await editButton.click();
+      const nameInput = page.getByRole('cell', { name: 'Synthetic coverage tag' }).getByRole('textbox');
+      await expect(nameInput).toBeVisible();
+      await nameInput.fill('Edited coverage tag');
+      const responsePromise = page.waitForResponse(response =>
+        response.request().method() === 'PUT' &&
+        new URL(response.url()).pathname === '/api/tags/fixture-tag',
+      );
+      await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+      const response = await responsePromise;
+      const isConflict = scene.overlayMutation === 'tag-edit-conflict';
+      expect(response.status()).toBe(isConflict ? 409 : 200);
+      expect(response.request().postDataJSON()).toEqual({
+        name: 'Edited coverage tag',
+        color: '#d74242',
+        description: 'Fixture-only tag.',
+        expectedRevision: 1,
+      });
+      if (isConflict) {
+        const conflictDialog = page.getByRole('dialog', { name: 'Conflict updating "Edited coverage tag"' });
+        await expect(conflictDialog).toBeVisible();
+        await expect(conflictDialog.getByRole('alert')).toContainText('This tag was changed by someone else');
+        await expect(conflictDialog.getByRole('table')).toContainText('Edited coverage tag');
+        await expect(conflictDialog.getByRole('table')).toContainText('Synthetic coverage tag');
+        await expect(conflictDialog.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
+        await expect(conflictDialog.getByRole('button', { name: 'Reload latest version', exact: true })).toBeVisible();
+      } else {
+        await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeHidden();
       }
     }
     if (scene.overlay === 'new-custom-field') {
@@ -327,6 +430,90 @@ export async function prepareVisualScene(context: BrowserContext, page: Page, sc
     if (scene.overlay === 'new-user') {
       await page.getByRole('button', { name: 'Add User', exact: true }).click();
       await expect(page.getByRole('dialog', { name: 'Create New User' })).toBeVisible();
+    }
+    if (
+      scene.overlay === 'edit-user' ||
+      scene.overlay === 'change-user-password' ||
+      scene.overlay === 'manage-user-permissions' ||
+      scene.overlay === 'delete-user'
+    ) {
+      const row = page.getByRole('row').filter({ hasText: 'fixture.operator' });
+      if (scene.overlay === 'edit-user') {
+        await row.locator('button[title="Edit user"]').click();
+        const dialog = page.getByRole('dialog', { name: /Edit User:/ });
+        await expect(dialog).toBeVisible();
+        await dialog.getByPlaceholder('First Name').fill('Edited');
+        const responsePromise = page.waitForResponse(response =>
+          response.request().method() === 'PUT' &&
+          new URL(response.url()).pathname === '/api/users/fixture-user',
+        );
+        await dialog.getByRole('button', { name: 'Save changes', exact: true }).click();
+        const response = await responsePromise;
+        expect(response.status()).toBe(200);
+        expect(response.request().postDataJSON()).toEqual({
+          firstName: 'Edited',
+          lastName: 'Operator',
+          email: 'fixture.operator@example.invalid',
+          isActive: true,
+          roleIds: ['fixture-user-role'],
+          accessibleAreas: ['printers', 'files'],
+        });
+        await expect(page.getByText('User updated successfully', { exact: true })).toBeVisible();
+        await expect(dialog).toBeHidden();
+      } else if (scene.overlay === 'change-user-password') {
+        await row.locator('button[title="Change password"]').click();
+        const dialog = page.getByRole('dialog', { name: /Change Password:/ });
+        await expect(dialog).toBeVisible();
+        await dialog.getByPlaceholder('Enter new password').fill('FixturePassword1!');
+        await dialog.getByPlaceholder('Confirm new password').fill('FixturePassword1!');
+        await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+        const confirmation = page.getByRole('dialog', { name: 'Confirm Password Change?' });
+        await expect(confirmation).toBeVisible();
+        const responsePromise = page.waitForResponse(response =>
+          response.request().method() === 'POST' &&
+          new URL(response.url()).pathname === '/api/users/fixture-user/change-password',
+        );
+        await confirmation.getByRole('button', { name: 'Change Password', exact: true }).click();
+        const response = await responsePromise;
+        expect(response.status()).toBe(200);
+        expect(response.request().postDataJSON()).toEqual({
+          newPassword: 'FixturePassword1!',
+          confirmNewPassword: 'FixturePassword1!',
+        });
+        await expect(page.getByText('Password changed for "fixture.operator"', { exact: true })).toBeVisible();
+        await expect(dialog).toBeHidden();
+      } else if (scene.overlay === 'manage-user-permissions') {
+        await row.locator('button[title="Manage permissions"]').click();
+        const dialog = page.getByRole('dialog', { name: /Manage Application Access/ });
+        await expect(dialog).toBeVisible();
+        await dialog.getByText('Files', { exact: true }).click();
+        const responsePromise = page.waitForResponse(response =>
+          response.request().method() === 'PUT' &&
+          new URL(response.url()).pathname === '/api/users/fixture-user',
+        );
+        await dialog.getByRole('button', { name: 'Save permissions', exact: true }).click();
+        const response = await responsePromise;
+        expect(response.status()).toBe(200);
+        expect(response.request().postDataJSON()).toEqual({ accessibleAreas: ['printers'] });
+        await expect(page.getByText('Permissions updated', { exact: true })).toBeVisible();
+        await expect(dialog).toBeHidden();
+      } else {
+        await row.locator('button[title="Delete user"]').click();
+        const dialog = page.getByRole('dialog', { name: /Delete User/i });
+        await expect(dialog).toBeVisible();
+        const responsePromise = page.waitForResponse(response =>
+          response.request().method() === 'DELETE' &&
+          new URL(response.url()).pathname === '/api/users/fixture-user',
+        );
+        await dialog.getByRole('button', { name: 'Delete User', exact: true }).click();
+        const response = await responsePromise;
+        expect(response.status()).toBe(409);
+        await expect(response.json()).resolves.toEqual({ message: 'Cannot delete the last administrator.' });
+        await expect(page.getByRole('row').filter({ hasText: 'fixture.operator' })).toBeVisible();
+        const errorToast = page.getByText('Failed to delete user', { exact: true });
+        await expect(errorToast).toBeVisible();
+        await expect(errorToast).toBeHidden({ timeout: 10000 });
+      }
     }
     if (scene.overlay === 'new-printer-group') {
       await page.getByTestId('create-printer-group-action').click();
@@ -666,7 +853,11 @@ export async function prepareVisualScene(context: BrowserContext, page: Page, sc
     for (const marker of scene.contentMarkers ?? []) {
       await expect(page.getByText(marker, { exact: false }).first()).toBeVisible();
     }
-    if (scene.overlay !== 'capability-loading' && scene.overlay !== 'lazy-route-loading') {
+    if (
+      scene.overlay !== 'capability-loading' &&
+      scene.overlay !== 'lazy-route-loading' &&
+      !['role-create-success', 'role-edit-success', 'role-delete-conflict', 'role-members'].includes(scene.overlayMutation ?? '')
+    ) {
       await expect(page.locator('main [aria-busy="true"]')).toHaveCount(0);
     }
     return { violations: networkViolations, pageErrors, releasePendingRequest };

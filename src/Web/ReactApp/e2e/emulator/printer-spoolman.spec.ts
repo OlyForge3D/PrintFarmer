@@ -28,7 +28,7 @@ test.describe('Printer Spoolman presentation — Moonraker', () => {
       const card = getPrinterCardByName(page, name);
       await expect(card).toBeVisible();
       await expect(card).toContainText('Generic PLA', { timeout: 15_000 });
-      await expect(card).toContainText('PLA | 1.00kg');
+      await expect(card.getByTestId('filament-grams')).toHaveText('1000 g');
     }
 
     await expect(

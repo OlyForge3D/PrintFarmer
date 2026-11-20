@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NewSliceJobPage } from '../NewSliceJobPage';
 import { AuthProvider } from '../../../../common/contexts/AuthContext';
 import type { OrcaMachineProfile, OrcaFilamentProfile, OrcaProcessProfile } from '../../../../services/slicerProfilesService';
+import type { SlicerSettings } from '../../components/job';
 
 // Import the mocked services - these will be the vi.mock versions
 import { apiClient } from '../../../../services/api';
@@ -17,9 +18,11 @@ import { toast } from 'sonner';
 import { binaryStl, modelTextBuffer, threeMfBuffer } from '@/features/slicer/utils/__tests__/model-response-fixtures';
 import { MotionType, PrinterBackend, type Printer } from '@/types/api';
 
-// Mutable slicer-mode ref so individual describes can opt into Advanced mode.
-// Hoisted because vi.mock factories run before module-body initialization.
-const slicerModeRef = vi.hoisted(() => ({ value: 'Simple' as 'Simple' | 'Advanced' }));
+// The farm mode is mocked; the metadata level uses its real persisted hook.
+const slicerModeRef = vi.hoisted(() => ({
+  value: 'Simple' as 'Simple' | 'Advanced',
+  listeners: new Set<() => void>(),
+}));
 
 // Mutable real-time job progress ref (issue #2214). The real hook subscribes
 // to SignalR + REST reconciliation; none of that plumbing is meaningful in
@@ -345,16 +348,32 @@ vi.mock('@/services/sliceJobService', async () => {
   };
 });
 
-// Force Advanced mode when needed so advanced-only sections render in tests.
-vi.mock('@/features/slicer/hooks/useSlicerMode', () => ({
-  useSlicerMode: () => ({
-    mode: slicerModeRef.value,
-    enabledModes: ['Simple', 'Advanced'],
-    canToggle: false,
-    setMode: vi.fn(),
-  }),
-  SLICER_MODE_STORAGE_KEY: 'pf.slicerMode',
-}));
+// Force both page modes as available so tests can cover their interaction.
+vi.mock('@/features/slicer/hooks/useSlicerMode', async () => {
+  const React = await vi.importActual<typeof import('react')>('react');
+  return {
+    useSlicerMode: () => {
+      const mode = React.useSyncExternalStore(
+        (listener) => {
+          slicerModeRef.listeners.add(listener);
+          return () => slicerModeRef.listeners.delete(listener);
+        },
+        () => slicerModeRef.value,
+        () => slicerModeRef.value,
+      );
+      return {
+        mode,
+        enabledModes: ['Simple', 'Advanced'],
+        canToggle: true,
+        setMode: (next: typeof mode) => {
+          slicerModeRef.value = next;
+          slicerModeRef.listeners.forEach((listener) => listener());
+        },
+      };
+    },
+    SLICER_MODE_STORAGE_KEY: 'pf.slicerMode',
+  };
+});
 
 // Mock sonner toast (used by the "Use URL" reachability check, issue #1910)
 vi.mock('sonner', () => ({
@@ -457,9 +476,18 @@ vi.mock('../../components/job', () => ({
       </div>
     );
   },
-  SlicerSettingsPanel: (props: { onValidationChange?: (isValid: boolean) => void }) => (
-    <div data-testid="slicer-settings-panel">
+  SlicerSettingsPanel: (props: { headerAction?: React.ReactNode; onValidationChange?: (isValid: boolean) => void; settings: SlicerSettings; onSettingsChange: (settings: SlicerSettings) => void }) => (
+    <div data-testid="slicer-settings-panel" data-slicer-mode="Simple">
       Settings Panel
+      {props.headerAction}
+      <input
+        type="range"
+        min="0"
+        max="100"
+        aria-label="Infill Density"
+        value={props.settings.infillPercent}
+        onChange={(event) => props.onSettingsChange({ ...props.settings, infillPercent: Number(event.target.value) })}
+      />
       {/* Lets submit-guard tests simulate an uncommitted invalid Simple-mode
           field (issue #2223) without depending on the real component's
           internals — mirrors the pin-engine-version button pattern above. */}
@@ -523,9 +551,13 @@ vi.mock('@/features/models3d/components/3d/ViewerSkeleton', () => ({
   ViewerSkeleton: () => <div data-testid="viewer-skeleton">Loading...</div>
 }));
 
-// Mock SlicerSettingsPanel
 vi.mock('@/features/slicer/components/settings', () => ({
-  SlicerSettingsPanel: () => <div data-testid="slicer-settings-panel">Settings Panel</div>,
+  SlicerSettingsPanel: ({ viewModeControl }: { viewModeControl?: React.ReactNode }) => (
+    <div data-testid="slicer-settings-panel">
+      Settings Panel
+      {viewModeControl}
+    </div>
+  ),
 }));
 
 // Mock useSTLFile hook
@@ -567,6 +599,9 @@ const renderWithProviders = (ui: React.ReactElement, { route = '/slicer' } = {})
 // === Tests ===
 describe('NewSliceJobPage', () => {
   beforeEach(() => {
+    slicerModeRef.value = 'Simple';
+    slicerModeRef.listeners.clear();
+    localStorage.removeItem('printfarmer-slicer-viewmode');
     // #1028: several tests queue one-shot behaviour with `mockResolvedValueOnce`
     // / `mockRejectedValueOnce` (L393, L501-502, L655, L666). `clearAllMocks`
     // only wipes call history — it leaves an unconsumed one-shot on the queue,
@@ -1277,6 +1312,61 @@ describe('NewSliceJobPage', () => {
   });
 
   describe('Bed-surface temperatures', () => {
+    it('cycles one settings control through Simple, Basic and Advanced without losing Simple edits or focus', async () => {
+      renderWithProviders(<NewSliceJobPage />);
+      const infill = await screen.findByRole('slider', { name: /infill density/i });
+      fireEvent.change(infill, { target: { value: '35' } });
+
+      expect(screen.queryByRole('radiogroup', { name: 'Slicer mode' })).not.toBeInTheDocument();
+      for (const [current, next] of [['Simple', 'Basic'], ['Basic', 'Advanced'], ['Advanced', 'Simple']]) {
+        expect(screen.getAllByRole('button', { name: /^Settings view:/ })).toHaveLength(1);
+        const toggle = screen.getByRole('button', { name: `Settings view: ${current}` });
+        expect(toggle).not.toHaveTextContent(current);
+        fireEvent.focus(toggle);
+        expect(toggle).toHaveAccessibleDescription(`${current} settings · Switch to ${next}`);
+        fireEvent.click(toggle);
+        expect(await screen.findByRole('button', { name: `Settings view: ${next}` })).toHaveFocus();
+      }
+      expect(await screen.findByRole('slider', { name: /infill density/i })).toHaveValue('35');
+    });
+
+    it.each([
+      { origin: { inherits: 'Qidi X-Plus 4 0.4 nozzle' }, nozzle: '0.4', compatible: true },
+      { origin: { name: 'Qidi X-Plus 4 0.4 nozzle', from: 'system' }, nozzle: '0.4', compatible: true },
+      { origin: { name: 'Qidi X-Plus 4 0.4 nozzle' }, nozzle: '0.4', compatible: false },
+      { origin: { inherits: 'Qidi X-Plus 4 0.4 nozzle' }, nozzle: '0.405', compatible: true },
+      { origin: { inherits: 'Qidi X-Plus 4 0.4 nozzle' }, nozzle: '0.6', compatible: false },
+    ])('only offers the QIDI source presets for a compatible nozzle: $origin $nozzle', async ({ origin, nozzle, compatible }) => {
+      const machine = { name: 'Qidi X-Plus 4 0.4 nozzle', manufacturer: 'Qidi', printerModel: 'Qidi X-Plus 4', nozzleDiameter: 0.4,
+        settings: { support_multi_bed_types: ['0'], curr_bed_type: 'Textured PEI Plate' } };
+      const custom = { id: 'qidi-custom', name: 'qp4-1-Qidi X-Plus 4', profileType: 'machine' as const,
+        printerModelId: 'model-1', isOwnedByCurrentUser: true, isSystem: false, createdAt: '2026-01-01',
+        rawJson: JSON.stringify({ ...origin, printer_model: machine.printerModel, nozzle_diameter: [nozzle] }) };
+      const preset = { ...mockProcessProfiles[0], name: '0.20mm Standard @Qidi XPlus4', compatible_printers: [machine.name] };
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([machine]);
+      vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
+        profiles: [custom], totalCount: 1, machineProfileCount: 1, processProfileCount: 0, filamentProfileCount: 0,
+      });
+      vi.mocked(slicerProfilesService.getProcessProfilesForMachines).mockImplementation(async (names) =>
+        names.includes(machine.name) ? [preset, { ...preset, name: 'Wrong nozzle', compatible_printers: ['Qidi X-Plus 4 0.6 nozzle'] }] : []);
+      localStorage.setItem('sliceJob.selectedPrinterId', 'printer-1');
+      localStorage.setItem('sliceJob.selectedMachineProfileId', custom.name);
+      localStorage.setItem('sliceJob.selectedMachineProfileId.customId', custom.id);
+      renderWithProviders(<NewSliceJobPage />);
+
+      if (compatible) {
+        expect(await screen.findByRole('option', { name: /0\.20mm Standard @Qidi XPlus4/ })).toBeInTheDocument();
+        expect(screen.queryByRole('option', { name: /Wrong nozzle/ })).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('Bed Type')).not.toBeInTheDocument();
+      } else {
+        expect(await screen.findByText('No process profiles available')).toBeInTheDocument();
+        expect(screen.queryByRole('option', { name: /0\.20mm Standard @Qidi XPlus4/ })).not.toBeInTheDocument();
+      }
+      expect(slicerProfilesService.getProcessProfilesForMachines).toHaveBeenLastCalledWith(
+        compatible ? [custom.name, machine.name] : [custom.name], expect.anything(),
+      );
+    });
+
     it.each([false, true])('submits source-qualified same-name selections (multi-toolhead: %s)', async multi => {
       const machine = {
         id: 'owned-machine-id', name: mockMachineProfiles[0].name, profileType: 'machine' as const,
@@ -1384,11 +1474,18 @@ describe('NewSliceJobPage', () => {
       const custom = {
         id: 'same-name-filament-id', name: mockFilamentProfiles[0].name, profileType: 'filament' as const,
         isSystem: false, createdAt: '2026-11-03T00:00:00Z',
-        rawJson: JSON.stringify({ compatible_printers: ['Prusa MK4 0.4 nozzle'], textured_plate_temp: ['62', '57'] }),
+        rawJson: JSON.stringify({
+          compatible_printers: ['Prusa MK4 0.4 nozzle'],
+          textured_plate_temp_initial_layer: ['0'],
+          textured_plate_temp: ['62', '57'],
+        }),
       };
       vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
         profiles: [custom], totalCount: 1, machineProfileCount: 0, filamentProfileCount: 1, processProfileCount: 0,
       });
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
+        { ...mockMachineProfiles[0], settings: { curr_bed_type: 'Textured PEI Plate', support_multi_bed_types: '1' } },
+      ]);
       vi.mocked(slicerProfilesService.getFilamentProfilesForMachines).mockResolvedValue([
         { ...mockFilamentProfiles[0], settings: { textured_plate_temp: ['51'] } },
       ]);
@@ -1407,19 +1504,27 @@ describe('NewSliceJobPage', () => {
       }
       renderWithProviders(<NewSliceJobPage />);
       await waitFor(() => expect(slicerProfilesService.getFilamentProfilesForMachines).toHaveBeenCalled());
-      const container = multi ? await screen.findByTestId('extruder-filament-1') : await screen.findByTestId('single-filament-section');
+      const containers = multi
+        ? [await screen.findByTestId('extruder-filament-0'), await screen.findByTestId('extruder-filament-1')]
+        : [await screen.findByTestId('single-filament-section')];
       for (const owned of [true, false]) {
-        const trigger = within(container).getAllByRole('button').find(button => button.getAttribute('aria-haspopup') === 'dialog')!;
-        fireEvent.click(trigger);
-        const picker = await screen.findByRole('dialog', { name: 'Filament selector' });
-        fireEvent.change(within(picker).getByPlaceholderText('Search filaments...'), { target: { value: custom.name } });
-        const row = within(picker).getByRole('button', { name: owned ? /★.*Generic PLA @MK4/ : 'Generic PLA @MK4' });
-        if (!multi && owned) {
-          expect(row).toHaveAttribute('aria-current', 'true');
+        for (const container of containers) {
+          const trigger = within(container).getAllByRole('button').find(button => button.getAttribute('aria-haspopup') === 'dialog')!;
+          fireEvent.click(trigger);
+          const picker = await screen.findByRole('dialog', { name: 'Filament selector' });
+          fireEvent.change(within(picker).getByPlaceholderText('Search filaments...'), { target: { value: custom.name } });
+          const row = within(picker).getByRole('button', { name: owned ? /★.*Generic PLA @MK4/ : 'Generic PLA @MK4' });
+          if (!multi && owned) {
+            expect(row).toHaveAttribute('aria-current', 'true');
+          }
+          fireEvent.click(row);
+          if (!multi) {
+            expect(localStorage.getItem('sliceJob.selectedFilamentProfileId.customId')).toBe(owned ? custom.id : null);
+          }
         }
-        fireEvent.click(row);
-        if (!multi) {
-          expect(localStorage.getItem('sliceJob.selectedFilamentProfileId.customId')).toBe(owned ? custom.id : null);
+        expect(screen.queryByText(/\d+°C/)).not.toBeInTheDocument();
+        for (const container of containers) {
+          expect(container).not.toHaveTextContent(/°C/);
         }
         if (multi) {
           fireEvent.click(screen.getByRole('button', { name: 'Edit Extruder 2 filament settings' }));
@@ -1483,9 +1588,9 @@ describe('NewSliceJobPage', () => {
       expect(slicerProfilesService.uploadProfile).not.toHaveBeenCalled();
     });
 
-    it('sends the explicitly selected native surface and shows its values instead of the hot-plate summary', async () => {
+    it('sends the explicitly selected native surface for a multi-bed machine', async () => {
       vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
-        { ...mockMachineProfiles[0], settings: { curr_bed_type: 'High Temp Plate', support_multi_bed_types: '0' } },
+        { ...mockMachineProfiles[0], settings: { curr_bed_type: 'High Temp Plate', support_multi_bed_types: '1' } },
       ]);
       vi.mocked(slicerProfilesService.getFilamentProfilesForMachines).mockResolvedValue([
         { ...mockFilamentProfiles[0], bedTemperature: 0, settings: {
@@ -1494,9 +1599,17 @@ describe('NewSliceJobPage', () => {
         } },
       ]);
       renderWithProviders(<NewSliceJobPage />, { route: '/slicer?modelId=model-3d-1' });
-      await screen.findByText('Bed first layer: 0°C; other layers: 0°C');
+      await screen.findByRole('option', { name: 'Inherit from profile (High Temp Plate)' });
+      const filamentSection = await screen.findByTestId('single-filament-section');
+      fireEvent.click(within(filamentSection).getAllByRole('button')
+        .find(button => button.getAttribute('aria-haspopup') === 'dialog')!);
+      const filamentPicker = await screen.findByRole('dialog', { name: 'Filament selector' });
+      fireEvent.change(within(filamentPicker).getByPlaceholderText('Search filaments...'), {
+        target: { value: 'Generic PLA @MK4' },
+      });
+      fireEvent.click(await within(filamentPicker).findByRole('button', { name: 'Generic PLA @MK4' }));
       fireEvent.change(screen.getByLabelText('Bed Type'), { target: { value: 'Textured PEI Plate' } });
-      expect(screen.getByText('Bed first layer: 65°C; other layers: 60°C')).toBeInTheDocument();
+      expect(screen.queryByText(/\d+°C/)).not.toBeInTheDocument();
       await waitFor(() => {
         expect(Array.from(document.querySelectorAll('select')).some(select => select.value.startsWith('system:'))).toBe(true);
       });
@@ -1522,7 +1635,9 @@ describe('NewSliceJobPage', () => {
         } },
       ]);
       renderWithProviders(<NewSliceJobPage />);
-      await screen.findByText('Bed first layer: 65°C; other layers: 60°C');
+      await screen.findByRole('button', { name: /Generic PLA @MK4/ });
+      await waitFor(() => expect(screen.queryByLabelText('Bed Type')).not.toBeInTheDocument());
+      expect(screen.queryByText(/\d+°C/)).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Filament profile options menu' }));
       fireEvent.click(screen.getByRole('button', { name: 'Edit settings' }));
       await waitFor(() => expect(screen.getByTitle('Textured Plate first layer')).toHaveValue(65));

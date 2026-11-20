@@ -17,6 +17,7 @@ import React, { useState, useMemo, useCallback, useRef } from 'react';
 import clsx from 'clsx';
 import { Button } from '@/common/components/ui';
 import { useSlicerViewMode } from '@/features/slicer/hooks/useSlicerViewMode';
+import { SlicerModeToggle } from '@/features/slicer/components/settings/SlicerModeToggle';
 import { MetadataTabRenderer } from '@/features/slicer/components/settings/MetadataTabRenderer';
 import { getMetadataForVersion } from '@/features/slicer/components/settings/orcaSettingsMetadataResolver';
 import {
@@ -75,6 +76,8 @@ export interface MetadataProfileEditorProps {
   simpleModeSettingKeys?: ReadonlySet<string>;
   /** Resolved machine/active-plate context; omitted in engine-agnostic editors. */
   filamentBedContext?: FilamentBedContext;
+  /** Replaces the default Basic/Advanced toggle with a caller-owned control. */
+  viewModeControl?: React.ReactNode;
 }
 
 export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
@@ -89,6 +92,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
   additionalSections,
   simpleModeSettingKeys,
   filamentBedContext,
+  viewModeControl,
 }) => {
   const scopedBundle = useMemo(
     () => getMetadataForVersion(engineVersion),
@@ -205,7 +209,9 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
       if (next === null) return;
       e.preventDefault();
       setActiveTabIdx(next);
-      tabRefs.current[next]?.focus();
+      const tab = tabRefs.current[next];
+      tab?.focus();
+      tab?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
     },
     [visibleTabs.length],
   );
@@ -240,9 +246,9 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
                   : `Bed surface: ${filamentBedContext.bedType}. Showing all bed-surface settings.`}
         </p>
       )}
-      {/* Tab bar + Advanced toggle */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-pf-border">
-        <div className="flex gap-3 overflow-x-auto" role="tablist" aria-label="Profile settings sections">
+      {/* Tab bar + settings view toggle */}
+      <div className="flex items-center justify-between gap-3 px-4 py-2 border-b border-pf-border">
+        <div className="flex min-w-0 flex-1 gap-3 overflow-x-auto p-0.5" role="tablist" aria-label="Profile settings sections">
           {visibleTabs.map((tab, idx) => {
             const isActive = idx === clampedActiveTabIdx;
             const dirty = isTabDirty(tab);
@@ -262,7 +268,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
                 disabled={disabled}
                 aria-selected={isActive}
                 className={clsx(
-                  'px-1 pb-1 -mb-2 text-xs whitespace-nowrap rounded-none border-b-2 transition-colors',
+                  'shrink-0 px-1 pb-1 text-xs whitespace-nowrap rounded-none border-b transition-colors',
                   isActive ? 'font-bold border-pf-accent-2' : 'font-normal border-transparent',
                   dirty
                     ? 'text-pf-warning'
@@ -276,33 +282,14 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
             );
           })}
         </div>
-
-        {/* Advanced toggle */}
-        <Button
-          variant="unstyled"
-          type="button"
-          onClick={toggleViewMode}
-          disabled={disabled}
-          className="shrink-0 ml-2 p-0.5 rounded transition-colors hover:bg-pf-bg-2 disabled:opacity-50"
-          title={viewMode === 'simple' ? 'Show advanced parameters' : 'Hide advanced parameters'}
-          aria-label={`Switch to ${viewMode === 'simple' ? 'Advanced' : 'Simple'} mode`}
-        >
-          <span className="inline-flex items-center gap-1.5">
-            <img src="/icons/orcaslicer-advanced.svg" alt="" className="w-4 h-4" />
-            <span
-              data-pf-radius="full"
-              className={`relative inline-block w-7 h-3.5 rounded-full transition-colors ${
-                viewMode === 'advanced' ? 'bg-pf-accent-2' : 'bg-pf-border'
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white shadow-sm transition-all ${
-                  viewMode === 'advanced' ? 'left-3.5' : 'left-0.5'
-                }`}
-              />
-            </span>
-          </span>
-        </Button>
+        {viewModeControl !== undefined ? viewModeControl : (
+          <SlicerModeToggle
+            levels={['Basic', 'Advanced']}
+            value={viewMode === 'advanced' ? 'Advanced' : 'Basic'}
+            onChange={toggleViewMode}
+            disabled={disabled}
+          />
+        )}
       </div>
 
       {/* Active tab content */}

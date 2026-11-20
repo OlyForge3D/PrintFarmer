@@ -191,6 +191,10 @@ describe('PrinterDashboard', () => {
     expect(screen.getByText('Total Printers')).toBeInTheDocument();
     expect(screen.getByText('Online')).toBeInTheDocument();
     expect(screen.getByText('Printing')).toBeInTheDocument();
+    const widgets = screen.getByTestId('dashboard-widgets');
+    expect(widgets).toHaveClass('grid-cols-1', 'md:grid-cols-2', 'lg:grid-cols-3');
+    expect(widgets.children).toHaveLength(6);
+    expect(widgets.firstElementChild).toHaveAttribute('data-tour', 'tasks-widget');
   });
 
   it('exposes data-testid attributes for printers list and items', () => {

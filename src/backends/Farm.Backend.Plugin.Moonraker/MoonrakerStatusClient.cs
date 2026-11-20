@@ -95,7 +95,11 @@ public class MoonrakerStatusClient : IPrinterStatusClient, IManagedSpoolProvider
                 LiveZOffsetMm: status.LiveZOffsetMm,
                 ActiveExtruderId: status.ActiveExtruderId,
                 SpeedFactorPercent: movement.IsOnline ? status.SpeedFactorPercent : null,
-                FlowFactorPercent: movement.IsOnline ? status.FlowFactorPercent : null);
+                FlowFactorPercent: movement.IsOnline ? status.FlowFactorPercent : null)
+            {
+                // The latest read uses print_stats.state when ready; composite State can fall back to readiness.
+                RawActivityState = movement.IsOnline && !string.IsNullOrWhiteSpace(movement.State) ? movement.State : null,
+            };
             return status.Sensors is not null ? result with { Sensors = status.Sensors } : result;
         }
         catch (OperationCanceledException)
