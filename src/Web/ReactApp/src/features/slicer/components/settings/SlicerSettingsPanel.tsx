@@ -28,6 +28,7 @@ interface SlicerSettingsPanelProps {
   originalSettings?: Record<string, unknown>;
   /** Pinned OrcaSlicer engine version for this slice job. */
   engineVersion?: string;
+  viewModeControl?: React.ReactNode;
 }
 
 /**
@@ -42,6 +43,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   className = '',
   originalSettings,
   engineVersion,
+  viewModeControl,
 }) => {
   // Adapt MetadataProfileEditor's per-field onUpdate to the batch onChange API
   const handleUpdate = useCallback(
@@ -60,6 +62,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
       className={className}
       originalSettings={originalSettings}
       engineVersion={engineVersion}
+      viewModeControl={viewModeControl}
     />
   );
 };

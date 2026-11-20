@@ -144,7 +144,7 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
             </span>
           </div>
         </div>
-        <div className="w-6 shrink-0 flex justify-center">
+        <div className="w-6 h-6 shrink-0 flex items-center justify-center">
           {anyModified && (
             <Button
               variant="subtle"
@@ -153,7 +153,7 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
                 if (isModified) onUpdate(field.key, origVal);
                 if (otherIsModified) onUpdate(pairedOtherKey, otherOrigVal);
               }}
-              className="p-0.5 text-pf-warning-text transition-colors enabled:hover:bg-pf-warning/10 rounded"
+              className="h-6 w-6 p-0 text-pf-warning-text transition-colors enabled:hover:bg-pf-warning/10 rounded"
               title="Reset to original"
               aria-label={`Reset ${plateName} temperatures to original values`}
             >
@@ -229,43 +229,46 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
       );
     }
 
-    case 'textarea':
+    case 'textarea': {
+      const resetButton = isModified && (
+        <Button
+          variant="subtle"
+          type="button"
+          onClick={() => onUpdate(field.key, origVal)}
+          className={`h-6 w-6 p-0 text-pf-warning-text transition-colors enabled:hover:bg-pf-warning/10 rounded shrink-0${showLabel ? '' : ' absolute right-1 top-1'}`}
+          title="Reset to original"
+          aria-label={`Reset ${meta.label} to original value`}
+        >
+          <ResetIcon className="w-4 h-4" />
+        </Button>
+      );
       return (
         <div className="py-0.5">
-          {(showLabel || isModified) && (
-            <div className="flex items-center gap-1.5 mb-1">
-              {showLabel && (
-                <span
-                  className={`text-xs ${isModified ? 'text-pf-warning font-medium' : 'text-pf-text-secondary'}`}
-                  title={meta.tooltip}
-                >
-                  {meta.label}
-                </span>
-              )}
-              {isModified && (
-                <Button
-                  variant="subtle"
-                  type="button"
-                  onClick={() => onUpdate(field.key, origVal)}
-                  className="p-0.5 text-pf-warning-text transition-colors enabled:hover:bg-pf-warning/10 rounded shrink-0"
-                  title="Reset to original"
-                  aria-label={`Reset ${meta.label} to original value`}
-                >
-                  <ResetIcon className="w-4 h-4" />
-                </Button>
-              )}
+          {showLabel && (
+            <div className="flex h-6 items-center gap-1.5 mb-1">
+              <span
+                className={`text-xs ${isModified ? 'text-pf-warning font-medium' : 'text-pf-text-secondary'}`}
+                title={meta.tooltip}
+              >
+                {meta.label}
+              </span>
+              {resetButton}
             </div>
           )}
-          <Textarea
-            rows={8}
-            value={toString(values[field.key], meta)}
-            onChange={(e) => onUpdate(field.key, e.target.value)}
-            aria-label={meta.label}
-            disabled={disabled}
-            className="font-mono text-sm"
-          />
+          <div className="relative">
+            <Textarea
+              rows={8}
+              value={toString(values[field.key], meta)}
+              onChange={(e) => onUpdate(field.key, e.target.value)}
+              aria-label={meta.label}
+              disabled={disabled}
+              className={`font-mono text-sm${showLabel ? '' : ' pr-9'}`}
+            />
+            {!showLabel && resetButton}
+          </div>
         </div>
       );
+    }
 
     case 'point': {
       const [px, py] = parsePoint(values[field.key], meta);
@@ -303,13 +306,13 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
               />
             </div>
           </div>
-          <div className="w-6 shrink-0 flex justify-center">
+          <div className="w-6 h-6 shrink-0 flex items-center justify-center">
             {isModified && (
               <Button
                 variant="subtle"
                 type="button"
                 onClick={() => onUpdate(field.key, origVal)}
-                className="p-0.5 text-pf-warning-text transition-colors enabled:hover:bg-pf-warning/10 rounded"
+                className="h-6 w-6 p-0 text-pf-warning-text transition-colors enabled:hover:bg-pf-warning/10 rounded"
                 title="Reset to original"
                 aria-label={`Reset ${meta.label} to original value`}
               >
@@ -384,13 +387,13 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
               </div>
             ))}
           </div>
-          <div className="w-6 shrink-0 flex justify-center">
+          <div className="w-6 h-6 shrink-0 flex items-center justify-center">
             {isModified && (
               <Button
                 variant="subtle"
                 type="button"
                 onClick={() => onUpdate(field.key, origVal)}
-                className="p-0.5 text-pf-warning-text transition-colors enabled:hover:bg-pf-warning/10 rounded"
+                className="h-6 w-6 p-0 text-pf-warning-text transition-colors enabled:hover:bg-pf-warning/10 rounded"
                 title="Reset to original"
                 aria-label={`Reset ${meta.label} to original values`}
               >

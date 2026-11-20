@@ -83,6 +83,9 @@
 
 ### Fixes
 
+- The web slicer uses one right-aligned control for Simple, Basic and Advanced
+  settings. Filament selection no longer shows nozzle or bed temperature text,
+  and modifying a setting no longer changes its row height (#3880).
 - Restore compatible process presets for renamed Orca machine profiles, hide
   Bed Type for single-bed machines, and remove vertical overflow from the web
   slicer's settings tabs.

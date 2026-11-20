@@ -11,21 +11,23 @@ function getStoredMode(): SlicerViewMode {
 }
 
 /**
- * Global, persisted Simple/Advanced toggle for all slicer profile editors.
+ * Global, persisted Basic/Advanced view for all slicer profile editors.
  * Reads from localStorage on mount, writes on change, syncs across
  * mounted components via the 'storage' event.
  */
-export function useSlicerViewMode(): [SlicerViewMode, () => void] {
+export function useSlicerViewMode(): [SlicerViewMode, () => void, (mode: SlicerViewMode) => void] {
   const [mode, setMode] = useState<SlicerViewMode>(getStoredMode);
 
-  // Toggle and persist
-  const toggleMode = useCallback(() => {
-    const next = mode === 'simple' ? 'advanced' : 'simple';
+  const setViewMode = useCallback((next: SlicerViewMode) => {
     setMode(next);
     localStorage.setItem(STORAGE_KEY, next);
     // Keep side effects out of the replayable React state updater.
     window.dispatchEvent(new CustomEvent('slicer-viewmode-change', { detail: next }));
-  }, [mode]);
+  }, []);
+
+  const toggleMode = useCallback(() => {
+    setViewMode(mode === 'simple' ? 'advanced' : 'simple');
+  }, [mode, setViewMode]);
 
   // Listen for changes from OTHER components using this hook
   useEffect(() => {
@@ -47,5 +49,5 @@ export function useSlicerViewMode(): [SlicerViewMode, () => void] {
     };
   }, []);
 
-  return [mode, toggleMode];
+  return [mode, toggleMode, setViewMode];
 }
