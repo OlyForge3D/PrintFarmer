@@ -174,6 +174,39 @@ public class SlicersServiceHfProfileSeedingTests
         Assert.Equal(2, harness.PersistedMachineProfiles.Count);
     }
 
+    [Fact]
+    public async Task ImportProfilesForModelAsync_StaleSystemHashesAndPrivateNames_ImportsRemainingProfiles()
+    {
+        SeedHarness harness = new();
+        harness.AddProcessProfiles(BaseModelName, "Existing quality", "Private quality");
+        using SlicerDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        db.Set<SlicerService>().Add(new SlicerService
+        {
+            Id = Guid.NewGuid(),
+            Name = "orca",
+            SlicerType = 1,
+            Host = "http://worker",
+            Version = "2.4.2",
+            CapabilitiesJson = $"[\"{CalibrationContractConstants.UpstreamSlicerCapability}\"]"
+        });
+        db.Set<MachineProfile>().AddRange(
+            new MachineProfile { Id = Guid.NewGuid(), Name = BaseProfileName, Manufacturer = ManufacturerName, SlicerType = SlicerType.OrcaSlicer, IsSystem = true, Hash = "old-machine" },
+            new MachineProfile { Id = Guid.NewGuid(), Name = HfProfileName, Manufacturer = ManufacturerName, SlicerType = SlicerType.OrcaSlicer, CreatedByUserId = Guid.NewGuid(), Hash = "private-machine" });
+        db.Set<ProcessProfile>().AddRange(
+            new ProcessProfile { Id = Guid.NewGuid(), Name = "Existing quality", SlicerType = SlicerType.OrcaSlicer, PrinterModelId = harness.CatalogModelId, IsSystem = true, Hash = "old-process" },
+            new ProcessProfile { Id = Guid.NewGuid(), Name = "Private quality", SlicerType = SlicerType.OrcaSlicer, PrinterModelId = harness.CatalogModelId, CreatedByUserId = Guid.NewGuid(), Hash = "private-process" });
+        await db.SaveChangesAsync();
+
+        SlicersService service = harness.CreateSlicersService(db, realProfileRepositories: true);
+        int imported = await service.ImportProfilesForModelAsync(harness.CatalogModelId, BaseModelName, ManufacturerName, CancellationToken.None);
+
+        Assert.Equal(2, imported);
+        Assert.Single(db.Set<MachineProfile>(), p => p.Name == BaseProfileName && p.CreatedByUserId == null);
+        Assert.Single(db.Set<MachineProfile>(), p => p.Name == HfProfileName && p.CreatedByUserId == null);
+        Assert.Single(db.Set<ProcessProfile>(), p => p.Name == "Existing quality" && p.CreatedByUserId == null);
+        Assert.Single(db.Set<ProcessProfile>(), p => p.Name == "Private quality" && p.CreatedByUserId == null);
+    }
+
     /// <summary>
     /// A hierarchy group that is neither a catalog model name nor a configured alias must still be
     /// skipped — the fix widens matching to aliases, it does not disable catalog filtering. The
@@ -199,6 +232,7 @@ public class SlicersServiceHfProfileSeedingTests
     private sealed class SeedHarness
     {
         private readonly Dictionary<string, List<MachineProfileDto>> _hierarchy = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, List<ProcessProfileDto>> _processProfiles = new(StringComparer.Ordinal);
         private readonly Dictionary<string, string> _locks = new(StringComparer.Ordinal);
 
         public SeedHarness()
@@ -228,6 +262,16 @@ public class SlicersServiceHfProfileSeedingTests
                     Instantiation = true
                 }
             };
+        }
+
+        public void AddProcessProfiles(string printerModel, params string[] names)
+        {
+            _processProfiles[printerModel] = names.Select(name => new ProcessProfileDto
+            {
+                Name = name,
+                Instantiation = true,
+                InheritanceResolved = true
+            }).ToList();
         }
 
         public async Task RegisterOrcaWorkerAsync()
@@ -320,7 +364,7 @@ public class SlicersServiceHfProfileSeedingTests
                 CreateAliasService().Object);
         }
 
-        private SlicersService CreateSlicersService(SlicerDbContext db)
+        public SlicersService CreateSlicersService(SlicerDbContext db, bool realProfileRepositories = false)
         {
             Mock<IClientProxy> clientProxy = new();
             _ = clientProxy.Setup(p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object[]>(), It.IsAny<CancellationToken>()))
@@ -338,10 +382,10 @@ public class SlicersServiceHfProfileSeedingTests
             return new SlicersService(
                 new EfSlicersRepository(db),
                 new EfWorkerRepository(db),
-                CreateProcessProfileRepository().Object,
-                CreateFilamentProfileRepository().Object,
-                CreateMachineProfileRepository().Object,
-                CreateMachineModelProfileRepository().Object,
+                realProfileRepositories ? new EfProcessProfileRepository(db) : CreateProcessProfileRepository().Object,
+                realProfileRepositories ? new EfFilamentProfileRepository(db) : CreateFilamentProfileRepository().Object,
+                realProfileRepositories ? new EfMachineProfileRepository(db) : CreateMachineProfileRepository().Object,
+                realProfileRepositories ? new EfMachineModelProfileRepository(db) : CreateMachineModelProfileRepository().Object,
                 CreateCatalogService().Object,
                 CreateAliasService().Object,
                 CreateSettingsService().Object,
@@ -463,7 +507,7 @@ public class SlicersServiceHfProfileSeedingTests
                     ModelId = group.Key,
                     MachineProfiles = [.. group.Value],
                     FilamentProfiles = [],
-                    ProcessProfiles = []
+                    ProcessProfiles = _processProfiles.TryGetValue(group.Key, out List<ProcessProfileDto>? processes) ? processes : []
                 };
             }
 
