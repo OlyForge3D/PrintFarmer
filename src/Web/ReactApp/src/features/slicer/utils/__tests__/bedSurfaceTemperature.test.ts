@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   getFilamentBedContext,
+  getFilamentEditorBedContext,
   getSingleBedTemperatureKey, isBedTemperatureSettingVisible, resolveBedType,
 } from '@/features/slicer/utils/bedSurfaceTemperature';
 
@@ -12,6 +13,42 @@ describe('native bed-surface profile values', () => {
     expect(resolveBedType('', process, machine)).toBe('Cool Plate');
     expect(resolveBedType('', {}, machine)).toBe('Textured PEI Plate');
     expect(resolveBedType('', {}, {})).toBeUndefined();
+  });
+
+  describe('filament editor resolved plate', () => {
+    const resolved = { machineResolved: true, processResolved: true, projectMayOverride: false };
+    const context = (machine: Record<string, unknown> | undefined, process: Record<string, unknown> | undefined,
+      options = resolved, override = '', manufacturer = 'Qidi') =>
+      getFilamentEditorBedContext(machine, process, override, manufacturer, options);
+
+    it('uses Orca defaults for a fully resolved single-bed machine', () => {
+      expect(getSingleBedTemperatureKey(context({}, {}))).toBe('cool_plate_temp');
+    });
+
+    it('uses the emitted process plate before the machine plate, and an override before both', () => {
+      const machine = { curr_bed_type: 'Cool Plate' };
+      const process = { curr_bed_type: 'Textured PEI Plate' };
+      expect(getSingleBedTemperatureKey(context(machine, process))).toBe('textured_plate_temp');
+      expect(getSingleBedTemperatureKey(context(machine, process, resolved, 'High Temp Plate'))).toBe('hot_plate_temp');
+    });
+
+    it('does not infer defaults from incomplete profiles or an overriding 3MF', () => {
+      for (const options of [
+        { ...resolved, machineResolved: false },
+        { ...resolved, processResolved: false },
+        { ...resolved, projectMayOverride: true },
+      ]) {
+        expect(getSingleBedTemperatureKey(context({ curr_bed_type: 'Cool Plate' }, {}, options))).toBeUndefined();
+      }
+    });
+
+    it('keeps all plates for Bambu, multi-bed and unrecognized plate or flag', () => {
+      expect(getSingleBedTemperatureKey(context({}, {}, resolved, '', 'BBL'))).toBeUndefined();
+      expect(getSingleBedTemperatureKey(context({ support_multi_bed_types: '1' }, {}))).toBeUndefined();
+      expect(getSingleBedTemperatureKey(context({ support_multi_bed_types: 'invalid' }, {}))).toBeUndefined();
+      expect(getSingleBedTemperatureKey(context({}, { curr_bed_type: 'Unknown Plate' }))).toBeUndefined();
+      expect(getSingleBedTemperatureKey(context({}, { curr_bed_type: null }))).toBeUndefined();
+    });
   });
 });
 

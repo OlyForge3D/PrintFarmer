@@ -37,6 +37,30 @@ export function getFilamentBedContext(
   };
 }
 
+/**
+ * Orca defaults to Cool Plate and a single bed only after all profile layers are
+ * resolved. A 3MF can supply a per-plate bed type that overrides those layers.
+ */
+export function getFilamentEditorBedContext(
+  machine: Settings,
+  process: Settings,
+  selectedBedType: string,
+  manufacturer: string | undefined,
+  options: { machineResolved: boolean; processResolved: boolean; projectMayOverride: boolean },
+): FilamentBedContext {
+  const context = getFilamentBedContext(machine, process, selectedBedType, manufacturer);
+  if (!options.machineResolved) return { ...context, supportMultiBedTypes: context.supportMultiBedTypes === true ? true : undefined };
+  const flag = machine?.support_multi_bed_types;
+  const supportMultiBedTypes = context.supportMultiBedTypes ?? (flag === undefined ? false : undefined);
+  if (options.projectMayOverride || !options.processResolved) return { supportMultiBedTypes };
+  const processBed = process?.curr_bed_type;
+  const machineBed = machine?.curr_bed_type;
+  const bedType = selectedBedType
+    || (processBed !== undefined ? readBedType(processBed)
+      : machineBed !== undefined ? readBedType(machineBed) : 'Cool Plate');
+  return { supportMultiBedTypes, bedType };
+}
+
 /** Orca hides other plate rows only for a known single-bed machine and known active plate. */
 export function getSingleBedTemperatureKey(context: FilamentBedContext | undefined): string | undefined {
   return context?.supportMultiBedTypes === false && context.bedType

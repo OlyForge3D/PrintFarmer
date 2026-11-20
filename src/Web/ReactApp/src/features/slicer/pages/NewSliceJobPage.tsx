@@ -37,7 +37,7 @@ import {
 } from '@/features/slicer/hooks/useMachineCompatibleProfiles';
 import { buildSlicerProfileJson } from '@/features/slicer/utils/slicerProfilePayload';
 import { BedSurfaceSettings } from '@/features/slicer/components/BedSurfaceSettings';
-import { getFilamentBedContext } from '@/features/slicer/utils/bedSurfaceTemperature';
+import { getFilamentBedContext, getFilamentEditorBedContext } from '@/features/slicer/utils/bedSurfaceTemperature';
 import {
   SlicerSettingsPanel,
   type OrcaProcessSettings,
@@ -1891,13 +1891,32 @@ export const NewSliceJobPage: React.FC = () => {
     simpleMode: slicerMode !== 'Advanced',
     engineVersion: selectedEngineVersion ?? latestAvailableForEngine,
   }), [slicerSettings, originalProcessSettings, advancedProcessSettings, slicerMode, selectedEngineVersion, latestAvailableForEngine]);
-  const filamentBedContext = getFilamentBedContext(
-    { ...inheritedMachine?.settings, ...selectedMachineProfile?.settings },
-    { ...resolvedProcessProfile?.settings, ...processOverrides },
+  const machineBedSettings = selectedMachineProfile
+    ? { ...inheritedMachine?.settings, ...selectedMachineProfile.settings }
+    : undefined;
+  const processBedSettings = { ...resolvedProcessProfile?.settings, ...processOverrides };
+  const bedContext = getFilamentBedContext(
+    machineBedSettings,
+    processBedSettings,
     bedTypeOverride,
     selectedMachineProfile?.manufacturer || inheritedMachine?.manufacturer,
   );
-  const selectedBedType = filamentBedContext.supportMultiBedTypes === false ? '' : bedTypeOverride;
+  const selectedBedType = bedContext.supportMultiBedTypes === false ? '' : bedTypeOverride;
+  const filamentBedContext = getFilamentEditorBedContext(
+    machineBedSettings,
+    processBedSettings,
+    selectedBedType,
+    selectedMachineProfile?.manufacturer || inheritedMachine?.manufacturer,
+    {
+      machineResolved: !!selectedMachineProfile?.settings && (
+        selectedMachineProfile.inheritanceResolved === true
+        || (!!inheritedMachine && inheritedMachine.inheritanceResolved === true)
+      ),
+      processResolved: !!resolvedProcessProfile?.settings && resolvedProcessProfile.inheritanceResolved === true,
+      projectMayOverride: bedModels.some(model => !model.fileName || model.fileName.toLowerCase().endsWith('.3mf'))
+        || (!!modelFileUrl && (!modelFileName || modelFileName.toLowerCase().endsWith('.3mf'))),
+    },
+  );
 
   // Per-kg filament cost from the selected profile, for best-effort material cost.
   const filamentCostPerKg = useMemo(
@@ -3271,7 +3290,7 @@ export const NewSliceJobPage: React.FC = () => {
             id="slice-bed-type"
             selectedBedType={selectedBedType}
             onChange={value => setBedSurfaceSelection({ machine: selectedMachineProfileId, value })}
-            context={filamentBedContext}
+            context={bedContext}
           />
 
           {/* PROCESS PROFILE - with Reset, Save-as, and profile management menu */}

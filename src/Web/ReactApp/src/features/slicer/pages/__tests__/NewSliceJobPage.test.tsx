@@ -1626,8 +1626,11 @@ describe('NewSliceJobPage', () => {
 
     it('passes the active surface and machine single-bed flag into the filament editor', async () => {
       vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
-        { ...mockMachineProfiles[0], settings: { curr_bed_type: 'Textured PEI Plate', support_multi_bed_types: '0' } },
+        { ...mockMachineProfiles[0], inheritanceResolved: true, settings: { curr_bed_type: 'Textured PEI Plate', support_multi_bed_types: '0' } },
       ]);
+      vi.mocked(slicerProfilesService.getProcessProfilesForMachines).mockResolvedValue(
+        mockProcessProfiles.map(profile => ({ ...profile, inheritanceResolved: true, settings: {} })),
+      );
       vi.mocked(slicerProfilesService.getFilamentProfilesForMachines).mockResolvedValue([
         { ...mockFilamentProfiles[0], settings: {
           hot_plate_temp_initial_layer: ['0'], hot_plate_temp: ['0'],
@@ -1642,6 +1645,26 @@ describe('NewSliceJobPage', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Edit settings' }));
       await waitFor(() => expect(screen.getByTitle('Textured Plate first layer')).toHaveValue(65));
       expect(screen.queryByTitle('Smooth PEI / High Temp Plate first layer')).not.toBeInTheDocument();
+    });
+
+    it.each([
+      { machineResolved: true, modelId: 'model-stl-1', hidden: true },
+      { machineResolved: false, modelId: 'model-stl-1', hidden: false },
+      { machineResolved: true, modelId: 'model-3d-1', hidden: false },
+    ])('uses the default only for complete non-3MF slice context: $machineResolved $modelId', async ({ machineResolved, modelId, hidden }) => {
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
+        { ...mockMachineProfiles[0], inheritanceResolved: machineResolved, settings: {} },
+      ]);
+      vi.mocked(slicerProfilesService.getProcessProfilesForMachines).mockResolvedValue(
+        mockProcessProfiles.map(profile => ({ ...profile, inheritanceResolved: true, settings: {} })),
+      );
+      renderWithProviders(<NewSliceJobPage />, { route: `/slicer?modelId=${modelId}` });
+      await screen.findByRole('button', { name: /Generic PLA @MK4/ });
+      await waitFor(() => expect(slicerWorkspaceSpy.mock.calls.at(-1)?.[0].models).toHaveLength(1));
+      fireEvent.click(screen.getByRole('button', { name: 'Filament profile options menu' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Edit settings' }));
+      expect(await screen.findByTitle('Cool Plate first layer')).toBeInTheDocument();
+      expect(!!screen.queryByTitle('Textured Plate first layer')).toBe(!hidden);
     });
   });
 

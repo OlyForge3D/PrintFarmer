@@ -68,6 +68,7 @@ public sealed class OrcaProfilesServiceInheritanceTests : IDisposable
 
         profiles.Should().HaveCount(1);
         var profile = profiles[0];
+        profile.InheritanceResolved.Should().BeTrue();
 
         // From parent
         profile.NozzleDiameter.Should().BeApproximately(0.4, 0.001);
@@ -313,6 +314,7 @@ public sealed class OrcaProfilesServiceInheritanceTests : IDisposable
         // Profile should still load with its own values (graceful degradation)
         profiles.Should().HaveCount(1);
         profiles[0].Name.Should().Be("Orphan Machine 0.4 nozzle");
+        profiles[0].InheritanceResolved.Should().BeFalse();
         profiles[0].RetractionLength.Should().Be(1.0);
     }
 
@@ -388,6 +390,7 @@ public sealed class OrcaProfilesServiceInheritanceTests : IDisposable
         // Profile should still load (broken chain, but no crash)
         profiles.Should().HaveCount(1);
         profiles[0].Name.Should().Be("Cycle A 0.4 nozzle");
+        profiles[0].InheritanceResolved.Should().BeFalse();
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -470,6 +473,7 @@ public sealed class OrcaProfilesServiceInheritanceTests : IDisposable
 
         profiles.Should().HaveCount(1);
         profiles[0].Name.Should().Be("Standalone Printer 0.4 nozzle");
+        profiles[0].InheritanceResolved.Should().BeTrue();
         profiles[0].NozzleDiameter.Should().BeApproximately(0.4, 0.001);
         profiles[0].RetractionLength.Should().Be(0.8);
         profiles[0].GcodeDialect.Should().Be("klipper");
@@ -514,6 +518,7 @@ public sealed class OrcaProfilesServiceInheritanceTests : IDisposable
         var profile = profiles[0];
 
         // Overridden by child
+        profile.InheritanceResolved.Should().BeTrue();
         profile.LayerHeight.Should().BeApproximately(0.12, 0.001);
         profile.PrintSpeed.Should().Be(60);
 

@@ -211,6 +211,7 @@ export interface OrcaMachineProfile {
   printerVariant?: string;
   instantiation?: boolean;
   inherits?: string;
+  inheritanceResolved?: boolean | null;
   buildVolumeX?: number;
   buildVolumeY?: number;
   buildVolumeZ?: number;
@@ -276,6 +277,7 @@ export interface OrcaProcessProfile {
   compatible_printers?: string[] | null;
   instantiation?: boolean;
   inherits?: string;
+  inheritanceResolved?: boolean | null;
   settings?: Record<string, unknown>;
 }
 

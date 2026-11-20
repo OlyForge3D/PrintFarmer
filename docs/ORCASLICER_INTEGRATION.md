@@ -124,9 +124,18 @@ and leaves all pairs visible. Hiding a surface never deletes its values or
 changes profile inheritance; saving an edit preserves other surfaces and the
 remaining native vector entries.
 
-This matches OrcaSlicer v2.4.0's
+For fully resolved Orca profiles, an absent `support_multi_bed_types` uses
+Orca's single-bed default, and an absent `curr_bed_type` uses **Cool Plate**
+(`cool_plate_temp`). Machine and process settings or an explicit selection can
+override that default. The editor keeps all pairs visible when inheritance is
+incomplete or a 3MF may supply its own plate setting; it does not guess the
+contents of the project. Older workers without resolution information also
+retain all pairs.
+
+This follows OrcaSlicer v2.4.2's
+[configuration defaults](https://github.com/OrcaSlicer/OrcaSlicer/blob/v2.4.2/src/libslic3r/PrintConfig.cpp),
 [filament visibility rule](https://github.com/SoftFever/OrcaSlicer/blob/6d9eb1792f50d11ea12d60526b6ace58666354fd/src/slic3r/GUI/Tab.cpp)
-and [native surface-key lookup](https://github.com/SoftFever/OrcaSlicer/blob/6d9eb1792f50d11ea12d60526b6ace58666354fd/src/libslic3r/PrintConfig.hpp).
+and [native surface-key lookup](https://github.com/OrcaSlicer/OrcaSlicer/blob/v2.4.2/src/libslic3r/PrintConfig.hpp).
 It does not establish the cause of an existing failed physical print without
 that job's profiles, effective surface and generated start G-code.
 
