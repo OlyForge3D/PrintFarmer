@@ -66,6 +66,8 @@ extension PrinterBackendCapabilities {
         )
         if let movementSupportStatus = wire.movementSupportStatus {
             self.movementSupportStatus = movementSupportStatus
+        } else if wire.supportsMovement == true {
+            self.movementSupportStatus = .supported
         } else {
             switch wire.backend {
             case .prusaLink?, .unknown?, nil:

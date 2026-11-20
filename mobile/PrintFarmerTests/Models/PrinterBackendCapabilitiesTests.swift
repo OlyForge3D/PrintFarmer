@@ -261,6 +261,24 @@ final class PrinterBackendCapabilitiesTests: XCTestCase {
         XCTAssertEqual(PrinterBackendCapabilities(wire: futureWire).movementSupportStatus, .unknown)
     }
 
+    func testMovementSupportStatus_legacyPositiveFlagPrecedesBackendFallback() throws {
+        let json = Data("""
+        {"printerId":"\(TestData.testUUID)","backend":"Moonraker","supportsMovement":true}
+        """.utf8)
+        let wire = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: json)
+        XCTAssertEqual(PrinterBackendCapabilities(wire: wire).movementSupportStatus, .supported)
+    }
+
+    func testMovementSupportStatus_falseOrMissingLegacyFlagKeepsBackendFallback() throws {
+        for fields in [#""supportsMovement":false,"#, ""] {
+            let json = Data("""
+            {"printerId":"\(TestData.testUUID)","backend":"Moonraker",\(fields)}
+            """.utf8)
+            let wire = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: json)
+            XCTAssertEqual(PrinterBackendCapabilities(wire: wire).movementSupportStatus, .unsupported, fields)
+        }
+    }
+
     func testGenericFlagsDoNotEnableSpecificOperations() throws {
         let json = Data("""
         {"printerId":"\(TestData.testUUID)","backend":"Moonraker",
