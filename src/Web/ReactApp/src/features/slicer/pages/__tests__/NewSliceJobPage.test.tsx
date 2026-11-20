@@ -1522,7 +1522,7 @@ describe('NewSliceJobPage', () => {
             expect(localStorage.getItem('sliceJob.selectedFilamentProfileId.customId')).toBe(owned ? custom.id : null);
           }
         }
-        expect(screen.queryByText(/°C (first|other)/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/\d+°C/)).not.toBeInTheDocument();
         for (const container of containers) {
           expect(container).not.toHaveTextContent(/°C/);
         }
@@ -1609,7 +1609,7 @@ describe('NewSliceJobPage', () => {
       });
       fireEvent.click(await within(filamentPicker).findByRole('button', { name: 'Generic PLA @MK4' }));
       fireEvent.change(screen.getByLabelText('Bed Type'), { target: { value: 'Textured PEI Plate' } });
-      expect(screen.queryByText(/°C (first|other)/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/\d+°C/)).not.toBeInTheDocument();
       await waitFor(() => {
         expect(Array.from(document.querySelectorAll('select')).some(select => select.value.startsWith('system:'))).toBe(true);
       });
@@ -1637,7 +1637,7 @@ describe('NewSliceJobPage', () => {
       renderWithProviders(<NewSliceJobPage />);
       await screen.findByRole('button', { name: /Generic PLA @MK4/ });
       await waitFor(() => expect(screen.queryByLabelText('Bed Type')).not.toBeInTheDocument());
-      expect(screen.queryByText(/°C (first|other)/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/\d+°C/)).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Filament profile options menu' }));
       fireEvent.click(screen.getByRole('button', { name: 'Edit settings' }));
       await waitFor(() => expect(screen.getByTitle('Textured Plate first layer')).toHaveValue(65));

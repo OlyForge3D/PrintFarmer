@@ -48,6 +48,7 @@ interface SlicerSettingsPanelProps {
    * of silently slicing with a stale (last valid) value.
    */
   onValidationChange?: (isValid: boolean) => void;
+  /** Optional control beside the Simple settings heading. */
   headerAction?: React.ReactNode;
 }
 

@@ -149,21 +149,23 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
       {props.type === 'textarea' ? (
         <div>
           {label && (
-            <div className="flex h-6 items-center gap-2 mb-1">
+            <div className="flex min-h-6 max-sm:min-h-11 pointer-coarse:min-h-11 items-center gap-2 mb-1">
               <span className="text-pf-accent-2 shrink-0">{icon}</span>
               <label htmlFor={id} className={`font-medium text-xs transition-colors ${isModified ? 'text-pf-warning' : 'text-pf-text-primary'}`} title={tooltip}>{label}</label>
-              {isModified && onReset && (
-                <Button
-                  variant="subtle"
-                  type="button"
-                  onClick={onReset}
-                  className="h-6 w-6 p-0 text-pf-warning-text transition-colors enabled:hover:bg-pf-warning/10 rounded shrink-0"
-                  title={`Reset to original: ${formatOriginalValue(originalValue)}`}
-                  aria-label={`Reset ${label} to original value`}
-                >
-                  <ResetIcon className="w-4 h-4" />
-                </Button>
-              )}
+              <div className="w-6 h-6 max-sm:w-11 max-sm:h-11 pointer-coarse:w-11 pointer-coarse:h-11 shrink-0">
+                {isModified && onReset && (
+                  <Button
+                    variant="subtle"
+                    type="button"
+                    onClick={onReset}
+                    className="h-6 w-6 max-sm:h-11 max-sm:w-11 pointer-coarse:h-11 pointer-coarse:w-11 p-0! text-pf-warning-text transition-colors enabled:hover:bg-pf-warning/10 rounded shrink-0"
+                    title={`Reset to original: ${formatOriginalValue(originalValue)}`}
+                    aria-label={`Reset ${label} to original value`}
+                  >
+                    <ResetIcon className="w-4 h-4" />
+                  </Button>
+                )}
+              </div>
             </div>
           )}
           {renderControl()}
@@ -201,13 +203,13 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
         </div>
 
         {/* Right: reset button (compact fixed spacer for alignment) */}
-        <div className="w-6 h-6 shrink-0 flex items-center justify-center">
+        <div className="w-6 h-6 max-sm:w-11 max-sm:h-11 pointer-coarse:w-11 pointer-coarse:h-11 shrink-0 flex items-center justify-center">
           {isModified && onReset && (
             <Button
               variant="subtle"
               type="button"
               onClick={onReset}
-              className="h-6 w-6 p-0 text-pf-warning-text transition-colors
+              className="h-6 w-6 max-sm:h-11 max-sm:w-11 pointer-coarse:h-11 pointer-coarse:w-11 p-0! text-pf-warning-text transition-colors
                          enabled:hover:bg-pf-warning/10 rounded"
               title={`Reset to original: ${formatOriginalValue(originalValue)}`}
               aria-label={`Reset ${label} to original value`}
@@ -861,13 +863,13 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
       {renderControl()}
 
       {/* Reset button spacer */}
-      <div className="w-6 h-6 shrink-0 flex items-center justify-center">
+      <div className="w-6 h-6 max-sm:w-11 max-sm:h-11 pointer-coarse:w-11 pointer-coarse:h-11 shrink-0 flex items-center justify-center">
         {isModified && onReset && (
           <Button
             variant="subtle"
             type="button"
             onClick={onReset}
-            className="h-6 w-6 p-0 text-pf-warning-text transition-colors
+            className="h-6 w-6 max-sm:h-11 max-sm:w-11 pointer-coarse:h-11 pointer-coarse:w-11 p-0! text-pf-warning-text transition-colors
                        enabled:hover:bg-pf-warning/10 rounded"
             title={`Reset to original: ${formatOriginalValue(originalValue)}`}
             aria-label={`Reset ${label} to original value`}
