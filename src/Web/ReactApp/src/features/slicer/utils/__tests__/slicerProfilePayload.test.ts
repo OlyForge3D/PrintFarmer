@@ -66,6 +66,16 @@ describe('buildSlicerProfileJson', () => {
     expect(payload.overrides).toEqual({ layer_height: 0.28, sparse_infill_density: '15%' });
   });
 
+  it('serializes the project-aware contract without adding a process bed override', () => {
+    const payload = parse(buildSlicerProfileJson({
+      ...base, bedSelection: { version: 1, explicitBedType: 'Textured PEI Plate' },
+    }));
+    expect(payload.bedSelection).toEqual({ version: 1, explicitBedType: 'Textured PEI Plate' });
+    expect(payload.overrides).toEqual(base.overrides);
+    expect(parse(buildSlicerProfileJson({ ...base, bedSelection: { version: 1 } })).bedSelection)
+      .toEqual({ version: 1 });
+  });
+
   it('only overrides the native bed surface on explicit selection, never filament temperatures', () => {
     const overrides = { layer_height: '0.2', curr_bed_type: 'Cool Plate', bed_temperature_formula: 'by_highest_temp' };
     expect(parse(buildSlicerProfileJson({ ...base, overrides, bedType: '' })).overrides).toEqual(overrides);

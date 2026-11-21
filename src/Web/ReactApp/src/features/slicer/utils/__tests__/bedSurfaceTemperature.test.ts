@@ -57,7 +57,7 @@ describe('native bed-surface profile values', () => {
       getFilamentEditorBedContext(machine, process, override, manufacturer, options);
 
     it('uses Orca defaults for a fully resolved single-bed machine', () => {
-      expect(getSingleBedTemperatureKey(context({}, {}))).toBe('cool_plate_temp');
+      expect(getSingleBedTemperatureKey(context({}, {}))).toBe('hot_plate_temp');
     });
 
     it('uses the emitted process plate before the machine plate, and an override before both', () => {

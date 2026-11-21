@@ -4,8 +4,29 @@ import type { SlicerSettings } from '@/features/slicer/components/job/SlicerSett
 import { orcaToSimpleSettings, simpleToOrcaSettings } from '@/features/slicer/pages/simpleSlicerMappings';
 import {
   buildProcessOverrides,
+  getEditedProcessBedType,
   normalizeOrcaOverrides,
 } from '@/features/slicer/utils/orcaOverrideNormalization';
+
+describe('getEditedProcessBedType', () => {
+  it.each([
+    ['Cool Plate', 'Cool Plate'],
+    [['Cool Plate'], ['Cool Plate']],
+    ['Cool Plate', ['Cool Plate']],
+    [undefined, undefined],
+  ])('does not turn unchanged profile values into explicit selection', (value, original) => {
+    expect(getEditedProcessBedType(value, original)).toBeUndefined();
+  });
+
+  it('retains a changed selection', () => {
+    expect(getEditedProcessBedType('High Temp Plate', ['Cool Plate'])).toBe('High Temp Plate');
+  });
+
+  it('retains invalid changed values for submission validation', () => {
+    expect(getEditedProcessBedType(['Cool Plate', 'High Temp Plate'], ['Cool Plate']))
+      .toEqual(['Cool Plate', 'High Temp Plate']);
+  });
+});
 
 // A profile that explicitly declares no adhesion (genuinely None).
 const baseline = {

@@ -83,7 +83,7 @@ current worker release.
   - Pinned to a version → `["orcaslicer:<version>"]` only. No generic `orcaslicer` capability.
   - Unpinned → `["orcaslicer"]` only.
   This is deliberate: `EfSliceJobRepository.ClaimNextJobAsync` uses OR-match, so a mixed capability set would let a wrong-version worker claim a pinned job.
-- Workers advertise their supported capabilities via `WorkerCapabilityProvider`, including `orcaslicer`, `orcaslicer:<Worker:EngineVersion>`, `orcaslicer:native-profile-selections-v1`, `orcaslicer:<Worker:EngineVersion>:native-profile-selections-v1`, `stl-processing`, and `gcode-generation`. Both `SlicerRegistrationClient` and `QueueConsumerService` use the same provider.
+- Workers advertise their supported capabilities via `WorkerCapabilityProvider`, including `orcaslicer`, `orcaslicer:<Worker:EngineVersion>`, `orcaslicer:native-profile-selections-v1`, `orcaslicer:<Worker:EngineVersion>:native-profile-selections-v1`, `orcaslicer:<Worker:EngineVersion>:project-bed-selection-v1`, `stl-processing`, and `gcode-generation`. Both `SlicerRegistrationClient` and `QueueConsumerService` use the same provider.
 - `GET /api/slicers/engines` returns `[{ engine, versions[], latest }]` for the React version picker.
 
 ### Deploying a second (previous) worker
@@ -103,11 +103,19 @@ Advanced. If only Simple is enabled, no control is shown.
 
 ### Bed surfaces and filament temperatures
 
-The web slicer and Quick Slice hide **Bed Type** for single-bed machine profiles
-and preserve the profile's bed surface. Where the selector is available, an
-explicit choice is submitted as
-`overrides.curr_bed_type` and included in the native process configuration; it
-does not rewrite the filament's temperature arrays.
+The web slicer and Quick Slice hide **Bed Type** for single-bed machine
+profiles. New Orca jobs submit a versioned `bedSelection` contract rather than
+an automatic `overrides.curr_bed_type`. An explicit user selection takes
+precedence over a 3MF plate setting, then a project-global setting; when none is
+present, the worker uses **High Temp Plate**. Mixed per-plate project settings
+are preserved when no explicit selection is made. Filament temperature arrays
+are not rewritten.
+
+These jobs require an engine version and a live worker advertising the matching
+`orcaslicer:<version>:project-bed-selection-v1` capability; otherwise submission
+returns HTTP 503. The worker rejects ambiguous or unreadable project settings
+and output whose bed metadata or temperatures cannot be verified. Existing
+jobs without the contract retain their legacy behavior.
 
 The slicer sidebar and Quick Slice show no nozzle or bed temperature text under
 filament selection. Review or change temperatures in the filament editor. Those
@@ -125,9 +133,9 @@ changes profile inheritance; saving an edit preserves other surfaces and the
 remaining native vector entries.
 
 For fully resolved Orca profiles, an absent `support_multi_bed_types` uses
-Orca's single-bed default, and an absent `curr_bed_type` uses **Cool Plate**
-(`cool_plate_temp`). Machine and process settings or an explicit selection can
-override that default. The editor keeps all pairs visible when inheritance is
+Orca's single-bed default. OrcaSlicer 2.4.2's own default bed type depends on
+the machine and model; the versioned PrintFarmer job contract instead uses the
+precedence and fallback above. The editor keeps all pairs visible when inheritance is
 incomplete or a 3MF may supply its own plate setting; it does not guess the
 contents of the project. Older workers without resolution information also
 retain all pairs.

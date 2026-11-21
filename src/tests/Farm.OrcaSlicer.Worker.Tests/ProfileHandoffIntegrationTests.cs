@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using System.IO.Compression;
+using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
@@ -461,25 +462,230 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
         return ValueTask.CompletedTask;
     }
 
+    [Theory]
+    [InlineData("High Temp Plate", "M140 S60", true)]
+    [InlineData("High Temp Plate", "M140 S45", false)]
+    [InlineData("Cool Plate", "M140 S45", false)]
+    public async Task ExecuteAsync_ProjectBedSelection_VerifiesOutputBeforeUploading(
+        string outputBed, string temperatureCommand, bool succeeds)
+    {
+        _ = Directory.CreateDirectory(_testRoot);
+        string captureDirectory = Path.Join(_testRoot, "capture");
+        _ = Directory.CreateDirectory(captureDirectory);
+        string gcodePath = Path.Join(_testRoot, "fixture.gcode");
+        await File.WriteAllTextAsync(gcodePath, $"""
+            ; HEADER_BLOCK_START
+            ; filament: 1
+            ; HEADER_BLOCK_END
+            {temperatureCommand}
+            ; CONFIG_BLOCK_START
+            ; curr_bed_type = {outputBed}
+            ; bed_temperature_formula = by_highest_temp
+            ; first_layer_bed_temperature = 60
+            ; hot_plate_temp_initial_layer = 60
+            ; hot_plate_temp = 60
+            ; CONFIG_BLOCK_END
+            """);
+        string fakeOrcaPath = await CreateFakeOrcaAsync(captureDirectory, false, gcodePath);
+        const string selection = """
+            {"machineProfileName":"Test Machine","processProfileName":"Test Process",
+             "filamentProfileName":"Test Filament","bedSelection":{"version":1}}
+            """;
+        var handler = new WorkerApiHandler(selection);
+        var clientFactory = new StubHttpClientFactory(handler);
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["SlicerApi:BaseUrl"] = "http://localhost",
+                ["Worker:PollIntervalSeconds"] = "1",
+                ["Worker:LeaseDurationSeconds"] = "300",
+                ["Worker:WorkingDirectory"] = Path.Join(_testRoot, "work"),
+                ["Worker:OrcaSlicerPath"] = fakeOrcaPath,
+            }).Build();
+        var workerState = new WorkerStateService();
+        workerState.SetRegisteredService(Guid.NewGuid(), "worker-secret");
+        using HttpClient client = new(handler, disposeHandler: false) { BaseAddress = new Uri("http://localhost") };
+        var pipeline = new OrcaSlicingPipelineService(
+            client, new NullProgressReporter(), NullLogger<OrcaSlicingPipelineService>.Instance, configuration, workerState);
+        ServiceCollection services = new();
+        _ = services.AddSingleton<ISlicerProfilesService>(new StubProfilesService("system"));
+        _ = services.AddSingleton<ISlicingPipelineService>(pipeline);
+        await using ServiceProvider serviceProvider = services.BuildServiceProvider();
+        var poller = new TestPoller(clientFactory, serviceProvider, workerState, configuration);
+        await poller.StartAsync(CancellationToken.None);
+        TerminalRequest terminal;
+        try
+        {
+            terminal = await handler.TerminalRequest.WaitAsync(TimeSpan.FromSeconds(20));
+        }
+        finally
+        {
+            await poller.StopAsync(CancellationToken.None);
+            poller.Dispose();
+        }
+
+        _ = terminal.Path.Should().EndWith(succeeds ? "/complete" : "/fail", terminal.Body);
+        _ = handler.ArtifactUploaded.Should().Be(succeeds);
+        if (succeeds)
+        {
+            string processJson = await File.ReadAllTextAsync(Path.Join(captureDirectory, "process.json"));
+            CompleteSliceJobRequest? completed = JsonSerializer.Deserialize<CompleteSliceJobRequest>(
+                terminal.Body, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            _ = completed!.ProcessProfileSha256.Should().Be(Sha256(processJson));
+        }
+    }
+
+    [Theory]
+    [InlineData(null, "Cool Plate", "Textured PEI Plate", true)]
+    [InlineData("Engineering Plate", "Engineering Plate", "Engineering Plate", true)]
+    [InlineData(null, "Cool Plate", "High Temp Plate", false)]
+    public async Task ExecuteAsync_MixedProjectBeds_VerifiesEveryPlateBeforeUploading(
+        string? explicitBed, string plateOneBed, string plateTwoBed, bool succeeds)
+    {
+        _ = Directory.CreateDirectory(_testRoot);
+        string captureDirectory = Path.Join(_testRoot, "capture");
+        _ = Directory.CreateDirectory(captureDirectory);
+        string firstGcode = Path.Join(_testRoot, "first.gcode");
+        string secondGcode = Path.Join(_testRoot, "second.gcode");
+        await File.WriteAllTextAsync(firstGcode, BedGcode(plateOneBed));
+        await File.WriteAllTextAsync(secondGcode, BedGcode(plateTwoBed));
+        string fakeOrcaPath = await CreateFakeOrcaAsync(captureDirectory, false, firstGcode, secondGcode);
+        string selection = JsonSerializer.Serialize(new
+        {
+            machineProfileName = "Test Machine",
+            processProfileName = "Test Process",
+            filamentProfileName = "Test Filament",
+            bedSelection = new { version = 1, explicitBedType = explicitBed },
+        }, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
+        byte[] project = CreateMixedBedProject();
+        var handler = new WorkerApiHandler(selection, modelFileName: "project.3mf", modelBytes: project);
+        var clientFactory = new StubHttpClientFactory(handler);
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["SlicerApi:BaseUrl"] = "http://localhost",
+                ["Worker:PollIntervalSeconds"] = "1",
+                ["Worker:LeaseDurationSeconds"] = "300",
+                ["Worker:WorkingDirectory"] = Path.Join(_testRoot, "work"),
+                ["Worker:OrcaSlicerPath"] = fakeOrcaPath,
+            }).Build();
+        var workerState = new WorkerStateService();
+        workerState.SetRegisteredService(Guid.NewGuid(), "worker-secret");
+        using HttpClient client = new(handler, disposeHandler: false) { BaseAddress = new Uri("http://localhost") };
+        var pipeline = new OrcaSlicingPipelineService(
+            client, new NullProgressReporter(), NullLogger<OrcaSlicingPipelineService>.Instance, configuration, workerState);
+        ServiceCollection services = new();
+        _ = services.AddSingleton<ISlicerProfilesService>(new StubProfilesService("system"));
+        _ = services.AddSingleton<ISlicingPipelineService>(pipeline);
+        await using ServiceProvider serviceProvider = services.BuildServiceProvider();
+        var poller = new TestPoller(clientFactory, serviceProvider, workerState, configuration);
+        await poller.StartAsync(CancellationToken.None);
+        TerminalRequest terminal;
+        try
+        {
+            terminal = await handler.TerminalRequest.WaitAsync(TimeSpan.FromSeconds(20));
+        }
+        finally
+        {
+            await poller.StopAsync(CancellationToken.None);
+            poller.Dispose();
+        }
+
+        _ = terminal.Path.Should().EndWith(succeeds ? "/complete" : "/fail", terminal.Body);
+        _ = handler.ArtifactUploaded.Should().Be(succeeds);
+        if (explicitBed is not null)
+        {
+            OrcaProjectBedSettings copied = OrcaProjectBedSettings.Read(Path.Join(captureDirectory, "project.3mf"));
+            _ = copied.Plates.Values.Should().OnlyContain(value => value == explicitBed);
+        }
+    }
+
+    private static string BedGcode(string bed)
+    {
+        string prefix = bed switch
+        {
+            "Cool Plate" => "cool_plate",
+            "Textured PEI Plate" => "textured_plate",
+            "Engineering Plate" => "eng_plate",
+            _ => "hot_plate",
+        };
+        return $"""
+            ; HEADER_BLOCK_START
+            ; filament: 1
+            ; HEADER_BLOCK_END
+            M140 S60
+            ; CONFIG_BLOCK_START
+            ; curr_bed_type = {bed}
+            ; bed_temperature_formula = by_highest_temp
+            ; first_layer_bed_temperature = 60
+            ; {prefix}_temp_initial_layer = 60
+            ; {prefix}_temp = 60
+            ; CONFIG_BLOCK_END
+            """;
+    }
+
+    private static byte[] CreateMixedBedProject()
+    {
+        using MemoryStream stream = new();
+        using (ZipArchive archive = new(stream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            WriteEntry("[Content_Types].xml", """
+                <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+                  <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
+                </Types>
+                """);
+            WriteEntry("_rels/.rels", """
+                <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                  <Relationship Target="/3D/3dmodel.model" Id="rel-1" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
+                </Relationships>
+                """);
+            WriteEntry("3D/3dmodel.model", """<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"/>""");
+            WriteEntry("Metadata/project_settings.config", """{"curr_bed_type":"High Temp Plate"}""");
+            WriteEntry("Metadata/model_settings.config", """
+                <config>
+                  <plate><metadata key="plater_id" value="1"/><metadata key="bed_type" value="Cool Plate"/></plate>
+                  <plate><metadata key="plater_id" value="2"/><metadata key="bed_type" value="Textured PEI Plate"/></plate>
+                </config>
+                """);
+
+            void WriteEntry(string name, string content)
+            {
+                using StreamWriter writer = new(archive.CreateEntry(name).Open(), Encoding.UTF8);
+                writer.Write(content);
+            }
+        }
+
+        return stream.ToArray();
+    }
+
     private async Task<string> CreateFakeOrcaAsync(
         string captureDirectory,
-        bool emitPipeProgress)
+        bool emitPipeProgress,
+        string? fixtureGcodePath = null,
+        string? secondFixtureGcodePath = null)
     {
         if (OperatingSystem.IsWindows())
         {
             string scriptPath = Path.Join(_testRoot, "fake-orca.cmd");
+            string writeGcode = fixtureGcodePath is null
+                ? """
+                  (
+                    echo ; estimated printing time = 120s
+                    echo ; filament used = 1g
+                    echo ; layer_count = 2
+                    echo G28
+                  ) > "%CD%\output\plate_1.gcode"
+                  """
+                : $"""copy /Y "{fixtureGcodePath}" "%CD%\output\plate_1.gcode" >nul""";
             string script = $"""
                 @echo off
                 copy /Y "%CD%\machine.json" "{Path.Join(captureDirectory, "machine.json")}" >nul
                 copy /Y "%CD%\process.json" "{Path.Join(captureDirectory, "process.json")}" >nul
                 copy /Y "%CD%\filament.json" "{Path.Join(captureDirectory, "filament.json")}" >nul
+                if exist "%CD%\project-bed-input.3mf" copy /Y "%CD%\project-bed-input.3mf" "{Path.Join(captureDirectory, "project.3mf")}" >nul
                 echo invoked>"{Path.Join(captureDirectory, "orca-invoked.txt")}"
-                (
-                  echo ; estimated printing time = 120s
-                  echo ; filament used = 1g
-                  echo ; layer_count = 2
-                  echo G28
-                ) > "%CD%\output\plate_1.gcode"
+                {writeGcode}
+                {(secondFixtureGcodePath is null ? "" : $"""copy /Y "{secondFixtureGcodePath}" "%CD%\output\plate_2.gcode" >nul""")}
                 exit /b 0
                 """;
             await File.WriteAllTextAsync(scriptPath, script, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
@@ -490,15 +696,20 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
         string progressCommand = emitPipeProgress
             ? "printf '%s\\n' '{\"total_percent\":50,\"message\":\"Testing\"}' > \"$PWD/progress.pipe\""
             : ":";
+        string unixWriteGcode = fixtureGcodePath is null
+            ? """printf '; estimated printing time = 120s\n; filament used = 1g\n; layer_count = 2\nG28\n' > "$PWD/output/plate_1.gcode" """
+            : $"""cp "{fixtureGcodePath}" "$PWD/output/plate_1.gcode" """;
         string unixScript = $"""
             #!/bin/sh
             set -eu
             cp "$PWD/machine.json" "{Path.Join(captureDirectory, "machine.json")}"
             cp "$PWD/process.json" "{Path.Join(captureDirectory, "process.json")}"
             cp "$PWD/filament.json" "{Path.Join(captureDirectory, "filament.json")}"
+            if [ -f "$PWD/project-bed-input.3mf" ]; then cp "$PWD/project-bed-input.3mf" "{Path.Join(captureDirectory, "project.3mf")}"; fi
             {progressCommand}
             printf 'invoked\n' > "{Path.Join(captureDirectory, "orca-invoked.txt")}"
-            printf '; estimated printing time = 120s\n; filament used = 1g\n; layer_count = 2\nG28\n' > "$PWD/output/plate_1.gcode"
+            {unixWriteGcode}
+            {(secondFixtureGcodePath is null ? ":" : $"""cp "{secondFixtureGcodePath}" "$PWD/output/plate_2.gcode" """)}
             """;
         await File.WriteAllTextAsync(
             unixScriptPath,
@@ -715,7 +926,11 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
         public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
     }
 
-    private sealed class WorkerApiHandler(string profileSelectionJson = ProfileSelectionJson, string? modelTransformJson = null)
+    private sealed class WorkerApiHandler(
+        string profileSelectionJson = ProfileSelectionJson,
+        string? modelTransformJson = null,
+        string modelFileName = "test-model.stl",
+        byte[]? modelBytes = null)
         : HttpMessageHandler
     {
         private readonly Guid _artifactId = Guid.NewGuid();
@@ -752,7 +967,7 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
                         ClaimToken = _claimToken,
                         Status = "Processing",
                         ModelFileUrl = $"/api/slice/{_jobId}/model",
-                        ModelFileName = "test-model.stl",
+                        ModelFileName = modelFileName,
                         ModelTransformJson = modelTransformJson,
                         SlicerEngine = SlicerEngineType.OrcaSlicer,
                         SlicerProfileJson = profileSelectionJson,
@@ -768,7 +983,7 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new ByteArrayContent(
-                        Encoding.UTF8.GetBytes("solid test\nendsolid test\n")),
+                        modelBytes ?? Encoding.UTF8.GetBytes("solid test\nendsolid test\n")),
                 };
             }
 

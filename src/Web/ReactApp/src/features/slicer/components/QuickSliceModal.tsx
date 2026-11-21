@@ -201,7 +201,10 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
   const selectedBedType = bedContext.supportMultiBedTypes === true ? bedTypeOverride : '';
   const projectMayOverrideBed = model.fileType === '3mf'
     || !model.fileName || model.fileName.toLowerCase().endsWith('.3mf');
-  const sliceBedType = projectMayOverrideBed ? selectedBedType : bedContext.bedType;
+  const displayedBedContext = {
+    ...bedContext,
+    bedType: selectedBedType || (projectMayOverrideBed ? undefined : 'High Temp Plate'),
+  };
 
   const handleSubmit = useCallback(() => {
     setError(null);
@@ -218,11 +221,6 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
       setError('Select a process profile');
       return;
     }
-    if (!projectMayOverrideBed && !sliceBedType) {
-      setError('Unable to determine the printer bed type. Check the machine profile and worker availability.');
-      return;
-    }
-
     // Issue #578 dual-engine (Hicks R3, refined R4): the engines registry
     // query MUST have populated before we submit. Without it we would fall
     // through to an unpinned Orca job that any registered version could
@@ -237,27 +235,9 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
     const orcaEngine = registeredEngines.find(
       e => (e?.engine ?? '').toLowerCase() === 'orcaslicer',
     );
-    // Backend returns latest=null in TWO shapes (Hicks R4 #3, Vasquez R4):
-    //   1. Legacy / fresh-install: NO SlicerService rows registered — every
-    //      versionEntry.available is true so the UI selector remains usable
-    //      but we leave the job UNPINNED so a generic-capability legacy
-    //      worker can claim it.
-    //   2. All-offline: rows exist but nothing is fresh+online — every
-    //      versionEntry.available is false and the job would sit
-    //      unclaimable in the queue.
-    // The presence of at least one `available` entry is the only reliable
-    // signal that distinguishes legacy from all-offline.
     const pinnedVersion = orcaEngine?.latest ?? undefined;
-    const hasAnyAvailableVersion = orcaEngine
-      ? (orcaEngine.versionEntries ?? []).some(v => v.available)
-      : true;
-    if (
-      orcaEngine
-      && orcaEngine.versions.length > 0
-      && !pinnedVersion
-      && !hasAnyAvailableVersion
-    ) {
-      setError('No online OrcaSlicer worker is available to accept this job.');
+    if (!pinnedVersion) {
+      setError('No available OrcaSlicer version is registered. Start an updated worker and retry.');
       return;
     }
 
@@ -275,13 +255,13 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
         process: { source: 'system', name: effectiveProcessProfileId.replace(/^system:/, '') },
         filaments: [{ source: 'system', name: effectiveFilamentProfileId }],
       },
-      ...(pinnedVersion ? { slicerEngineVersion: pinnedVersion } : {}),
+      slicerEngineVersion: pinnedVersion,
       slicerProfileJson: buildSlicerProfileJson({
         machineProfileName: effectiveMachineProfileId,
         filamentProfileName: effectiveFilamentProfileId,
         processPresetId: effectiveProcessProfileId,
         overrides: {},
-        bedType: sliceBedType,
+        bedSelection: { version: 1, ...(selectedBedType ? { explicitBedType: selectedBedType } : {}) },
       }),
       requiredCapabilitiesJson: '[]',
       priority: 1,
@@ -293,8 +273,7 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
     effectiveMachineProfileId,
     effectiveFilamentProfileId,
     effectiveProcessProfileId,
-    projectMayOverrideBed,
-    sliceBedType,
+    selectedBedType,
     submitMutation,
     user?.id,
     registeredEngines,
@@ -379,7 +358,7 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
           id="qs-bed-type"
           selectedBedType={selectedBedType}
           onChange={setSelectedBedType}
-          context={bedContext}
+          context={displayedBedContext}
         />
 
         {error && <Alert type="error">{error}</Alert>}

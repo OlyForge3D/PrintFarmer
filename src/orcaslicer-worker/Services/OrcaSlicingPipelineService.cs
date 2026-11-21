@@ -1821,6 +1821,21 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 break;
         }
 
+        if (!ProjectBedSelectionContract.TryParse(job.SlicerProfileJson, out ProjectBedSelectionContract? bedSelection, out string? bedSelectionError))
+        {
+            throw new InvalidDataException(bedSelectionError);
+        }
+
+        OrcaProjectBedSettings? projectBedSettings = null;
+        if (bedSelection is not null)
+        {
+            var prepared = await OrcaProjectBedSettings.PrepareAsync(
+                effectiveModelPaths, processJson, workDir, bedSelection.ExplicitBedType, cancellationToken);
+            projectBedSettings = prepared.Settings;
+            processJson = prepared.ProcessPath;
+            effectiveModelPaths = prepared.ModelPaths.ToList();
+        }
+
         // Extracted as a pure function (DescribePlacementWarnings) so the logging decision
         // itself is unit-testable, not just the PlacementPlan flags it reads — issue #1799 was
         // partly about a degradation that shipped with no way to prove it was ever surfaced.
@@ -1957,9 +1972,14 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             throw new SlicerEngineFailureException(diagnosis.Reason, diagnosis.Detail);
         }
 
-        // OrcaSlicer CLI always outputs plate_X.gcode (not {modelname}.gcode)
-        if (!File.Exists(gcodeFilePath))
+        if (bedSelection is not null)
         {
+            gcodeFilePath = await VerifyProjectBedOutputsAsync(
+                gcodeOutputDir, job.PlateIndex, projectBedSettings!, bedSelection.ExplicitBedType, cancellationToken);
+        }
+        else if (!File.Exists(gcodeFilePath))
+        {
+            // OrcaSlicer CLI normally outputs plate_X.gcode, not {modelname}.gcode.
             string expectedPlateName = job.PlateIndex.HasValue ? $"plate_{job.PlateIndex.Value + 1}.gcode" : "plate_1.gcode";
             string platePath = Path.Join(gcodeOutputDir, expectedPlateName);
             if (File.Exists(platePath))
@@ -1984,6 +2004,39 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
 
         return (gcodeFilePath, layoutDegradation);
+    }
+
+    internal static async Task<string> VerifyProjectBedOutputsAsync(
+        string outputDir,
+        int? plateIndex,
+        OrcaProjectBedSettings settings,
+        string? explicitBedType,
+        CancellationToken cancellationToken)
+    {
+        string[] paths = Directory.GetFiles(outputDir, "*.gcode");
+        if (paths.Length == 0)
+        {
+            throw new InvalidDataException("OrcaSlicer produced no G-code for bed selection verification.");
+        }
+
+        foreach (string path in paths)
+        {
+            Match match = Regex.Match(Path.GetFileName(path), @"^plate_([1-9]\d*)\.gcode$", RegexOptions.CultureInvariant);
+            if (!match.Success || !int.TryParse(match.Groups[1].Value, out int plateId))
+            {
+                throw new InvalidDataException("OrcaSlicer produced a G-code file with an ambiguous plate name.");
+            }
+
+            await OrcaBedGcodeVerifier.VerifyAsync(path, settings.Resolve(plateId, explicitBedType), cancellationToken);
+        }
+
+        string selectedPath = Path.Join(outputDir, $"plate_{(plateIndex ?? 0) + 1}.gcode");
+        if (!File.Exists(selectedPath))
+        {
+            throw new InvalidDataException("OrcaSlicer did not produce the requested plate.");
+        }
+
+        return selectedPath;
     }
 
     /// <summary>

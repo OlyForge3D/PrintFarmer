@@ -39,6 +39,7 @@ import { buildSlicerProfileJson } from '@/features/slicer/utils/slicerProfilePay
 import { BedSurfaceSettings } from '@/features/slicer/components/BedSurfaceSettings';
 import { getNativeBedContext } from '@/features/slicer/utils/bedSurfaceTemperature';
 import { resolveMachineProfile } from '@/features/slicer/utils/resolveMachineProfile';
+import { customFilamentMatchesMachine, filamentFamilyMachineNames } from '@/features/slicer/utils/customProfileScoping';
 import {
   SlicerSettingsPanel,
   type OrcaProcessSettings,
@@ -71,7 +72,7 @@ import { buildSlicerViewerModelUrl, getSlicerViewerFileType } from '@/features/s
 import { loadModelResponse, isAuthenticatedModelUrl } from '@/common/utils/authenticatedModelUrl';
 import { validateModelResponse } from '@/features/slicer/utils/validate-model-response';
 import { buildSlicePayloadModels, resolveModel3DId, modelTransformJson } from '@/features/slicer/utils/slicePayload';
-import { buildProcessOverrides } from '@/features/slicer/utils/orcaOverrideNormalization';
+import { buildProcessOverrides, getEditedProcessBedType } from '@/features/slicer/utils/orcaOverrideNormalization';
 import { validateOrcaPrintSettings } from '@/features/slicer/utils/slicerSettingsValidation';
 import { readOrcaBundle } from '@/features/slicer/utils/orcaBundleLoader';
 import { SlicerWorkspaceBoundary } from '@/features/slicer/components/viewer/SlicerWorkspaceBoundary';
@@ -488,6 +489,7 @@ export const NewSliceJobPage: React.FC = () => {
   const [slicerSettings, setSlicerSettings] = useState<OrcaProcessSettings>({} as OrcaProcessSettings);
   const [originalProcessSettings, setOriginalProcessSettings] = useState<Record<string, unknown>>({});
   const [advancedProcessSettings, setAdvancedProcessSettings] = useState<Record<string, unknown>>({});
+  const [originalAdvancedBedType, setOriginalAdvancedBedType] = useState<unknown>();
   
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const profileMenuRef = React.useRef<HTMLDivElement>(null);
@@ -1248,6 +1250,11 @@ export const NewSliceJobPage: React.FC = () => {
     if (!selectedMachineProfile?.name) return [];
     return [selectedMachineProfile.name];
   }, [selectedMachineProfile]);
+  const filamentMachineNames = useMemo(() => {
+    if (!selectedMachineProfile || machineProfilesData.includes(selectedMachineProfile)
+      || !selectedMachineProfile.inherits) return selectedMachineNames;
+    return [...new Set([...selectedMachineNames, selectedMachineProfile.inherits])];
+  }, [machineProfilesData, selectedMachineNames, selectedMachineProfile]);
   const processMachineNames = useMemo(() =>
     inheritedMachine ? [...selectedMachineNames, inheritedMachine.name] : selectedMachineNames,
   [inheritedMachine, selectedMachineNames]);
@@ -1261,7 +1268,7 @@ export const NewSliceJobPage: React.FC = () => {
       data: processProfilesData = EMPTY_PROFILES,
       isLoading: isProcessProfilesLoading,
     },
-  } = useMachineCompatibleProfiles(selectedMachineNames, {
+  } = useMachineCompatibleProfiles(filamentMachineNames, {
     enabled: selectedMachineNames.length > 0,
     engineVersion: selectedEngineVersion ?? latestAvailableForEngine,
     processMachineNames,
@@ -1285,19 +1292,12 @@ export const NewSliceJobPage: React.FC = () => {
   const customFilamentProfiles = useMemo(() => {
     const allCustomFilament = customProfilesData?.profiles?.filter(p => p.profileType === 'filament') ?? [];
     if (!selectedMachineProfileId) return allCustomFilament;
-    return allCustomFilament.filter(p => {
-      if (p.rawJson) {
-        try {
-          const parsed = JSON.parse(p.rawJson) as Record<string, unknown>;
-          const compatible = parsed.compatible_printers as string[] | undefined;
-          if (compatible && compatible.length > 0) {
-            return compatible.some(c => c === selectedMachineProfileId);
-          }
-        } catch { /* hide profile if can't parse */ }
-      }
-      return false;
-    });
-  }, [customProfilesData, selectedMachineProfileId]);
+    if (!selectedMachineProfile) return [];
+    const familyNames = filamentFamilyMachineNames(
+      selectedMachineProfile, machineSelection.customId, machineProfilesData, customMachineProfiles,
+    );
+    return allCustomFilament.filter(p => customFilamentMatchesMachine(p, familyNames));
+  }, [customProfilesData, selectedMachineProfileId, selectedMachineProfile, machineSelection.customId, machineProfilesData, customMachineProfiles]);
 
   // Process profiles are scoped by the authoritative catalog PrinterModel
   // association (printerModelId). Legacy profiles without that association fall
@@ -1927,9 +1927,9 @@ export const NewSliceJobPage: React.FC = () => {
   const projectMayOverrideBed = bedModels.some(model => model.fileType === '3mf' || !model.fileName || model.fileName.toLowerCase().endsWith('.3mf'))
     || (bedModels.length === 0 && !!modelFileUrl && (!modelFileName || modelFileName.toLowerCase().endsWith('.3mf')));
   const selectedBedType = bedContext.supportMultiBedTypes === true ? bedTypeOverride : '';
-  const sliceBedType = selectedSlicerId !== 1 ? undefined
-    : projectMayOverrideBed ? selectedBedType : bedContext.bedType;
-  const filamentBedContext = projectMayOverrideBed ? { ...bedContext, bedType: undefined } : bedContext;
+  const displayBedType = selectedBedType || (projectMayOverrideBed ? undefined : 'High Temp Plate');
+  const displayedBedContext = { ...bedContext, bedType: displayBedType };
+  const filamentBedContext = displayedBedContext;
 
   // Per-kg filament cost from the selected profile, for best-effort material cost.
   const filamentCostPerKg = useMemo(
@@ -1993,6 +1993,7 @@ export const NewSliceJobPage: React.FC = () => {
       const rawSettings = selectedProcessProfile?.settings;
       if (rawSettings && typeof rawSettings === 'object') {
         setAdvancedProcessSettings({ ...rawSettings });
+        setOriginalAdvancedBedType(rawSettings.curr_bed_type);
         return;
       }
 
@@ -2002,6 +2003,7 @@ export const NewSliceJobPage: React.FC = () => {
           const parsed = JSON.parse(customRawJson);
           if (parsed && typeof parsed === 'object') {
             setAdvancedProcessSettings(parsed as Record<string, unknown>);
+            setOriginalAdvancedBedType(parsed.curr_bed_type);
             return;
           }
         } catch {
@@ -2010,6 +2012,7 @@ export const NewSliceJobPage: React.FC = () => {
       }
 
       setAdvancedProcessSettings({});
+      setOriginalAdvancedBedType(undefined);
     });
   }, [selectedCustomProcessProfile, selectedProcessProfile]);
 
@@ -2187,10 +2190,12 @@ export const NewSliceJobPage: React.FC = () => {
       return false;
     }
 
-    // Legacy / fresh-install path is served naturally: `latestAvailableForEngine`
-    // is undefined (backend `latest=null`), no user pin is set, so
-    // `slicerEngineVersion` stays undefined below and a legacy single-worker
-    // deployment can claim the job with its generic "orcaslicer" capability.
+    if (slicerInfo.engine === 0 && !(selectedEngineVersion ?? latestAvailableForEngine)) {
+      const msg = 'No available OrcaSlicer version is registered. Start an updated worker and retry.';
+      setError(msg);
+      toast.error(msg);
+      return false;
+    }
 
     // Plate-aware slicing: only the ACTIVE plate's models are sliced. The IDs
     // are passed synchronously from the workspace's Slice button so we never
@@ -2241,11 +2246,17 @@ export const NewSliceJobPage: React.FC = () => {
       toast.error(msg);
       return false;
     }
-    if (selectedSlicerId === 1 && !projectMayOverrideBed && !sliceBedType) {
-      const msg = 'Unable to determine the printer bed type. Check the machine profile and worker availability.';
-      setError(msg);
-      toast.error(msg);
-      return false;
+    const { curr_bed_type: processBedType, ...orcaProcessOverrides } = processOverrides;
+    const editedProcessBedType = getEditedProcessBedType(processBedType, originalAdvancedBedType);
+    if (slicerInfo.engine === 0 && editedProcessBedType !== undefined) {
+      const valid = typeof editedProcessBedType === 'string'
+        && ['Cool Plate', 'Engineering Plate', 'High Temp Plate', 'Textured PEI Plate', 'Textured Cool Plate', 'Supertack Plate'].includes(editedProcessBedType);
+      if (!valid || (selectedBedType && selectedBedType !== editedProcessBedType)) {
+        const msg = 'The process bed type is invalid or conflicts with the selected bed type. Choose one bed type and retry.';
+        setError(msg);
+        toast.error(msg);
+        return false;
+      }
     }
 
     // Issue #2374 (Bishop review): `submitSliceJob` previously validated less
@@ -2320,11 +2331,6 @@ export const NewSliceJobPage: React.FC = () => {
       model3DId: resolveModel3DId(payloadModels, selectedModelId),
       modelFileName: effectiveModelFileName,
       slicerEngine: slicerInfo.engine,
-      // Issue #578 dual-engine: when the user leaves the dropdown on "Latest"
-      // (undefined pin), resolve to the backend-computed newest AVAILABLE
-      // version so the job is deterministically routed to a worker that can
-      // actually claim it. When nothing is registered/available, remain
-      // unpinned so legacy single-worker deployments still work.
       slicerEngineVersion: selectedEngineVersion ?? latestAvailableForEngine,
       slicerProfileJson: buildSlicerProfileJson({
         // Canonical profile name, never the trimmed picker label.
@@ -2335,8 +2341,14 @@ export const NewSliceJobPage: React.FC = () => {
         filamentColour: singleFilamentColour,
         processPresetId: selectedCustomProcessProfile
           ? selectedCustomProcessProfile.name : selectedProcessPresetId,
-        overrides: processOverrides,
-        bedType: sliceBedType,
+        overrides: slicerInfo.engine === 0 ? orcaProcessOverrides : processOverrides,
+        ...(slicerInfo.engine === 0 ? {
+          bedSelection: {
+            version: 1,
+            ...(selectedBedType || typeof editedProcessBedType === 'string'
+              ? { explicitBedType: selectedBedType || String(editedProcessBedType) } : {}),
+          },
+        } : {}),
       }),
       slicerProfileId: selectedProcessPresetId.startsWith('custom:')
             ? selectedProcessPresetId.slice('custom:'.length)
@@ -2397,8 +2409,8 @@ export const NewSliceJobPage: React.FC = () => {
     requiredNozzleDiameter,
     requiredPrinterModel,
     selectedFilamentProfileId,
-    sliceBedType,
-    projectMayOverrideBed,
+    selectedBedType,
+    originalAdvancedBedType,
     processOverrides,
     selectedMachineProfileId,
     selectedProcessPresetId,
@@ -3310,7 +3322,7 @@ export const NewSliceJobPage: React.FC = () => {
             id="slice-bed-type"
             selectedBedType={selectedBedType}
             onChange={value => setBedSurfaceSelection({ machine: selectedMachineProfileId, value })}
-            context={bedContext}
+            context={displayedBedContext}
           />
 
           {/* PROCESS PROFILE - with Reset, Save-as, and profile management menu */}
