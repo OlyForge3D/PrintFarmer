@@ -123,18 +123,16 @@ internal sealed record OrcaProjectBedSettings(string? Global, IReadOnlyDictionar
             }
 
             bool found = false;
-            foreach (JsonProperty property in document.RootElement.EnumerateObject())
+            foreach (JsonProperty property in document.RootElement.EnumerateObject()
+                .Where(property => property.NameEquals("curr_bed_type")))
             {
-                if (property.NameEquals("curr_bed_type"))
+                if (found || property.Value.ValueKind != JsonValueKind.String)
                 {
-                    if (found || property.Value.ValueKind != JsonValueKind.String)
-                    {
-                        throw new InvalidDataException("The 3MF project bed type is ambiguous.");
-                    }
-
-                    found = true;
-                    global = ValidateBedType(property.Value.GetString());
+                    throw new InvalidDataException("The 3MF project bed type is ambiguous.");
                 }
+
+                found = true;
+                global = ValidateBedType(property.Value.GetString());
             }
         }
 
