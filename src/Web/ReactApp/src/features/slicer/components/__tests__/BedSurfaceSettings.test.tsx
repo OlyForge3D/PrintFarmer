@@ -14,7 +14,7 @@ describe('BedSurfaceSettings', () => {
         context={{ bedType: 'Textured PEI Plate', supportMultiBedTypes: true }}
       />,
     );
-    expect(screen.getByRole('option', { name: 'Inherit from profile (Textured PEI Plate)' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Default (Textured PEI Plate)' })).toBeInTheDocument();
     expect(container).not.toHaveTextContent(/°C/);
     expect(screen.queryByRole('button', { name: 'About bed temperatures' })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Bed Type'), { target: { value: 'High Temp Plate' } });

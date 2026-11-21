@@ -670,7 +670,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         try
         {
             // Build the fully resolved profile JSON by loading and merging the entire inheritance chain
-            string? resolvedProfileJson = BuildResolvedProfileJson(filePath);
+            string? resolvedProfileJson = BuildResolvedProfileJson(filePath, out bool inheritanceResolved);
             if (resolvedProfileJson == null)
             {
                 return null;
@@ -692,7 +692,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                 }
             }
 
-            return typeof(T).Name switch
+            T? profile = typeof(T).Name switch
             {
                 nameof(MachineProfileDto) => ParseMachineProfile(resolvedProfile, filePath) as T,
                 nameof(MachineModelProfileDto) => ParseMachineModelProfile(resolvedProfile) as T,
@@ -700,6 +700,16 @@ public class OrcaProfilesService : ISlicerProfilesService
                 nameof(ProcessProfileDto) => ParseProcessProfile(resolvedProfile) as T,
                 _ => null
             };
+            if (profile is MachineProfileDto machine)
+            {
+                machine.InheritanceResolved = inheritanceResolved;
+            }
+            else if (profile is ProcessProfileDto process)
+            {
+                process.InheritanceResolved = inheritanceResolved;
+            }
+
+            return profile;
         }
         catch (Exception ex)
         {
@@ -712,8 +722,9 @@ public class OrcaProfilesService : ISlicerProfilesService
     /// Build a fully resolved profile by loading and merging all profiles in the inheritance chain.
     /// Returns the merged profile JSON string with all inherited properties + overrides from the current profile.
     /// </summary>
-    private string? BuildResolvedProfileJson(string filePath)
+    private string? BuildResolvedProfileJson(string filePath, out bool inheritanceResolved)
     {
+        inheritanceResolved = true;
         try
         {
             // Collect all profiles in the inheritance chain (parent -> child order)
@@ -731,7 +742,8 @@ public class OrcaProfilesService : ISlicerProfilesService
                     visited,
                     customBundleName,
                     familyName,
-                    rootProfileName))
+                    rootProfileName,
+                    ref inheritanceResolved))
             {
                 return null;
             }
@@ -756,11 +768,13 @@ public class OrcaProfilesService : ISlicerProfilesService
         HashSet<string> visited,
         string? customBundleName,
         string familyName,
-        string rootProfileName)
+        string rootProfileName,
+        ref bool inheritanceResolved)
     {
         // Prevent infinite loops
         if (visited.Contains(filePath))
         {
+            inheritanceResolved = false;
             return true;
         }
 
@@ -801,8 +815,10 @@ public class OrcaProfilesService : ISlicerProfilesService
                                 visited,
                                 customBundleName,
                                 familyName,
-                                rootProfileName))
+                                rootProfileName,
+                                ref inheritanceResolved))
                         {
+                            inheritanceResolved = false;
                             if (customBundleName is not null)
                             {
                                 return false;
@@ -816,6 +832,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                     }
                     else
                     {
+                        inheritanceResolved = false;
                         if (customBundleName is not null)
                         {
                             RecordMissingCustomParent(
@@ -833,6 +850,11 @@ public class OrcaProfilesService : ISlicerProfilesService
                             parentProfilePath ?? "null");
                     }
                 }
+            }
+            else if (root.TryGetProperty("inherits", out inheritsElem) &&
+                     inheritsElem.ValueKind is not JsonValueKind.Null)
+            {
+                inheritanceResolved = false;
             }
         }
         catch (Exception ex)

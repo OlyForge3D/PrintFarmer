@@ -12,12 +12,12 @@ interface BedSurfaceSettingsProps {
 export function BedSurfaceSettings({
   id, selectedBedType, onChange, context,
 }: BedSurfaceSettingsProps) {
-  if (context.supportMultiBedTypes === false) return null;
+  if (context.supportMultiBedTypes !== true) return null;
   const { bedType } = context;
   return (
     <FormField label="Bed Type" htmlFor={id}>
       <Select id={id} value={selectedBedType} onChange={event => onChange(event.target.value)}>
-        <option value="">Inherit from profile{bedType && !selectedBedType ? ` (${bedType})` : ''}</option>
+        <option value="">Default{bedType && !selectedBedType ? ` (${bedType})` : ''}</option>
         {BED_TYPE_OPTIONS.map(option => (
           <option key={option.value} value={option.value}>{option.label}</option>
         ))}

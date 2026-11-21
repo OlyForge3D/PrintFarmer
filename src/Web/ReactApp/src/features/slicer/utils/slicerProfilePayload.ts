@@ -32,6 +32,8 @@ export interface SlicerProfilePayloadInput {
   overrides: Record<string, unknown>;
   /** Empty/omitted preserves the profile's native bed surface. */
   bedType?: string;
+  /** Opts Orca jobs into project-aware bed selection. */
+  bedSelection?: { version: 1; explicitBedType?: string };
 }
 
 /**
@@ -66,6 +68,7 @@ export function buildSlicerProfileJson(input: SlicerProfilePayloadInput): string
     ...(input.filamentColours ? { filamentColours: input.filamentColours } : {}),
     ...(input.filamentColour ? { filamentColour: input.filamentColour } : {}),
     processProfileName: stripProcessPresetPrefix(input.processPresetId),
+    ...(input.bedSelection ? { bedSelection: input.bedSelection } : {}),
     overrides: {
       ...input.overrides,
       ...(input.bedType ? { curr_bed_type: input.bedType } : {}),

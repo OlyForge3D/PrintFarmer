@@ -30,6 +30,9 @@ public class ProcessProfileDto
     [JsonPropertyName("inherits")]
     public string? Inherits { get; set; }
 
+    /// <summary>Whether the worker resolved the complete inheritance chain.</summary>
+    public bool? InheritanceResolved { get; set; }
+
     // ── Layer ─────────────────────────────────────────────────────────────
     public double LayerHeight { get; set; } = 0.2;
 

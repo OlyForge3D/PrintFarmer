@@ -115,6 +115,7 @@ public sealed class SlicerRegistrationClientTests
         _ = advertisedCapabilities.Should().Contain("orcaslicer:2.4.2");
         _ = advertisedCapabilities.Should().Contain("orcaslicer:native-profile-selections-v1");
         _ = advertisedCapabilities.Should().Contain("orcaslicer:2.4.2:native-profile-selections-v1");
+        _ = advertisedCapabilities.Should().Contain("orcaslicer:2.4.2:project-bed-selection-v1");
     }
 
     [Theory]

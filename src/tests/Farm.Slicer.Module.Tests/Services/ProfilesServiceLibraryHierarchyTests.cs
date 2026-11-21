@@ -266,6 +266,25 @@ public sealed class ProfilesServiceLibraryHierarchyTests
             && entry.Message.Contains(workerManufacturer, StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task GetWorkerMachineModelsAsync_UsesRequestedVersionAndEscapedQuery()
+    {
+        ProfilesService service = CreateService(Mock.Of<IPrinterModelAliasService>(), Mock.Of<ICatalogService>());
+        var handler = new MachineModelsHandler();
+        using HttpClient client = new(handler);
+
+        IReadOnlyList<MachineModelProfileDto> profiles = await service.GetWorkerMachineModelsAsync(
+            client, "Qidi & Co", "X Plus", "2.4.2", CancellationToken.None);
+
+        profiles.Should().ContainSingle().Which.Settings.Should().ContainKey("model_id");
+        handler.RequestUri.Should().NotBeNull();
+        handler.RequestUri!.Host.Should().Be("worker");
+        handler.RequestUri.AbsolutePath.Should().Be("/api/profiles/machine-models");
+        handler.RequestUri.Query.Should().Be("?manufacturer=Qidi%20%26%20Co&model=X%20Plus");
+        await Assert.ThrowsAsync<HttpRequestException>(() =>
+            service.GetWorkerMachineModelsAsync(client, "Qidi", "X Plus", "2.4.1", CancellationToken.None));
+    }
+
     private static ProfilesService CreateService(
         IPrinterModelAliasService aliasService,
         ICatalogService catalogService,
@@ -334,5 +353,24 @@ public sealed class ProfilesServiceLibraryHierarchyTests
                     Encoding.UTF8,
                     "application/json")
             });
+    }
+
+    private sealed class MachineModelsHandler : HttpMessageHandler
+    {
+        public Uri? RequestUri { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            RequestUri = request.RequestUri;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """[{"name":"X Plus","manufacturer":"Qidi","settings":{"model_id":"QIDI_X"}}]""",
+                    Encoding.UTF8,
+                    "application/json")
+            });
+        }
     }
 }

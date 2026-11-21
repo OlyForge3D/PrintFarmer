@@ -103,8 +103,8 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
       .replace('Hot', 'Smooth PEI / High Temp');
 
     return (
-      <div className="flex items-center gap-1.5 py-0.5">
-        <div className="w-[46%] shrink-0 truncate">
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-1.5 py-0.5">
+        <div className="col-span-full sm:col-span-1 min-w-0">
           <span
             className={`text-xs font-medium ${anyModified ? 'text-pf-warning' : 'text-pf-text-primary'}`}
             title={meta.tooltip}
@@ -112,13 +112,13 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
             {plateName}
           </span>
         </div>
-        <div className="w-[30%] shrink-0 flex items-center gap-1">
+        <div className="min-w-0 flex flex-col sm:flex-row sm:items-center gap-1">
           <span className="text-[10px] text-pf-text-muted whitespace-nowrap">First layer</span>
-          <div className="flex items-center flex-1">
+          <div className="flex items-center flex-1 min-w-0">
             <input
               type="number"
               title={`${plateName} first layer`}
-              className="w-full py-1 px-2 bg-pf-panel border border-pf-border text-pf-text-primary text-xs text-right rounded-l-lg rounded-r-none border-r-0 hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden"
+              className="w-full min-w-0 py-1 px-2 bg-pf-panel border border-pf-border text-pf-text-primary text-xs text-right rounded-l-lg rounded-r-none border-r-0 hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden"
               value={toNumber(values[field.key], meta)}
               onChange={(e) => onUpdate(field.key, Number(e.target.value))}
               disabled={disabled}
@@ -128,13 +128,13 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
             </span>
           </div>
         </div>
-        <div className="w-[30%] shrink-0 flex items-center gap-1">
+        <div className="min-w-0 flex flex-col sm:flex-row sm:items-center gap-1">
           <span className="text-[10px] text-pf-text-muted whitespace-nowrap">Other layers</span>
-          <div className="flex items-center flex-1">
+          <div className="flex items-center flex-1 min-w-0">
             <input
               type="number"
               title={`${plateName} other layers`}
-              className="w-full py-1 px-2 bg-pf-panel border border-pf-border text-pf-text-primary text-xs text-right rounded-l-lg rounded-r-none border-r-0 hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden"
+              className="w-full min-w-0 py-1 px-2 bg-pf-panel border border-pf-border text-pf-text-primary text-xs text-right rounded-l-lg rounded-r-none border-r-0 hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden"
               value={toNumber(values[pairedOtherKey], pairedOtherMeta)}
               onChange={(e) => onUpdate(pairedOtherKey, Number(e.target.value))}
               disabled={disabled}

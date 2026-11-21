@@ -11,6 +11,8 @@
  * `printerModelId`. Those fall back to fuzzy matching so they remain usable.
  */
 
+import type { CustomProfile, OrcaMachineProfile } from '@/services/slicerProfilesService';
+
 export type ProfileScope = 'match' | 'mismatch' | 'unscoped';
 
 export interface ScopeableCustomProfile {
@@ -95,6 +97,7 @@ export function legacyProcessProfileMatchesMachine(
   if (!selectedMachineProfileId || !profile.rawJson) {
     return false;
   }
+
   try {
     const parsed = JSON.parse(profile.rawJson) as Record<string, unknown>;
     const compatible = parsed.compatible_printers as string[] | undefined;
@@ -105,4 +108,99 @@ export function legacyProcessProfileMatchesMachine(
     /* hide profile if it can't be parsed */
   }
   return false;
+}
+
+function machineParent(profile: CustomProfile): string | undefined {
+  if (!profile.rawJson) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(profile.rawJson);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const raw = parsed as Record<string, unknown>;
+    const nested = raw.settings;
+    const settings = nested && typeof nested === 'object' && !Array.isArray(nested)
+      ? { ...raw, ...nested as Record<string, unknown> } : raw;
+    const parent = settings.from === 'system' ? settings.name : settings.inherits;
+    return typeof parent === 'string' && parent ? parent : undefined;
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    console.warn(`Cannot read machine profile inheritance for "${profile.name}".`);
+    return undefined;
+  }
+}
+
+/**
+ * Collect related machine names within the selected printer model. A custom
+ * chain can terminate at a system preset; system siblings share their direct
+ * parent, but generic ancestors beyond that parent must not join families.
+ */
+export function filamentFamilyMachineNames(
+  selected: OrcaMachineProfile,
+  selectedCustomId: string | undefined,
+  systemProfiles: readonly OrcaMachineProfile[],
+  customProfiles: readonly CustomProfile[],
+): string[] {
+  const systems = new Map(systemProfiles.map(profile => [profile.name, profile]));
+  const customs = customProfiles.filter(profile => profile.profileType === 'machine');
+
+  function lineage(name: string, customId?: string): Set<string> {
+    const names = new Set<string>();
+    let current: string | undefined = name;
+    let first = true;
+    while (current && !names.has(current)) {
+      names.add(current);
+      const candidates = customs.filter(profile => first && customId
+        ? profile.id === customId : profile.name === current);
+      if (first && customId) {
+        current = candidates.length === 1 ? machineParent(candidates[0]) : undefined;
+      } else {
+        const system = systems.get(current);
+        if (system) {
+          if (system.inherits) names.add(system.inherits);
+          break;
+        }
+        current = candidates.length === 1 ? machineParent(candidates[0]) : undefined;
+      }
+      first = false;
+    }
+    return names;
+  }
+
+  const selectedLineage = lineage(selected.name, selectedCustomId);
+  const result = new Set(selectedLineage);
+  for (const profile of [...systemProfiles, ...customs]) {
+    const candidateLineage = lineage(profile.name, 'profileType' in profile ? profile.id : undefined);
+    if ([...candidateLineage].some(name => selectedLineage.has(name))) {
+      candidateLineage.forEach(name => result.add(name));
+    }
+  }
+  return [...result];
+}
+
+export function customFilamentMatchesMachine(
+  profile: Pick<CustomProfile, 'name' | 'rawJson' | 'compatiblePrinters'>,
+  machineNames: readonly string[],
+): boolean {
+  let compatible = profile.compatiblePrinters;
+  if (compatible === undefined) {
+    if (!profile.rawJson) return false;
+    try {
+      const parsed: unknown = JSON.parse(profile.rawJson);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+      const raw = parsed as Record<string, unknown>;
+      const nested = raw.settings;
+      const settings = nested && typeof nested === 'object' && !Array.isArray(nested)
+        ? { ...raw, ...nested as Record<string, unknown> } : raw;
+      const value = settings.compatible_printers;
+      if (value !== undefined && (!Array.isArray(value) || !value.every(item => typeof item === 'string'))) {
+        console.warn(`Invalid compatible printers for filament profile "${profile.name}".`);
+        return false;
+      }
+      compatible = value as string[] | undefined;
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      console.warn(`Cannot read compatibility for filament profile "${profile.name}".`);
+      return false;
+    }
+  }
+  return !compatible?.length || compatible.some(name => machineNames.includes(name));
 }

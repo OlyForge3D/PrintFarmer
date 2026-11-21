@@ -54,8 +54,8 @@ const CompoundRow: React.FC<CompoundRowProps> = ({
   };
 
   return (
-    <div className="flex items-center gap-1.5 py-0.5">
-      <div className="w-[46%] shrink-0 truncate">
+    <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 py-0.5">
+      <div className="basis-full sm:basis-auto sm:w-[46%] min-w-0 shrink-0">
         <span
           className={`text-xs font-medium ${anyModified ? 'text-pf-warning' : 'text-pf-text-primary'}`}
           title={label}
@@ -63,7 +63,7 @@ const CompoundRow: React.FC<CompoundRowProps> = ({
           {label}
         </span>
       </div>
-      <div className="flex-1 flex items-center gap-2">
+      <div className="min-w-0 flex-1 flex items-center gap-2">
         {fields.map((f) => {
           const meta = allSettings[f.key];
           if (!meta) return null;
@@ -74,16 +74,16 @@ const CompoundRow: React.FC<CompoundRowProps> = ({
               ? ''
               : Number(rawVal);
           return (
-            <div key={f.key} className="flex items-center gap-1 flex-1">
+            <div key={f.key} className="min-w-0 flex flex-col sm:flex-row sm:items-center gap-1 flex-1">
               {meta.label && (
                 <span className="text-[10px] text-pf-text-muted whitespace-nowrap">{meta.label}</span>
               )}
-              <div className="flex items-center flex-1">
+              <div className="flex items-center flex-1 min-w-0">
                 <input
                   type="number"
                   title={meta.tooltip || `${label} ${meta.label || ''}`}
                   aria-label={`${label} ${meta.label}`}
-                  className="w-full py-1 px-2 bg-pf-panel border border-pf-border text-pf-text-primary text-xs text-right rounded-l-lg rounded-r-none border-r-0 hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden"
+                  className="w-full min-w-0 py-1 px-2 bg-pf-panel border border-pf-border text-pf-text-primary text-xs text-right rounded-l-lg rounded-r-none border-r-0 hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden"
                   value={numVal}
                   min={meta.min}
                   max={meta.max}

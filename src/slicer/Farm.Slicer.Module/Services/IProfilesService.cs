@@ -66,6 +66,10 @@ public interface IProfilesService
     /// <param name="engineVersion">Optional exact engine version to query.</param>
     Task<AllProfilesResponseDto?> GetWorkerProfilesHierarchyAsync(HttpClient httpClient, CancellationToken ct, string? engineVersion = null);
 
+    /// <summary>Fetches matching machine model metadata from the selected OrcaSlicer worker.</summary>
+    Task<IReadOnlyList<MachineModelProfileDto>> GetWorkerMachineModelsAsync(
+        HttpClient httpClient, string manufacturer, string model, string? engineVersion, CancellationToken ct);
+
     /// <summary>
     /// Fetches profile hierarchy from OrcaSlicer worker filtered to only include
     /// manufacturers and models present in the PrintFarmer catalog.
