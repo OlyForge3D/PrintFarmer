@@ -27,7 +27,7 @@ export const SlicerModeToggle = forwardRef<HTMLButtonElement, SlicerModeTogglePr
           onClick={() => onChange(next)}
           disabled={disabled}
           aria-label={`Settings view: ${value}`}
-          className="inline-flex min-h-8 max-sm:min-h-11 pointer-coarse:min-h-11 items-center rounded px-1 transition-colors hover:bg-pf-bg-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pf-accent disabled:opacity-50"
+          className="inline-flex h-6.5 items-center rounded px-1 transition-colors hover:bg-pf-bg-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pf-accent disabled:opacity-50"
         >
           <span className="flex items-center gap-1.5">
             <img src="/icons/orcaslicer-advanced.svg" alt="" className="h-4 w-4" />
