@@ -284,22 +284,11 @@ export const NewSliceJobPage: React.FC = () => {
   const settingsLevel: SlicerSettingsLevel = slicerMode === 'Advanced'
     ? metadataViewMode === 'advanced' ? 'Advanced' : 'Basic'
     : 'Simple';
-  const settingsToggleRef = useRef<HTMLButtonElement>(null);
-  const restoreSettingsToggleFocus = useRef(false);
-  useEffect(() => {
-    if (restoreSettingsToggleFocus.current) {
-      settingsToggleRef.current?.focus();
-      restoreSettingsToggleFocus.current = false;
-    }
-  }, [settingsLevel]);
   const settingsViewControl = (
     <SlicerModeToggle
-      ref={settingsToggleRef}
       levels={settingsLevels}
       value={settingsLevel}
       onChange={(next) => {
-        // Simple and metadata panels remount; keep keyboard focus on the control.
-        restoreSettingsToggleFocus.current = true;
         if (next === 'Simple') {
           setSlicerMode('Simple');
         } else {
@@ -3276,9 +3265,10 @@ export const NewSliceJobPage: React.FC = () => {
 
           {/* PROCESS PROFILE - with Reset, Save-as, and profile management menu */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
-            {/* Header: label + ⋮ options menu */}
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-semibold text-pf-text-primary">Process</label>
+            {/* Header: label + settings view toggle + ⋮ options menu */}
+            <div className="flex items-center gap-1 mb-2">
+              <label className="block min-w-0 flex-1 truncate text-sm font-semibold text-pf-text-primary">Process</label>
+              {settingsViewControl}
               <div className="relative" ref={profileMenuRef}>
                 <Button
                   type="button"
@@ -3468,7 +3458,6 @@ export const NewSliceJobPage: React.FC = () => {
               onSettingsChange={handleSimpleSettingsChange}
               onValidationChange={setIsSimpleSlicerSettingsValid}
               simpleMode
-              headerAction={settingsViewControl}
             />
           )}
 
@@ -3482,7 +3471,7 @@ export const NewSliceJobPage: React.FC = () => {
                 onAdvancedSettingsChange={setAdvancedProcessSettings}
                 originalSettings={originalProcessSettings}
                 engineVersion={effectiveEngineVersion}
-                viewModeControl={settingsViewControl}
+                viewModeControl={null}
               />
             </div>
           )}

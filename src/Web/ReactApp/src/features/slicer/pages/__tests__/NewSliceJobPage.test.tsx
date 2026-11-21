@@ -476,10 +476,9 @@ vi.mock('../../components/job', () => ({
       </div>
     );
   },
-  SlicerSettingsPanel: (props: { headerAction?: React.ReactNode; onValidationChange?: (isValid: boolean) => void; settings: SlicerSettings; onSettingsChange: (settings: SlicerSettings) => void }) => (
+  SlicerSettingsPanel: (props: { onValidationChange?: (isValid: boolean) => void; settings: SlicerSettings; onSettingsChange: (settings: SlicerSettings) => void }) => (
     <div data-testid="slicer-settings-panel" data-slicer-mode="Simple">
       Settings Panel
-      {props.headerAction}
       <input
         type="range"
         min="0"
@@ -1312,20 +1311,21 @@ describe('NewSliceJobPage', () => {
   });
 
   describe('Bed-surface temperatures', () => {
-    it('cycles one settings control through Simple, Basic and Advanced without losing Simple edits or focus', async () => {
+    it('cycles one settings control, placed on the Process row, through Simple, Basic and Advanced without losing Simple edits or focus', async () => {
       renderWithProviders(<NewSliceJobPage />);
       const infill = await screen.findByRole('slider', { name: /infill density/i });
       fireEvent.change(infill, { target: { value: '35' } });
 
       expect(screen.queryByRole('radiogroup', { name: 'Slicer mode' })).not.toBeInTheDocument();
+      const processRow = screen.getByText('Process').parentElement as HTMLElement;
       for (const [current, next] of [['Simple', 'Basic'], ['Basic', 'Advanced'], ['Advanced', 'Simple']]) {
         expect(screen.getAllByRole('button', { name: /^Settings view:/ })).toHaveLength(1);
-        const toggle = screen.getByRole('button', { name: `Settings view: ${current}` });
+        const toggle = within(processRow).getByRole('button', { name: `Settings view: ${current}` });
         expect(toggle).not.toHaveTextContent(current);
-        fireEvent.focus(toggle);
+        act(() => toggle.focus());
         expect(toggle).toHaveAccessibleDescription(`${current} settings · Switch to ${next}`);
         fireEvent.click(toggle);
-        expect(await screen.findByRole('button', { name: `Settings view: ${next}` })).toHaveFocus();
+        expect(await within(processRow).findByRole('button', { name: `Settings view: ${next}` })).toHaveFocus();
       }
       expect(await screen.findByRole('slider', { name: /infill density/i })).toHaveValue('35');
     });
