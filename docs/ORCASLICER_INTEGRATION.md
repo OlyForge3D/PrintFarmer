@@ -94,9 +94,10 @@ current worker release.
 
 ### Settings views
 
-Use the control on the right of the web slicer's settings header to cycle
-**Simple → Basic → Advanced → Simple**. Hover or focus the control to see the
-current and next view. Simple shows curated print settings;
+Use the control in the web slicer sidebar's **Process** header, beside the
+profile menu, to cycle **Simple → Basic → Advanced → Simple**. Its dots mirror
+the available views, and the knob marks the current one. Hover or focus the
+control to see the current and next view. Simple shows curated print settings;
 Basic and Advanced show the profile editor with different levels of detail.
 If the farm enables only Advanced mode, the control cycles between Basic and
 Advanced. If only Simple is enabled, no control is shown.
