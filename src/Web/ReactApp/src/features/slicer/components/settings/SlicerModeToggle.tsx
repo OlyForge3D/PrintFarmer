@@ -35,16 +35,18 @@ export const SlicerModeToggle = forwardRef<HTMLButtonElement, SlicerModeTogglePr
               aria-hidden="true"
               data-pf-radius="full"
               className={clsx(
-                'relative inline-block h-3.5 rounded-full transition-colors',
-                levels.length === 3 ? 'w-10' : 'w-7',
+                'relative inline-flex h-3.5 items-center rounded-full px-0.5 transition-colors',
                 index === 0 ? 'bg-pf-border' : index === levels.length - 1 ? 'bg-pf-accent-2' : 'bg-pf-accent-2/50',
               )}
             >
+              {levels.map((level) => (
+                <span key={level} className="flex h-full w-3 items-center justify-center">
+                  <span className={clsx('h-1 w-1 rounded-full', index === 0 ? 'bg-pf-text-muted' : 'bg-white/70')} />
+                </span>
+              ))}
               <span
-                className={clsx(
-                  'absolute top-0.5 h-2.5 w-2.5 rounded-full bg-white shadow-sm transition-all motion-reduce:transition-none',
-                  index === 0 ? 'left-0.5' : index === 1 ? 'left-3.5' : 'left-6.5',
-                )}
+                className="absolute left-[0.1875rem] top-0.5 h-2.5 w-2.5 rounded-full bg-white shadow-sm transition-transform motion-reduce:transition-none"
+                style={{ transform: `translateX(${index * 0.75}rem)` }}
               />
             </span>
           </span>

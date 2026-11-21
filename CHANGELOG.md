@@ -83,6 +83,9 @@
 
 ### Fixes
 
+- The web slicer's settings-view control now sits beside the profile menu in
+  the Process header for all levels. Its pill shows Orca-style dots, and it no
+  longer takes space beside the Print Settings heading or the settings tabs (#3886).
 - The web slicer uses one right-aligned control for Simple, Basic and Advanced
   settings. Filament selection no longer shows nozzle or bed temperature text,
   and modifying a setting no longer changes its row height (#3880).

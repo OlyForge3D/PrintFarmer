@@ -28,7 +28,7 @@ interface SlicerSettingsPanelProps {
   originalSettings?: Record<string, unknown>;
   /** Pinned OrcaSlicer engine version for this slice job. */
   engineVersion?: string;
-  /** Replaces the default Basic/Advanced toggle with a caller-owned control. */
+  /** Replaces the default Basic/Advanced toggle; pass null to hide it. */
   viewModeControl?: React.ReactNode;
 }
 

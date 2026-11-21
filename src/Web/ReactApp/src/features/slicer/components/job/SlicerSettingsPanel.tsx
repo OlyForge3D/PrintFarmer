@@ -48,8 +48,6 @@ interface SlicerSettingsPanelProps {
    * of silently slicing with a stale (last valid) value.
    */
   onValidationChange?: (isValid: boolean) => void;
-  /** Optional control beside the Simple settings heading. */
-  headerAction?: React.ReactNode;
 }
 
 const BED_ADHESION_OPTIONS: { value: Exclude<SlicerSettings['bedAdhesionType'], 'profile'>; label: string }[] = [
@@ -395,7 +393,6 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   simpleMode = false,
   className,
   onValidationChange,
-  headerAction,
 }) => {
   const panelId = React.useId();
   const layerHeightId = `${panelId}-layer-height`;
@@ -462,10 +459,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
 
   return (
     <div className={`bg-pf-panel border border-pf-border rounded-lg p-4 space-y-4 ${className ?? ''}`}>
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold text-pf-text-primary">Print Settings</h3>
-        {headerAction}
-      </div>
+      <h3 className="text-sm font-semibold text-pf-text-primary">Print Settings</h3>
 
       {/* Layer Height — hidden in Simple mode (encoded in process profile preset) */}
       {!simpleMode && (

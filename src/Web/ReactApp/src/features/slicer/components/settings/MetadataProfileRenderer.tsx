@@ -76,7 +76,7 @@ export interface MetadataProfileEditorProps {
   simpleModeSettingKeys?: ReadonlySet<string>;
   /** Resolved machine/active-plate context; omitted in engine-agnostic editors. */
   filamentBedContext?: FilamentBedContext;
-  /** Replaces the default Basic/Advanced toggle with a caller-owned control. */
+  /** Replaces the default Basic/Advanced toggle with a caller-owned control; `null` hides it. */
   viewModeControl?: React.ReactNode;
 }
 
