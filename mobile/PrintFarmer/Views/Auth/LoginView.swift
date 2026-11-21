@@ -101,8 +101,11 @@ struct LoginView: View {
                         .foregroundStyle(.tertiary)
                         .rotationEffect(.degrees(viewModel.isServerURLExpanded ? 90 : 0))
                 }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("login.server.expand")
 
             loginServerPicker
 
@@ -297,9 +300,12 @@ struct LoginView: View {
             }
             .font(.subheadline)
             .foregroundStyle(.secondary)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .padding(.top, 4)
+        .accessibilityIdentifier("login.demo")
     }
 
     // MARK: - Actions

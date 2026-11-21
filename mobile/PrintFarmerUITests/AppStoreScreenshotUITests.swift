@@ -156,7 +156,8 @@ class ScreenshotCaptureUITestCase: QueueUITestBase {
                 // Handle every finding in the receipt; the catalog test fails
                 // after all screens so one defect cannot hide later audits.
                 try app.performAccessibilityAudit(for: .all) { issue in
-                    auditIssues.append("\(issue.compactDescription): \(issue.detailedDescription)")
+                    let element = issue.element?.debugDescription ?? "Element unavailable"
+                    auditIssues.append("\(issue.compactDescription): \(issue.detailedDescription)\n\(element)")
                     return true
                 }
                 // The audit changes Dynamic Type temporarily. Require the original
@@ -587,6 +588,11 @@ final class CatalogRootVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         XCTAssertTrue(app.textFields["usernameField"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.secureTextFields["passwordField"].exists)
         XCTAssertTrue(app.buttons["loginButton"].exists)
+        for identifier in ["login.server.expand", "login.demo"] {
+            let button = app.buttons[identifier]
+            XCTAssertTrue(button.exists, "\(identifier) must be available on the login screen.")
+            XCTAssertGreaterThanOrEqual(button.frame.height, 44, "\(identifier) needs a 44-point target.")
+        }
         try capture("22-login")
     }
 

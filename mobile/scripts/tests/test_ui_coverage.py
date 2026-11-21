@@ -123,7 +123,11 @@ class CoverageReportTests(unittest.TestCase):
         self.assertEqual(set(MODULE.validate_catalog(self.catalog)), set(captures))
         self.assertEqual(len(captures), 52)
         self.assertIn("try app.performAccessibilityAudit(for: .all)", source)
-        self.assertIn('auditIssues.append("\\(issue.compactDescription): \\(issue.detailedDescription)")', source)
+        self.assertIn('issue.element?.debugDescription ?? "Element unavailable"', source)
+        self.assertIn(
+            'auditIssues.append("\\(issue.compactDescription): \\(issue.detailedDescription)\\n\\(element)")',
+            source,
+        )
         self.assertIn("XCTAssertTrue(catalogAuditFailures.isEmpty", source)
 
     def test_scenario_profiles_are_strict_and_cannot_change_environment_pins(self):
