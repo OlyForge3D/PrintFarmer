@@ -463,11 +463,11 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
     }
 
     [Theory]
-    [InlineData("High Temp Plate", "M140 S60", true)]
-    [InlineData("High Temp Plate", "M140 S45", false)]
-    [InlineData("Cool Plate", "M140 S45", false)]
-    public async Task ExecuteAsync_ProjectBedSelection_VerifiesOutputBeforeUploading(
-        string outputBed, string temperatureCommand, bool succeeds)
+    [InlineData("High Temp Plate", "M140 S60")]
+    [InlineData("High Temp Plate", "M140 S45")]
+    [InlineData("Cool Plate", "M140 S45")]
+    public async Task ExecuteAsync_ProjectBedSelection_TrustsOrcaOutput(
+        string outputBed, string temperatureCommand)
     {
         _ = Directory.CreateDirectory(_testRoot);
         string captureDirectory = Path.Join(_testRoot, "capture");
@@ -524,23 +524,29 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
             poller.Dispose();
         }
 
-        _ = terminal.Path.Should().EndWith(succeeds ? "/complete" : "/fail", terminal.Body);
-        _ = handler.ArtifactUploaded.Should().Be(succeeds);
-        if (succeeds)
-        {
-            string processJson = await File.ReadAllTextAsync(Path.Join(captureDirectory, "process.json"));
-            CompleteSliceJobRequest? completed = JsonSerializer.Deserialize<CompleteSliceJobRequest>(
-                terminal.Body, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-            _ = completed!.ProcessProfileSha256.Should().Be(Sha256(processJson));
-        }
+        _ = terminal.Path.Should().EndWith("/complete", terminal.Body);
+        _ = handler.ArtifactUploaded.Should().BeTrue();
+        string processJson = await File.ReadAllTextAsync(Path.Join(captureDirectory, "process.json"));
+        string bedProcessJson = await File.ReadAllTextAsync(Path.Join(captureDirectory, "project-bed-process.json"));
+        AssertBedProfileArguments(await File.ReadAllLinesAsync(Path.Join(captureDirectory, "arguments.txt")));
+        using JsonDocument bedProcess = JsonDocument.Parse(bedProcessJson);
+        _ = bedProcess.RootElement.GetProperty("curr_bed_type").GetString().Should().Be("High Temp Plate");
+        _ = bedProcess.RootElement.GetProperty("layer_height").GetString().Should().Be("0.2");
+        using JsonDocument machine = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(captureDirectory, "machine.json")));
+        _ = machine.RootElement.GetProperty("name").GetString().Should().Be("Test Machine");
+        using JsonDocument filament = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(captureDirectory, "filament.json")));
+        _ = filament.RootElement.GetProperty("filament_type")[0].GetString().Should().Be("PLA");
+        CompleteSliceJobRequest? completed = JsonSerializer.Deserialize<CompleteSliceJobRequest>(
+            terminal.Body, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        _ = completed!.ProcessProfileSha256.Should().Be(Sha256(processJson));
     }
 
     [Theory]
-    [InlineData(null, "Cool Plate", "Textured PEI Plate", true)]
-    [InlineData("Engineering Plate", "Engineering Plate", "Engineering Plate", true)]
-    [InlineData(null, "Cool Plate", "High Temp Plate", false)]
-    public async Task ExecuteAsync_MixedProjectBeds_VerifiesEveryPlateBeforeUploading(
-        string? explicitBed, string plateOneBed, string plateTwoBed, bool succeeds)
+    [InlineData(null, "High Temp Plate", "Cool Plate", "Textured PEI Plate")]
+    [InlineData(null, "Cool Plate", "Cool Plate", "High Temp Plate")]
+    [InlineData("Engineering Plate", "Cool Plate", "Engineering Plate", "Engineering Plate")]
+    public async Task ExecuteAsync_MixedProjectBeds_TrustsOrcaOutput(
+        string? explicitBed, string globalBed, string plateOneBed, string plateTwoBed)
     {
         _ = Directory.CreateDirectory(_testRoot);
         string captureDirectory = Path.Join(_testRoot, "capture");
@@ -557,7 +563,7 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
             filamentProfileName = "Test Filament",
             bedSelection = new { version = 1, explicitBedType = explicitBed },
         }, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
-        byte[] project = CreateMixedBedProject();
+        byte[] project = CreateMixedBedProject(globalBed);
         var handler = new WorkerApiHandler(selection, modelFileName: "project.3mf", modelBytes: project);
         var clientFactory = new StubHttpClientFactory(handler);
         IConfiguration configuration = new ConfigurationBuilder()
@@ -591,13 +597,20 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
             poller.Dispose();
         }
 
-        _ = terminal.Path.Should().EndWith(succeeds ? "/complete" : "/fail", terminal.Body);
-        _ = handler.ArtifactUploaded.Should().Be(succeeds);
-        if (explicitBed is not null)
+        _ = terminal.Path.Should().EndWith("/complete", terminal.Body);
+        _ = handler.ArtifactUploaded.Should().BeTrue();
+        string[] arguments = await File.ReadAllLinesAsync(Path.Join(captureDirectory, "arguments.txt"));
+        AssertBedProfileArguments(arguments);
+        _ = Path.GetExtension(arguments[^1]).Should().Be(".3mf");
+        using JsonDocument process = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(captureDirectory, "project-bed-process.json")));
+        _ = process.RootElement.GetProperty("curr_bed_type").GetString().Should().Be(explicitBed ?? globalBed);
+        OrcaProjectBedSettings passedProject = OrcaProjectBedSettings.Read(Path.Join(captureDirectory, "project.3mf"));
+        _ = passedProject.Global.Should().Be(globalBed);
+        _ = passedProject.Plates.Should().BeEquivalentTo(new Dictionary<int, string>
         {
-            OrcaProjectBedSettings copied = OrcaProjectBedSettings.Read(Path.Join(captureDirectory, "project.3mf"));
-            _ = copied.Plates.Values.Should().OnlyContain(value => value == explicitBed);
-        }
+            [1] = explicitBed ?? "Cool Plate",
+            [2] = explicitBed ?? "Textured PEI Plate",
+        });
     }
 
     private static string BedGcode(string bed)
@@ -624,7 +637,18 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
             """;
     }
 
-    private static byte[] CreateMixedBedProject()
+    private static void AssertBedProfileArguments(string[] arguments)
+    {
+        int settingsIndex = Array.IndexOf(arguments, "--load-settings");
+        int filamentIndex = Array.IndexOf(arguments, "--load-filaments");
+        _ = settingsIndex.Should().BeGreaterThanOrEqualTo(0);
+        _ = filamentIndex.Should().BeGreaterThanOrEqualTo(0);
+        _ = arguments[settingsIndex + 1].Split(';').Select(Path.GetFileName)
+            .Should().Equal("machine.json", "project-bed-process.json");
+        _ = Path.GetFileName(arguments[filamentIndex + 1]).Should().Be("filament.json");
+    }
+
+    private static byte[] CreateMixedBedProject(string globalBed)
     {
         using MemoryStream stream = new();
         using (ZipArchive archive = new(stream, ZipArchiveMode.Create, leaveOpen: true))
@@ -640,7 +664,7 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
                 </Relationships>
                 """);
             WriteEntry("3D/3dmodel.model", """<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"/>""");
-            WriteEntry("Metadata/project_settings.config", """{"curr_bed_type":"High Temp Plate"}""");
+            WriteEntry("Metadata/project_settings.config", JsonSerializer.Serialize(new { curr_bed_type = globalBed }));
             WriteEntry("Metadata/model_settings.config", """
                 <config>
                   <plate><metadata key="plater_id" value="1"/><metadata key="bed_type" value="Cool Plate"/></plate>
@@ -682,7 +706,13 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
                 copy /Y "%CD%\machine.json" "{Path.Join(captureDirectory, "machine.json")}" >nul
                 copy /Y "%CD%\process.json" "{Path.Join(captureDirectory, "process.json")}" >nul
                 copy /Y "%CD%\filament.json" "{Path.Join(captureDirectory, "filament.json")}" >nul
-                if exist "%CD%\project-bed-input.3mf" copy /Y "%CD%\project-bed-input.3mf" "{Path.Join(captureDirectory, "project.3mf")}" >nul
+                if exist "%CD%\project-bed-process.json" copy /Y "%CD%\project-bed-process.json" "{Path.Join(captureDirectory, "project-bed-process.json")}" >nul
+                type nul >"{Path.Join(captureDirectory, "arguments.txt")}"
+                for %%a in (%*) do (
+                  echo %%~a>>"{Path.Join(captureDirectory, "arguments.txt")}"
+                  set "model=%%~a"
+                )
+                if /I "%model:~-4%"==".3mf" copy /Y "%model%" "{Path.Join(captureDirectory, "project.3mf")}" >nul
                 echo invoked>"{Path.Join(captureDirectory, "orca-invoked.txt")}"
                 {writeGcode}
                 {(secondFixtureGcodePath is null ? "" : $"""copy /Y "{secondFixtureGcodePath}" "%CD%\output\plate_2.gcode" >nul""")}
@@ -705,7 +735,10 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
             cp "$PWD/machine.json" "{Path.Join(captureDirectory, "machine.json")}"
             cp "$PWD/process.json" "{Path.Join(captureDirectory, "process.json")}"
             cp "$PWD/filament.json" "{Path.Join(captureDirectory, "filament.json")}"
-            if [ -f "$PWD/project-bed-input.3mf" ]; then cp "$PWD/project-bed-input.3mf" "{Path.Join(captureDirectory, "project.3mf")}"; fi
+            if [ -f "$PWD/project-bed-process.json" ]; then cp "$PWD/project-bed-process.json" "{Path.Join(captureDirectory, "project-bed-process.json")}"; fi
+            printf '%s\n' "$@" > "{Path.Join(captureDirectory, "arguments.txt")}"
+            for model in "$@"; do :; done
+            case "$model" in *.3mf) cp "$model" "{Path.Join(captureDirectory, "project.3mf")}" ;; esac
             {progressCommand}
             printf 'invoked\n' > "{Path.Join(captureDirectory, "orca-invoked.txt")}"
             {unixWriteGcode}

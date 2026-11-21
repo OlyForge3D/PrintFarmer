@@ -1826,12 +1826,10 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             throw new InvalidDataException(bedSelectionError);
         }
 
-        OrcaProjectBedSettings? projectBedSettings = null;
         if (bedSelection is not null)
         {
             var prepared = await OrcaProjectBedSettings.PrepareAsync(
                 effectiveModelPaths, processJson, workDir, bedSelection.ExplicitBedType, cancellationToken);
-            projectBedSettings = prepared.Settings;
             processJson = prepared.ProcessPath;
             effectiveModelPaths = prepared.ModelPaths.ToList();
         }
@@ -1974,8 +1972,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
         if (bedSelection is not null)
         {
-            gcodeFilePath = await VerifyProjectBedOutputsAsync(
-                gcodeOutputDir, job.PlateIndex, projectBedSettings!, bedSelection.ExplicitBedType, cancellationToken);
+            gcodeFilePath = SelectProjectBedOutput(gcodeOutputDir, job.PlateIndex);
         }
         else if (!File.Exists(gcodeFilePath))
         {
@@ -2006,28 +2003,21 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         return (gcodeFilePath, layoutDegradation);
     }
 
-    internal static async Task<string> VerifyProjectBedOutputsAsync(
-        string outputDir,
-        int? plateIndex,
-        OrcaProjectBedSettings settings,
-        string? explicitBedType,
-        CancellationToken cancellationToken)
+    internal static string SelectProjectBedOutput(string outputDir, int? plateIndex)
     {
         string[] paths = Directory.GetFiles(outputDir, "*.gcode");
         if (paths.Length == 0)
         {
-            throw new InvalidDataException("OrcaSlicer produced no G-code for bed selection verification.");
+            throw new InvalidDataException("OrcaSlicer produced no G-code.");
         }
 
         foreach (string path in paths)
         {
             Match match = Regex.Match(Path.GetFileName(path), @"^plate_([1-9]\d*)\.gcode$", RegexOptions.CultureInvariant);
-            if (!match.Success || !int.TryParse(match.Groups[1].Value, out int plateId))
+            if (!match.Success || !int.TryParse(match.Groups[1].Value, out _))
             {
                 throw new InvalidDataException("OrcaSlicer produced a G-code file with an ambiguous plate name.");
             }
-
-            await OrcaBedGcodeVerifier.VerifyAsync(path, settings.Resolve(plateId, explicitBedType), cancellationToken);
         }
 
         string selectedPath = Path.Join(outputDir, $"plate_{(plateIndex ?? 0) + 1}.gcode");

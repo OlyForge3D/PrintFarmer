@@ -877,8 +877,11 @@ public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime, IDispo
         selected.RawJson = """{"inherits":"Intermediate","printer_model":"Custom","custom_key":"child"}""";
         db.MachineProfiles.Add(new MachineProfile
         {
-            Id = Guid.NewGuid(), Name = "Intermediate", SlicerType = SlicerType.OrcaSlicer,
-            CreatedByUserId = userId, IsPublic = false,
+            Id = Guid.NewGuid(),
+            Name = "Intermediate",
+            SlicerType = SlicerType.OrcaSlicer,
+            CreatedByUserId = userId,
+            IsPublic = false,
             RawJson = """{"inherits":"Base Machine","custom_key":"parent","parent_key":"retained"}""",
         });
         await db.SaveChangesAsync();
@@ -993,8 +996,12 @@ public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime, IDispo
             case "ambiguous-machine-parent":
                 db.MachineProfiles.Add(new MachineProfile
                 {
-                    Id = Guid.NewGuid(), Name = "Base Machine", SlicerType = SlicerType.OrcaSlicer,
-                    CreatedByUserId = userId, IsPublic = false, RawJson = """{"inherits":"Other"}""",
+                    Id = Guid.NewGuid(),
+                    Name = "Base Machine",
+                    SlicerType = SlicerType.OrcaSlicer,
+                    CreatedByUserId = userId,
+                    IsPublic = false,
+                    RawJson = """{"inherits":"Other"}""",
                 });
                 break;
             case "unresolved-machine-parent":
@@ -1007,8 +1014,12 @@ public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime, IDispo
                 (await db.MachineProfiles.SingleAsync()).RawJson = """{"inherits":"Private Parent"}""";
                 db.MachineProfiles.Add(new MachineProfile
                 {
-                    Id = Guid.NewGuid(), Name = "Private Parent", SlicerType = SlicerType.OrcaSlicer,
-                    CreatedByUserId = userId, IsPublic = false, RawJson = """{"inherits":"Base Machine"}""",
+                    Id = Guid.NewGuid(),
+                    Name = "Private Parent",
+                    SlicerType = SlicerType.OrcaSlicer,
+                    CreatedByUserId = userId,
+                    IsPublic = false,
+                    RawJson = """{"inherits":"Base Machine"}""",
                 });
                 break;
         }

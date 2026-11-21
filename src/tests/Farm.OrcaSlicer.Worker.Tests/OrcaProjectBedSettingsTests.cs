@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using Farm.OrcaSlicer.Worker.Services;
@@ -9,6 +9,30 @@ namespace Farm.OrcaSlicer.Worker.Tests;
 
 public sealed class OrcaProjectBedSettingsTests
 {
+    [Fact]
+    public void SelectProjectBedOutput_RequiresUnambiguousRequestedPlate()
+    {
+        string directory = Path.Join(Path.GetTempPath(), $"orca-bed-output-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string plateOne = Path.Join(directory, "plate_1.gcode");
+            string plateTwo = Path.Join(directory, "plate_2.gcode");
+            File.WriteAllText(plateOne, "arbitrary Orca output");
+            File.WriteAllText(plateTwo, "arbitrary Orca output");
+            _ = OrcaSlicingPipelineService.SelectProjectBedOutput(directory, 1).Should().Be(plateTwo);
+            _ = ((Action)(() => OrcaSlicingPipelineService.SelectProjectBedOutput(directory, 2)))
+                .Should().Throw<InvalidDataException>().WithMessage("*requested plate*");
+            File.WriteAllText(Path.Join(directory, "ambiguous.gcode"), "arbitrary Orca output");
+            _ = ((Action)(() => OrcaSlicingPipelineService.SelectProjectBedOutput(directory, 0)))
+                .Should().Throw<InvalidDataException>().WithMessage("*ambiguous plate name*");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Fact]
     public void Read_SeparatesGlobalAndPerPlateSelections()
     {

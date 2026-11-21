@@ -1245,16 +1245,27 @@ export const NewSliceJobPage: React.FC = () => {
   const bedModelId = bedModelProfiles?.length === 1 && typeof bedModelProfiles[0].settings.model_id === 'string'
     ? bedModelProfiles[0].settings.model_id : undefined;
 
-  // Machine names for filament/process queries (just the selected machine)
+  // Machine profiles are scoped to the selected printer before resolving families.
+  const customMachineProfiles = useMemo(() => {
+    const allCustomMachine = customProfilesData?.profiles?.filter(p => p.profileType === 'machine') ?? [];
+    return filterCustomMachineProfiles(
+      allCustomMachine,
+      selectedPrinterModelId,
+      selectedPrinterForSlicing?.manufacturerName,
+      selectedPrinterForSlicing?.modelName,
+    );
+  }, [customProfilesData, selectedPrinterForSlicing, selectedPrinterModelId]);
+
   const selectedMachineNames = useMemo(() => {
     if (!selectedMachineProfile?.name) return [];
     return [selectedMachineProfile.name];
   }, [selectedMachineProfile]);
   const filamentMachineNames = useMemo(() => {
-    if (!selectedMachineProfile || machineProfilesData.includes(selectedMachineProfile)
-      || !selectedMachineProfile.inherits) return selectedMachineNames;
-    return [...new Set([...selectedMachineNames, selectedMachineProfile.inherits])];
-  }, [machineProfilesData, selectedMachineNames, selectedMachineProfile]);
+    if (!selectedMachineProfile) return [];
+    return filamentFamilyMachineNames(
+      selectedMachineProfile, machineSelection.customId, machineProfilesData, customMachineProfiles,
+    );
+  }, [selectedMachineProfile, machineSelection.customId, machineProfilesData, customMachineProfiles]);
   const processMachineNames = useMemo(() =>
     inheritedMachine ? [...selectedMachineNames, inheritedMachine.name] : selectedMachineNames,
   [inheritedMachine, selectedMachineNames]);
@@ -1274,30 +1285,13 @@ export const NewSliceJobPage: React.FC = () => {
     processMachineNames,
   });
 
-  // Filter custom profiles by type for each selector.
-  // Machine profiles are scoped by the authoritative catalog PrinterModel
-  // association (printerModelId). Legacy profiles without that association fall
-  // back to fuzzy manufacturer/model matching so they remain usable.
-  const customMachineProfiles = useMemo(() => {
-    const allCustomMachine = customProfilesData?.profiles?.filter(p => p.profileType === 'machine') ?? [];
-    return filterCustomMachineProfiles(
-      allCustomMachine,
-      selectedPrinterModelId,
-      selectedPrinterForSlicing?.manufacturerName,
-      selectedPrinterForSlicing?.modelName,
-    );
-  }, [customProfilesData, selectedPrinterForSlicing, selectedPrinterModelId]);
-
   // Filament profiles filtered by selected machine profile compatibility
   const customFilamentProfiles = useMemo(() => {
     const allCustomFilament = customProfilesData?.profiles?.filter(p => p.profileType === 'filament') ?? [];
     if (!selectedMachineProfileId) return allCustomFilament;
     if (!selectedMachineProfile) return [];
-    const familyNames = filamentFamilyMachineNames(
-      selectedMachineProfile, machineSelection.customId, machineProfilesData, customMachineProfiles,
-    );
-    return allCustomFilament.filter(p => customFilamentMatchesMachine(p, familyNames));
-  }, [customProfilesData, selectedMachineProfileId, selectedMachineProfile, machineSelection.customId, machineProfilesData, customMachineProfiles]);
+    return allCustomFilament.filter(p => customFilamentMatchesMachine(p, filamentMachineNames));
+  }, [customProfilesData, selectedMachineProfileId, selectedMachineProfile, filamentMachineNames]);
 
   // Process profiles are scoped by the authoritative catalog PrinterModel
   // association (printerModelId). Legacy profiles without that association fall

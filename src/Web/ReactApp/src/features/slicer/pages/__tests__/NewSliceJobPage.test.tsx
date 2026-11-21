@@ -1390,10 +1390,14 @@ describe('NewSliceJobPage', () => {
         ...customFilament, id: 'other-filament', name: 'Other PLA',
         rawJson: JSON.stringify({ compatible_printers: ['Qidi X-Plus 4 0.6 nozzle'] }),
       };
+      const universalFilament = {
+        ...customFilament, id: 'universal-filament', name: 'Universal PLA',
+        rawJson: JSON.stringify({}),
+      };
       const systemFilament = { ...mockFilamentProfiles[0], name: 'Qidi PLA Basic', compatible_printers: [parent] };
       vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
-        profiles: [customMachine, customFilament, otherFilament],
-        totalCount: 3, machineProfileCount: 1, processProfileCount: 0, filamentProfileCount: 2,
+        profiles: [customMachine, customFilament, otherFilament, universalFilament],
+        totalCount: 4, machineProfileCount: 1, processProfileCount: 0, filamentProfileCount: 3,
       });
       vi.mocked(slicerProfilesService.getFilamentProfilesForMachines).mockImplementation(async names =>
         names.includes(parent) ? [systemFilament] : []);
@@ -1411,8 +1415,52 @@ describe('NewSliceJobPage', () => {
       fireEvent.click(within(picker).getByRole('button', { name: /Generic/ }));
       expect(await within(picker).findByRole('button', { name: 'Qidi PLA Basic' })).toBeInTheDocument();
       expect(within(picker).getByRole('button', { name: /My Qidi PLA/ })).toBeInTheDocument();
+      expect(within(picker).getByRole('button', { name: /Universal PLA/ })).toBeInTheDocument();
       expect(within(picker).queryByRole('button', { name: /Other PLA/ })).not.toBeInTheDocument();
     });
+
+    it.each(['system clone', 'nested custom chain'])(
+      'fetches stock filament presets for a %s',
+      async origin => {
+        const machine = {
+          name: 'Qidi X-Plus 4 0.4 nozzle', manufacturer: 'Qidi',
+          printerModel: 'Qidi X-Plus 4', nozzleDiameter: 0.4, settings: {},
+        };
+        const parent = {
+          id: 'custom-parent', name: 'Qidi parent', profileType: 'machine' as const,
+          printerModelId: 'model-1', isSystem: false, createdAt: '2026-01-01',
+          rawJson: JSON.stringify({ inherits: machine.name }),
+        };
+        const custom = {
+          ...parent, id: 'custom-selected', name: 'My Qidi',
+          rawJson: JSON.stringify(origin === 'system clone'
+            ? { from: 'system', name: machine.name }
+            : { inherits: parent.name }),
+        };
+        const profiles = origin === 'system clone' ? [custom] : [custom, parent];
+        const filament = { ...mockFilamentProfiles[0], name: 'Qidi PLA Basic', compatible_printers: [machine.name] };
+        vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([machine]);
+        vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
+          profiles, totalCount: profiles.length, machineProfileCount: profiles.length,
+          processProfileCount: 0, filamentProfileCount: 0,
+        });
+        vi.mocked(slicerProfilesService.getFilamentProfilesForMachines).mockImplementation(async names =>
+          names.includes(machine.name) ? [filament] : []);
+        localStorage.setItem('sliceJob.selectedPrinterId', 'printer-1');
+        localStorage.setItem('sliceJob.selectedMachineProfileId', custom.name);
+        localStorage.setItem('sliceJob.selectedMachineProfileId.customId', custom.id);
+        renderWithProviders(<NewSliceJobPage />);
+
+        await waitFor(() => expect(slicerProfilesService.getFilamentProfilesForMachines)
+          .toHaveBeenLastCalledWith(expect.arrayContaining([custom.name, machine.name]), expect.anything()));
+        const section = await screen.findByTestId('single-filament-section');
+        fireEvent.click(within(section).getAllByRole('button')
+          .find(button => button.getAttribute('aria-haspopup') === 'dialog')!);
+        const picker = await screen.findByRole('dialog', { name: 'Filament selector' });
+        fireEvent.click(within(picker).getByRole('button', { name: /Generic/ }));
+        expect(await within(picker).findByRole('button', { name: 'Qidi PLA Basic' })).toBeInTheDocument();
+      },
+    );
 
     it.each([false, true])('submits source-qualified same-name selections (multi-toolhead: %s)', async multi => {
       const machine = {
