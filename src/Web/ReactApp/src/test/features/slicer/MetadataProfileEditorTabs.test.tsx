@@ -6,7 +6,7 @@
  * differs from the original snapshot is rendered in the "modified" (warning) color.
  */
 import { describe, it, expect } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import metadata from '@/features/slicer/generated/orcaSettingsMetadata.json';
 import { MetadataProfileEditor } from '@/features/slicer/components/settings/MetadataProfileRenderer';
@@ -35,6 +35,16 @@ function tabButtons(container: HTMLElement): HTMLButtonElement[] {
 }
 
 describe('MetadataProfileEditor — OrcaSlicer-style tabs', () => {
+  it('provides a settings-view toggle by default but hides it when the caller passes null', () => {
+    const props = { profileType: 'process' as const, settings: {}, onUpdate: () => {} };
+    const { rerender } = render(<MetadataProfileEditor {...props} />);
+    const name = /^Settings view:/;
+    expect(screen.getByRole('button', { name })).toBeInTheDocument();
+
+    rerender(<MetadataProfileEditor {...props} viewModeControl={null} />);
+    expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+  });
+
   it('renders the selected tab bold with an accent underline and unselected tabs muted/normal', () => {
     const { container } = render(
       <MetadataProfileEditor profileType="process" settings={{}} onUpdate={() => {}} />,

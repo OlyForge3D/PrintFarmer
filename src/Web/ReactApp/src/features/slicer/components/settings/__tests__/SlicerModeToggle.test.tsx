@@ -16,17 +16,24 @@ describe('SlicerModeToggle', () => {
     expect(button).toHaveTextContent('');
   });
 
-  it('moves the knob to the selected level and cycles to the next level on click', () => {
+  const pair = ['Basic', 'Advanced'] as const;
+  const trio = ['Simple', 'Basic', 'Advanced'] as const;
+  it.each([
+    { levels: pair, value: 'Basic', offset: '0rem', next: 'Advanced' },
+    { levels: pair, value: 'Advanced', offset: '0.75rem', next: 'Basic' },
+    { levels: trio, value: 'Simple', offset: '0rem', next: 'Basic' },
+    { levels: trio, value: 'Basic', offset: '0.75rem', next: 'Advanced' },
+    { levels: trio, value: 'Advanced', offset: '1.5rem', next: 'Simple' },
+  ] as const)('places $value at $offset and cycles to $next ($levels)', ({ levels, value, offset, next }) => {
     const onChange = vi.fn();
-    const levels = ['Simple', 'Basic', 'Advanced'] as const;
-    render(<SlicerModeToggle levels={levels} value="Basic" onChange={onChange} />);
+    render(<SlicerModeToggle levels={levels} value={value} onChange={onChange} />);
 
-    const button = screen.getByRole('button', { name: 'Settings view: Basic' });
+    const button = screen.getByRole('button', { name: `Settings view: ${value}` });
     const knob = button.querySelector<HTMLElement>('.shadow-sm');
-    expect(knob?.style.transform).toBe('translateX(0.75rem)');
+    expect(knob?.style.transform).toBe(`translateX(${offset})`);
 
     fireEvent.click(button);
-    expect(onChange).toHaveBeenCalledWith('Advanced');
+    expect(onChange).toHaveBeenCalledWith(next);
   });
 
   it('renders nothing when there is only one level to choose from', () => {

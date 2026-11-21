@@ -551,7 +551,7 @@ vi.mock('@/features/models3d/components/3d/ViewerSkeleton', () => ({
 }));
 
 vi.mock('@/features/slicer/components/settings', () => ({
-  SlicerSettingsPanel: ({ viewModeControl }: { viewModeControl?: React.ReactNode }) => (
+  SlicerSettingsPanel: ({ viewModeControl = <button type="button">Settings view: Basic</button> }: { viewModeControl?: React.ReactNode }) => (
     <div data-testid="slicer-settings-panel">
       Settings Panel
       {viewModeControl}
