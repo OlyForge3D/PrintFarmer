@@ -38,7 +38,11 @@ vi.mock('@/services/api', () => ({
 vi.mock('@/services/slicerProfilesService', () => ({
   slicerProfilesService: {
     getMachineProfilesForModel: vi.fn(() => Promise.resolve([
-      { name: 'Machine A', manufacturer: 'Prusa', nozzleDiameter: 0.4 },
+      { name: 'Machine A', manufacturer: 'Prusa', nozzleDiameter: 0.4, printerModel: 'MK4',
+        inheritanceResolved: true, settings: { support_multi_bed_types: '1' } },
+    ])),
+    getWorkerMachineModels: vi.fn(() => Promise.resolve([
+      { name: 'MK4', manufacturer: 'Prusa', settings: { model_id: 'MK4' } },
     ])),
     getFilamentProfilesForMachines: vi.fn(() => Promise.resolve([
       { name: 'PLA Generic', material: 'PLA', nozzleTemperature: 210, bedTemperature: 60, printSpeed: 60, compatible_printers: ['Machine A'] },
@@ -268,10 +272,10 @@ describe('QuickSliceModal', () => {
   });
 
   describe('bed type override', () => {
-    it('hides the selector and submits no bed override for a single-bed machine', async () => {
+    it('hides the selector and submits the native default for a single-bed machine', async () => {
       vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValueOnce([
-        { name: 'Micron representative', manufacturer: 'Voron', settings: {
-          curr_bed_type: 'Textured PEI Plate', support_multi_bed_types: '0',
+        { name: 'Micron representative', manufacturer: 'Voron', printerModel: 'MK4', inheritanceResolved: true, settings: {
+          default_bed_type: '4', support_multi_bed_types: '0',
         } },
       ]);
       vi.mocked(slicerProfilesService.getFilamentProfilesForMachines).mockResolvedValueOnce([
@@ -287,7 +291,7 @@ describe('QuickSliceModal', () => {
       fireEvent.click(screen.getByRole('button', { name: /^Slice$/ }));
       await waitFor(() => expect(mockSubmitJob).toHaveBeenCalledOnce());
       expect(JSON.parse(mockSubmitJob.mock.calls[0][0].slicerProfileJson).overrides)
-        .not.toHaveProperty('curr_bed_type');
+        .toHaveProperty('curr_bed_type', 'Textured PEI Plate');
     });
 
     it('defaults to "Inherit from profile"', async () => {
@@ -327,7 +331,7 @@ describe('QuickSliceModal', () => {
       });
     });
 
-    it('omits bed type from overrides when inherit is selected', async () => {
+    it('sends the native default when inherit is selected for an STL', async () => {
       renderModal();
 
       await waitFor(() => {
@@ -340,13 +344,24 @@ describe('QuickSliceModal', () => {
         expect(mockSubmitJob).toHaveBeenCalled();
         const submittedRequest = mockSubmitJob.mock.calls.at(-1)?.[0];
         expect(submittedRequest?.slicerProfileJson).toEqual(expect.any(String));
-        expect(submittedRequest?.slicerProfileJson).not.toContain('curr_bed_type');
+        expect(JSON.parse(submittedRequest!.slicerProfileJson).overrides.curr_bed_type).toBe('High Temp Plate');
         expect(submittedRequest?.profileSelections).toEqual({
           machine: { source: 'system', name: 'Machine A' },
           process: { source: 'system', name: '0.20mm Standard' },
           filaments: [{ source: 'system', name: 'PLA Generic' }],
         });
       });
+
+    });
+
+    it('preserves project plate precedence for an extensionless 3MF', async () => {
+      renderModal({ model: { ...mockModel, fileName: 'project', fileType: '3mf' } });
+      await screen.findByLabelText('Bed Type');
+      await waitFor(() => expect(screen.getByRole('button', { name: /^Slice$/ })).toBeEnabled());
+      fireEvent.click(screen.getByRole('button', { name: /^Slice$/ }));
+      await waitFor(() => expect(mockSubmitJob).toHaveBeenCalled());
+      expect(JSON.parse(mockSubmitJob.mock.calls.at(-1)![0].slicerProfileJson).overrides)
+        .not.toHaveProperty('curr_bed_type');
     });
   });
 

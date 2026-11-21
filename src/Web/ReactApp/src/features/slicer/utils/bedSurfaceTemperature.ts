@@ -10,9 +10,46 @@ const BED_TEMPERATURE_KEYS = new Map([
 
 type Settings = Record<string, unknown> | undefined;
 
+const NATIVE_BED_TYPES = [
+  'Cool Plate', 'Engineering Plate', 'High Temp Plate',
+  'Textured PEI Plate', 'Textured Cool Plate', 'Supertack Plate',
+];
+
 export interface FilamentBedContext {
   bedType?: string;
   supportMultiBedTypes?: boolean;
+}
+
+/** Matches Preset::get_bed_type for a resolved printer preset and model. */
+export function getNativeDefaultBedType(machine: Settings, modelId: string | undefined): string | undefined {
+  if (!machine) return undefined;
+  const raw = machine.default_bed_type;
+  if (raw !== undefined && raw !== null && typeof raw !== 'string') return undefined;
+  if (typeof raw === 'string' && raw !== '') {
+    const number = Number.parseInt(raw, 10);
+    if (!Number.isFinite(number) || number <= 0) return 'High Temp Plate';
+    return NATIVE_BED_TYPES[number - 1];
+  }
+  if (!modelId) return undefined;
+  return ['BL-P001', 'BL-P002', 'C13'].includes(modelId) ? 'Cool Plate' : 'High Temp Plate';
+}
+
+export function getNativeBedContext(
+  machine: Settings,
+  modelId: string | undefined,
+  manufacturer: string | undefined,
+  selectedBedType: string,
+): FilamentBedContext {
+  if (!machine) return {};
+  const vendor = manufacturer?.trim().toLowerCase();
+  const flag = machine.support_multi_bed_types;
+  const multi = ['bbl', 'bambu', 'bambu lab', 'bambulab'].includes(vendor ?? '')
+    ? true : flag === undefined ? false : readNativeBoolean(flag);
+  const defaultBed = getNativeDefaultBedType(machine, modelId);
+  return {
+    supportMultiBedTypes: multi,
+    bedType: multi === true && selectedBedType ? readBedType(selectedBedType) : defaultBed,
+  };
 }
 
 function readNativeBoolean(value: unknown): boolean | undefined {

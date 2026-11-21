@@ -2,8 +2,43 @@ import { describe, expect, it } from 'vitest';
 import {
   getFilamentBedContext,
   getFilamentEditorBedContext,
+  getNativeBedContext,
+  getNativeDefaultBedType,
   getSingleBedTemperatureKey, isBedTemperatureSettingVisible, resolveBedType,
 } from '@/features/slicer/utils/bedSurfaceTemperature';
+
+describe('Orca printer preset bed defaults', () => {
+  it.each([
+    ['1', 'Cool Plate'],
+    ['2', 'Engineering Plate'],
+    ['3', 'High Temp Plate'],
+    ['4', 'Textured PEI Plate'],
+    ['5', 'Textured Cool Plate'],
+    ['6', 'Supertack Plate'],
+    ['0', 'High Temp Plate'],
+    ['bad', 'High Temp Plate'],
+  ])('maps native default %s to %s', (value, expected) => {
+    expect(getNativeDefaultBedType({ default_bed_type: value }, 'model')).toBe(expected);
+  });
+
+  it('uses the native model fallback only when a model is known', () => {
+    expect(getNativeDefaultBedType({}, 'BL-P001')).toBe('Cool Plate');
+    expect(getNativeDefaultBedType({}, 'C13')).toBe('Cool Plate');
+    expect(getNativeDefaultBedType({}, 'other')).toBe('High Temp Plate');
+    expect(getNativeDefaultBedType({}, undefined)).toBeUndefined();
+    expect(getNativeDefaultBedType({ default_bed_type: '7' }, 'other')).toBeUndefined();
+    expect(getNativeDefaultBedType(undefined, 'other')).toBeUndefined();
+  });
+
+  it('uses the default for single-bed printers and selection for multi-bed printers', () => {
+    expect(getNativeBedContext({ default_bed_type: '4' }, 'other', 'Qidi', 'Cool Plate'))
+      .toEqual({ supportMultiBedTypes: false, bedType: 'Textured PEI Plate' });
+    expect(getNativeBedContext({ default_bed_type: '4' }, 'other', 'BBL', 'Cool Plate'))
+      .toEqual({ supportMultiBedTypes: true, bedType: 'Cool Plate' });
+    expect(getNativeBedContext({ support_multi_bed_types: 'invalid' }, 'other', 'Qidi', ''))
+      .toEqual({ supportMultiBedTypes: undefined, bedType: 'High Temp Plate' });
+  });
+});
 
 describe('native bed-surface profile values', () => {
   it('follows explicit override, then process, then machine with no arbitrary fallback', () => {

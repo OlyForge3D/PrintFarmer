@@ -122,12 +122,16 @@ const mockMachineProfiles: OrcaMachineProfile[] = [
     manufacturer: 'Prusa',
     nozzleDiameter: 0.4,
     printerModel: 'MK4',
+    inheritanceResolved: true,
+    settings: {},
   },
   {
     name: 'Prusa MK4 0.6 nozzle',
     manufacturer: 'Prusa',
     nozzleDiameter: 0.6,
     printerModel: 'MK4',
+    inheritanceResolved: true,
+    settings: {},
   }
 ];
 
@@ -280,6 +284,9 @@ vi.mock('@/services/slicerProfilesService', () => ({
   slicerProfilesService: {
     listExtended: vi.fn(() => Promise.resolve(mockProfilesSummary)),
     getMachineProfilesForModel: vi.fn(() => Promise.resolve(mockMachineProfiles)),
+    getWorkerMachineModels: vi.fn(() => Promise.resolve([
+      { name: 'MK4', manufacturer: 'Prusa', settings: { model_id: 'MK4' } },
+    ])),
     getFilamentProfilesForMachines: vi.fn(() => Promise.resolve(mockFilamentProfiles)),
     getProcessProfilesForMachines: vi.fn(() => Promise.resolve(mockProcessProfiles)),
     listCustomProfiles: vi.fn(() => Promise.resolve({ profiles: [], totalCount: 0 })),
@@ -1590,7 +1597,7 @@ describe('NewSliceJobPage', () => {
 
     it('sends the explicitly selected native surface for a multi-bed machine', async () => {
       vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
-        { ...mockMachineProfiles[0], settings: { curr_bed_type: 'High Temp Plate', support_multi_bed_types: '1' } },
+        { ...mockMachineProfiles[0], settings: { printer_model: 'MK4', support_multi_bed_types: '1' } },
       ]);
       vi.mocked(slicerProfilesService.getFilamentProfilesForMachines).mockResolvedValue([
         { ...mockFilamentProfiles[0], bedTemperature: 0, settings: {
@@ -1599,7 +1606,7 @@ describe('NewSliceJobPage', () => {
         } },
       ]);
       renderWithProviders(<NewSliceJobPage />, { route: '/slicer?modelId=model-3d-1' });
-      await screen.findByRole('option', { name: 'Inherit from profile (High Temp Plate)' });
+      await screen.findByRole('option', { name: 'Default (High Temp Plate)' });
       const filamentSection = await screen.findByTestId('single-filament-section');
       fireEvent.click(within(filamentSection).getAllByRole('button')
         .find(button => button.getAttribute('aria-haspopup') === 'dialog')!);
@@ -1626,7 +1633,7 @@ describe('NewSliceJobPage', () => {
 
     it('passes the active surface and machine single-bed flag into the filament editor', async () => {
       vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
-        { ...mockMachineProfiles[0], inheritanceResolved: true, settings: { curr_bed_type: 'Textured PEI Plate', support_multi_bed_types: '0' } },
+        { ...mockMachineProfiles[0], inheritanceResolved: true, settings: { default_bed_type: '4', support_multi_bed_types: '0' } },
       ]);
       vi.mocked(slicerProfilesService.getProcessProfilesForMachines).mockResolvedValue(
         mockProcessProfiles.map(profile => ({ ...profile, inheritanceResolved: true, settings: {} })),
@@ -1643,15 +1650,17 @@ describe('NewSliceJobPage', () => {
       expect(screen.queryByText(/\d+°C/)).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Filament profile options menu' }));
       fireEvent.click(screen.getByRole('button', { name: 'Edit settings' }));
-      await waitFor(() => expect(screen.getByTitle('Textured Plate first layer')).toHaveValue(65));
-      expect(screen.queryByTitle('Smooth PEI / High Temp Plate first layer')).not.toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByTitle('Textured Plate first layer')).toHaveValue(65);
+        expect(screen.queryByTitle('Smooth PEI / High Temp Plate first layer')).not.toBeInTheDocument();
+      });
     });
 
-    it('keeps all surfaces for a partial custom machine even when its catalog parent is resolved', async () => {
+    it('uses the native default for a custom machine with a parent outside the selected catalog model', async () => {
       const machine = {
         name: 'Qidi X-Plus 4 0.4 nozzle', manufacturer: 'Qidi', printerModel: 'Qidi X-Plus 4',
         nozzleDiameter: 0.4, inheritanceResolved: true,
-        settings: { support_multi_bed_types: ['0'], curr_bed_type: 'Textured PEI Plate' },
+        settings: { support_multi_bed_types: ['0'] },
       };
       const custom = {
         id: 'qidi-custom', name: 'qp4-1-Qidi X-Plus 4', profileType: 'machine' as const,
@@ -1659,8 +1668,11 @@ describe('NewSliceJobPage', () => {
         rawJson: JSON.stringify({ inherits: machine.name, printer_model: machine.printerModel, nozzle_diameter: ['0.4'] }),
       };
       const process = { ...mockProcessProfiles[0], name: '0.20mm Standard @Qidi XPlus4',
-        compatible_printers: [machine.name], inheritanceResolved: true, settings: {} };
-      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([machine]);
+        compatible_printers: [custom.name], inheritanceResolved: true, settings: {} };
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue(mockMachineProfiles);
+      vi.mocked(slicerProfilesService.getWorkerHierarchy).mockResolvedValue({
+        byHierarchy: {}, machineProfiles: { Qidi: [machine] },
+      });
       vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
         profiles: [custom], totalCount: 1, machineProfileCount: 1, processProfileCount: 0, filamentProfileCount: 0,
       });
@@ -1670,12 +1682,16 @@ describe('NewSliceJobPage', () => {
       localStorage.setItem('sliceJob.selectedMachineProfileId.customId', custom.id);
       renderWithProviders(<NewSliceJobPage />, { route: '/slicer?modelId=model-stl-1' });
       await screen.findByRole('option', { name: /0\.20mm Standard @Qidi XPlus4/ });
+      await waitFor(() => expect(slicerProfilesService.getWorkerHierarchy).toHaveBeenCalledWith('2.4.2'));
       await screen.findByRole('button', { name: /Generic PLA @MK4/ });
       await waitFor(() => expect(slicerWorkspaceSpy.mock.calls.at(-1)?.[0].models).toHaveLength(1));
       fireEvent.click(screen.getByRole('button', { name: 'Filament profile options menu' }));
       fireEvent.click(screen.getByRole('button', { name: 'Edit settings' }));
-      expect(await screen.findByTitle('Cool Plate first layer')).toBeInTheDocument();
-      expect(screen.getByTitle('Textured Plate first layer')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByTitle('Smooth PEI / High Temp Plate first layer')).toBeInTheDocument();
+        expect(screen.queryByTitle('Cool Plate first layer')).not.toBeInTheDocument();
+        expect(screen.queryByTitle('Textured Plate first layer')).not.toBeInTheDocument();
+      });
     });
 
     it.each([
@@ -1684,7 +1700,7 @@ describe('NewSliceJobPage', () => {
       { machineResolved: true, modelId: 'model-3d-1', hidden: false },
     ])('uses the default only for complete non-3MF slice context: $machineResolved $modelId', async ({ machineResolved, modelId, hidden }) => {
       vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
-        { ...mockMachineProfiles[0], inheritanceResolved: machineResolved, settings: {} },
+        { ...mockMachineProfiles[0], inheritanceResolved: machineResolved, settings: { printer_model: 'MK4' } },
       ]);
       vi.mocked(slicerProfilesService.getProcessProfilesForMachines).mockResolvedValue(
         mockProcessProfiles.map(profile => ({ ...profile, inheritanceResolved: true, settings: {} })),
@@ -1694,8 +1710,10 @@ describe('NewSliceJobPage', () => {
       await waitFor(() => expect(slicerWorkspaceSpy.mock.calls.at(-1)?.[0].models).toHaveLength(1));
       fireEvent.click(screen.getByRole('button', { name: 'Filament profile options menu' }));
       fireEvent.click(screen.getByRole('button', { name: 'Edit settings' }));
-      expect(await screen.findByTitle('Cool Plate first layer')).toBeInTheDocument();
-      expect(!!screen.queryByTitle('Textured Plate first layer')).toBe(!hidden);
+      await waitFor(() => {
+        expect(screen.getByTitle('Smooth PEI / High Temp Plate first layer')).toBeInTheDocument();
+        expect(!!screen.queryByTitle('Textured Plate first layer')).toBe(!hidden);
+      });
     });
   });
 
@@ -2423,7 +2441,7 @@ describe('NewSliceJobPage', () => {
       // what reaches the wire) — not just at either layer in isolation.
       async function reachSubmittableStateViaUrl() {
         vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
-          { name: 'Prusa MK4S 0.4 nozzle', manufacturer: 'Prusa', nozzleDiameter: 0.4, printerModel: 'MK4S' },
+          { name: 'Prusa MK4S 0.4 nozzle', manufacturer: 'Prusa', nozzleDiameter: 0.4, printerModel: 'MK4S', inheritanceResolved: true, settings: { printer_model: 'MK4S' } },
         ] as OrcaMachineProfile[]);
         vi.mocked(slicerProfilesService.getProcessProfilesForMachines).mockResolvedValue([
           {
@@ -2604,12 +2622,10 @@ describe('NewSliceJobPage', () => {
       slicerModeRef.value = 'Simple';
     });
 
-    it('keeps the explicit bed surface selector available in advanced mode without forcing an override', async () => {
+    it('hides the explicit bed surface selector for a single-bed machine', async () => {
       renderWithProviders(<NewSliceJobPage />);
-
-      await waitFor(() => {
-        expect(screen.getByLabelText(/bed type/i)).toHaveValue('');
-      });
+      await screen.findByRole('button', { name: /Generic PLA @MK4/ });
+      expect(screen.queryByLabelText(/bed type/i)).not.toBeInTheDocument();
     });
   });
 

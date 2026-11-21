@@ -25,7 +25,7 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { getErrorMessage } from '@/common/utils/apiErrors';
 import { BedSurfaceSettings } from '@/features/slicer/components/BedSurfaceSettings';
-import { getFilamentBedContext } from '@/features/slicer/utils/bedSurfaceTemperature';
+import { getNativeBedContext } from '@/features/slicer/utils/bedSurfaceTemperature';
 import { buildSlicerProfileJson } from '@/features/slicer/utils/slicerProfilePayload';
 import type { Model } from '@/types/models';
 
@@ -127,6 +127,16 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
   const effectiveMachineProfileId = selectedMachineProfileId
     || (machineProfiles.length > 0 ? machineProfiles[0].name : '');
   const effectiveMachineProfile = machineProfiles.find(profile => profile.name === effectiveMachineProfileId);
+  const bedMachineModel = effectiveMachineProfile?.printerModel ?? effectiveMachineProfile?.printer_model;
+  const bedManufacturer = effectiveMachineProfile?.manufacturer;
+  const { data: bedModelProfiles } = useQuery({
+    queryKey: ['workerMachineModels', bedManufacturer, bedMachineModel, effectiveEngineVersion ?? null],
+    queryFn: () => slicerProfilesService.getWorkerMachineModels(bedManufacturer!, bedMachineModel!, effectiveEngineVersion),
+    enabled: !!bedManufacturer && !!bedMachineModel,
+    staleTime: 30_000,
+  });
+  const bedModelId = bedModelProfiles?.length === 1 && typeof bedModelProfiles[0].settings.model_id === 'string'
+    ? bedModelProfiles[0].settings.model_id : undefined;
 
   const machineNames = effectiveMachineProfileId ? [effectiveMachineProfileId] : [];
 
@@ -184,13 +194,14 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
     },
   });
 
-  const bedContext = getFilamentBedContext(
-    effectiveMachineProfile?.settings,
-    processProfiles.find(profile => profile.name === effectiveProcessProfileId)?.settings,
-    bedTypeOverride,
-    effectiveMachineProfile?.manufacturer,
+  const bedContext = getNativeBedContext(
+    effectiveMachineProfile?.inheritanceResolved === true ? effectiveMachineProfile.settings : undefined,
+    bedModelId, bedManufacturer, bedTypeOverride,
   );
-  const selectedBedType = bedContext.supportMultiBedTypes === false ? '' : bedTypeOverride;
+  const selectedBedType = bedContext.supportMultiBedTypes === true ? bedTypeOverride : '';
+  const projectMayOverrideBed = model.fileType === '3mf'
+    || !model.fileName || model.fileName.toLowerCase().endsWith('.3mf');
+  const sliceBedType = projectMayOverrideBed ? selectedBedType : bedContext.bedType;
 
   const handleSubmit = useCallback(() => {
     setError(null);
@@ -205,6 +216,10 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
     }
     if (!effectiveProcessProfileId) {
       setError('Select a process profile');
+      return;
+    }
+    if (!projectMayOverrideBed && !sliceBedType) {
+      setError('Unable to determine the printer bed type. Check the machine profile and worker availability.');
       return;
     }
 
@@ -266,7 +281,7 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
         filamentProfileName: effectiveFilamentProfileId,
         processPresetId: effectiveProcessProfileId,
         overrides: {},
-        bedType: selectedBedType,
+        bedType: sliceBedType,
       }),
       requiredCapabilitiesJson: '[]',
       priority: 1,
@@ -278,7 +293,8 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
     effectiveMachineProfileId,
     effectiveFilamentProfileId,
     effectiveProcessProfileId,
-    selectedBedType,
+    projectMayOverrideBed,
+    sliceBedType,
     submitMutation,
     user?.id,
     registeredEngines,
