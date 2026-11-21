@@ -34,7 +34,7 @@ interface SlicerSettingsPanelProps {
 
 /**
  * SlicerSettingsPanel — delegates entirely to MetadataProfileEditor.
- * All 344 process settings rendered from orcaSettingsMetadata.json,
+ * Renders tabbed process settings from orcaSettingsMetadata.json,
  * scoped to the pinned engine version when provided (issue #578).
  */
 export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({

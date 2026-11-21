@@ -139,8 +139,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
   const [viewMode, toggleViewMode] = useSlicerViewMode();
   const [activeTabIdx, setActiveTabIdx] = useState(0);
 
-  // Filter tabs to only show those with visible fields in the current view mode,
-  // and append a synthetic "Other Settings" tab for orphaned settings in advanced mode.
+  // Filter tabs to only show those with visible fields in the current view mode.
   const visibleTabs = useMemo(() => {
     const isFieldVisible = (key: string): boolean => {
       const m = profileMeta.settings[key];
@@ -154,40 +153,9 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
       return true;
     };
 
-    const filtered = profileMeta.tabs.filter((tab) =>
+    return profileMeta.tabs.filter((tab) =>
       tab.sections.some((section) => section.fields.some((f) => isFieldVisible(f.key)))
     );
-
-    // Collect keys that appear in any tab
-    const tabbedKeys = new Set(
-      profileMeta.tabs.flatMap((t) => t.sections.flatMap((s) => s.fields.map((f) => f.key)))
-    );
-
-    // Find orphaned settings with an explicit user-visible mode.
-    // Settings without a mode are internal/programmatic and should not appear.
-    const orphanedFields = Object.keys(profileMeta.settings)
-      .filter((k) => {
-        if (tabbedKeys.has(k)) return false;
-        const m = profileMeta.settings[k];
-        if (!m || !m.mode || m.mode === 'developer') return false;
-        if (
-          viewMode === 'simple'
-          && m.mode === 'advanced'
-          && !simpleModeSettingKeys?.has(k)
-        ) return false;
-        return true;
-      })
-      .map((k) => ({ key: k, compound: false }));
-
-    if (orphanedFields.length > 0) {
-      filtered.push({
-        name: 'Other Settings',
-        icon: 'cog',
-        sections: [{ name: 'Other Settings', icon: 'cog', fields: orphanedFields }],
-      });
-    }
-
-    return filtered;
   }, [profileMeta.tabs, profileMeta.settings, simpleModeSettingKeys, viewMode]);
 
   // Clamp activeTabIdx when visibleTabs changes
@@ -248,7 +216,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
       )}
       {/* Tab bar + settings view toggle */}
       <div className="flex items-center justify-between gap-3 px-4 py-2 border-b border-pf-border">
-        <div className="flex min-w-0 flex-1 gap-3 overflow-x-auto p-0.5" role="tablist" aria-label="Profile settings sections">
+        <div className="flex min-w-0 flex-1 flex-wrap p-0.5" role="tablist" aria-label="Profile settings sections">
           {visibleTabs.map((tab, idx) => {
             const isActive = idx === clampedActiveTabIdx;
             const dirty = isTabDirty(tab);

@@ -5,8 +5,8 @@
  * unselected tabs are muted/normal weight, and any tab containing a setting that
  * differs from the original snapshot is rendered in the "modified" (warning) color.
  */
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import metadata from '@/features/slicer/generated/orcaSettingsMetadata.json';
 import { MetadataProfileEditor } from '@/features/slicer/components/settings/MetadataProfileRenderer';
@@ -35,6 +35,34 @@ function tabButtons(container: HTMLElement): HTMLButtonElement[] {
 }
 
 describe('MetadataProfileEditor — OrcaSlicer-style tabs', () => {
+  it('does not render a synthetic tab or mutate orphaned settings in advanced mode', () => {
+    localStorage.removeItem('printfarmer-slicer-viewmode');
+    const onUpdate = vi.fn();
+    const settings = { support_parallel_printheads: true };
+    const { unmount } = render(
+      <MetadataProfileEditor profileType="process" settings={settings} onUpdate={onUpdate} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^Settings view:/ }));
+
+    expect(screen.getByRole('button', { name: 'Settings view: Advanced' })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Other Settings' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Support parallel printheads')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('tab').length).toBeGreaterThan(1);
+    expect(settings.support_parallel_printheads).toBe(true);
+    expect(onUpdate).not.toHaveBeenCalled();
+    unmount();
+    localStorage.removeItem('printfarmer-slicer-viewmode');
+  });
+
+  it('navigates between tabs with arrow keys', () => {
+    render(<MetadataProfileEditor profileType="process" settings={{}} onUpdate={() => {}} />);
+    const tabs = screen.getAllByRole('tab');
+    tabs[0].focus();
+    fireEvent.keyDown(tabs[0], { key: 'ArrowRight' });
+    expect(tabs[1]).toHaveFocus();
+    expect(tabs[1]).toHaveAttribute('aria-selected', 'true');
+  });
+
   it('provides a settings-view toggle by default but hides it when the caller passes null', () => {
     const props = { profileType: 'process' as const, settings: {}, onUpdate: () => {} };
     const { rerender } = render(<MetadataProfileEditor {...props} />);
