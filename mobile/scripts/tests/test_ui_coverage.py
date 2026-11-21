@@ -22,7 +22,7 @@ class CoverageReportTests(unittest.TestCase):
         self.catalog = MODULE.read_json(MOBILE / "ui-coverage/catalog.json")
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.root = Path(self.directory.name)
+        self.root = Path(self.directory.name).resolve()
 
     def candidate(self, scenario="01-farm"):
         profile = {**self.catalog["renderProfile"],
