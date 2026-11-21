@@ -31,8 +31,12 @@ prints with identical names cannot be distinguished without an intervening statu
 change.
 
 Movement still requires explicit backend capability evidence and affirmative homing
-for the selected axis. Keep changes to command guards and confirmation behavior in
-the shared hook rather than adding separate handlers to either surface.
+for the selected axis. PrusaLink movement discovery distinguishes confirmed support,
+confirmed lack of support, and unknown status; only confirmed support enables remote
+Home and jog. Unknown status prompts a connection/credentials check and page reload,
+while unsupported status directs operators to the printer's physical controls. Keep
+changes to command guards and confirmation behavior in the shared hook rather than
+adding separate handlers to either surface.
 
 ## Organization
 

@@ -108,9 +108,12 @@ public class PrinterBackendCapabilitiesService(
 
         PrinterControlCapabilities controls =
             (controlClient as ISupportsPrinterControlCapabilities)?.ControlCapabilities ?? new();
-        bool movement = controlClient is ISupportsMovement &&
-            (controlClient is not ISupportsMovementDiscovery discovery ||
-                await GetMovementSupportAsync(printer, discovery, ct));
+        PrinterMovementSupportStatus movementSupportStatus = controlClient is not ISupportsMovement
+            ? PrinterMovementSupportStatus.Unsupported
+            : controlClient is ISupportsMovementDiscovery discovery
+                ? await GetMovementSupportStatusAsync(printer, discovery, ct)
+                : PrinterMovementSupportStatus.Supported;
+        bool movement = movementSupportStatus == PrinterMovementSupportStatus.Supported;
         bool temperature = controlClient is ISupportsTemperatureControl;
         bool homing = movement && controls.SupportsHoming;
         PrinterStatusCacheSnapshot? statusSnapshot =
@@ -152,6 +155,7 @@ public class PrinterBackendCapabilitiesService(
         {
             // Interactive controls use native transport support. Verified safety remains
             // separate evidence for automated workflows, not a manual-command prerequisite.
+            MovementSupportStatus = movementSupportStatus,
             SupportsRelativeMovement = movement,
             SupportsAbsoluteMovement = movement && controls.SupportsAbsoluteMovement,
 
@@ -188,7 +192,7 @@ public class PrinterBackendCapabilitiesService(
         };
     }
 
-    private async Task<bool> GetMovementSupportAsync(
+    private async Task<PrinterMovementSupportStatus> GetMovementSupportStatusAsync(
         Printer printer,
         ISupportsMovementDiscovery discovery,
         CancellationToken ct)
@@ -204,7 +208,9 @@ public class PrinterBackendCapabilitiesService(
             credentialFingerprint);
         if (_movementCache?.TryGetValue(key, out bool cached) == true)
         {
-            return cached;
+            return cached
+                ? PrinterMovementSupportStatus.Supported
+                : PrinterMovementSupportStatus.Unsupported;
         }
 
         bool? supported = await discovery.SupportsMovementAsync(printer.BackendUrl, printer.Credential, ct);
@@ -213,7 +219,12 @@ public class PrinterBackendCapabilitiesService(
             _movementCache?.Set(key, supported.Value, TimeSpan.FromMinutes(1));
         }
 
-        return supported == true;
+        return supported switch
+        {
+            true => PrinterMovementSupportStatus.Supported,
+            false => PrinterMovementSupportStatus.Unsupported,
+            null => PrinterMovementSupportStatus.Unknown,
+        };
     }
 
     private async Task<PrinterVerifiedSafetyDto> GetVerifiedSafetyAsync(

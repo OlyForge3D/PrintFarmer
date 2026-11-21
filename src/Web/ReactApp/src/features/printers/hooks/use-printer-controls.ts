@@ -226,6 +226,8 @@ export function usePrinterControls(
       homedAxes: printer?.homedAxes,
       movementActionPending,
       movementUnavailable: backendCapabilities?.supportsRelativeMovement === false,
+      movementSupportStatus: backendCapabilities?.movementSupportStatus,
+      backend: backendCapabilities?.backend,
       canMove: canMoveNow,
       canHomeAll: canMoveNow && backendCapabilities?.supportsHoming === true,
       canHomeXY: canMoveNow && backendCapabilities?.supportsHomingXY === true,
