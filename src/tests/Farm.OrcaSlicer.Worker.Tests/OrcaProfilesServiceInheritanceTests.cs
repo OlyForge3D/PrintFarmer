@@ -68,6 +68,7 @@ public sealed class OrcaProfilesServiceInheritanceTests : IDisposable
 
         profiles.Should().HaveCount(1);
         var profile = profiles[0];
+        profile.InheritanceResolved.Should().BeTrue();
 
         // From parent
         profile.NozzleDiameter.Should().BeApproximately(0.4, 0.001);
@@ -313,7 +314,29 @@ public sealed class OrcaProfilesServiceInheritanceTests : IDisposable
         // Profile should still load with its own values (graceful degradation)
         profiles.Should().HaveCount(1);
         profiles[0].Name.Should().Be("Orphan Machine 0.4 nozzle");
+        profiles[0].InheritanceResolved.Should().BeFalse();
         profiles[0].RetractionLength.Should().Be(1.0);
+    }
+
+    [Fact]
+    public async Task NonStringParent_MachineProfileIsUnresolved()
+    {
+        WriteManufacturerBundle("TestMfg", machineEntries: [
+            ("Invalid Parent 0.4 nozzle", "machine/invalid_parent.json"),
+        ]);
+        WriteProfile("TestMfg", "machine/invalid_parent.json", """
+            {
+              "name": "Invalid Parent 0.4 nozzle",
+              "inherits": 42,
+              "instantiation": "true",
+              "nozzle_diameter": ["0.4"]
+            }
+            """);
+
+        var service = new OrcaProfilesService(NullLogger.Instance, _profilesRoot);
+        var profiles = await service.ListAvailableMachineProfilesAsync();
+
+        profiles.Should().ContainSingle().Which.InheritanceResolved.Should().BeFalse();
     }
 
     [Fact]
@@ -388,6 +411,7 @@ public sealed class OrcaProfilesServiceInheritanceTests : IDisposable
         // Profile should still load (broken chain, but no crash)
         profiles.Should().HaveCount(1);
         profiles[0].Name.Should().Be("Cycle A 0.4 nozzle");
+        profiles[0].InheritanceResolved.Should().BeFalse();
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -470,6 +494,7 @@ public sealed class OrcaProfilesServiceInheritanceTests : IDisposable
 
         profiles.Should().HaveCount(1);
         profiles[0].Name.Should().Be("Standalone Printer 0.4 nozzle");
+        profiles[0].InheritanceResolved.Should().BeTrue();
         profiles[0].NozzleDiameter.Should().BeApproximately(0.4, 0.001);
         profiles[0].RetractionLength.Should().Be(0.8);
         profiles[0].GcodeDialect.Should().Be("klipper");
@@ -514,12 +539,34 @@ public sealed class OrcaProfilesServiceInheritanceTests : IDisposable
         var profile = profiles[0];
 
         // Overridden by child
+        profile.InheritanceResolved.Should().BeTrue();
         profile.LayerHeight.Should().BeApproximately(0.12, 0.001);
         profile.PrintSpeed.Should().Be(60);
 
         // Inherited from parent
         profile.InfillPercentage.Should().Be(20);
         profile.Supports.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task MissingParent_ProcessProfileIsUnresolved()
+    {
+        WriteManufacturerBundle("TestMfg", processEntries: [
+            ("Orphan Process", "process/orphan.json"),
+        ]);
+        WriteProfile("TestMfg", "process/orphan.json", """
+            {
+              "name": "Orphan Process",
+              "inherits": "missing_process",
+              "instantiation": "true",
+              "layer_height": "0.2"
+            }
+            """);
+
+        var service = new OrcaProfilesService(NullLogger.Instance, _profilesRoot);
+        var profiles = await service.ListAvailableProcessProfilesAsync();
+
+        profiles.Should().ContainSingle().Which.InheritanceResolved.Should().BeFalse();
     }
 
     [Fact]

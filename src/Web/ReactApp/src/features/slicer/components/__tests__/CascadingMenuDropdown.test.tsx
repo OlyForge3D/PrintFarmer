@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { FilamentProfileDropdown } from '../CascadingMenuDropdown';
 import type { OrcaFilamentProfile } from '@/services/slicerProfilesService';
@@ -67,9 +67,9 @@ describe('FilamentProfileDropdown trigger', () => {
     render(
       <FilamentProfileDropdown
         profiles={[
+          filament('Generic PLA @0.4 nozzle', 'PLA'),
           filament('Generic ABS @0.4 nozzle', 'ABS'),
           filament('Generic ABS High Speed', 'ABS'),
-          filament('Generic PLA @0.4 nozzle', 'PLA'),
         ].map(p => ({ ...p, manufacturer: 'Generic' }))}
         customProfiles={[]}
         selectedProfileName=""
@@ -89,9 +89,16 @@ describe('FilamentProfileDropdown trigger', () => {
     expect(screen.getByText('Generic ABS High Speed')).toBeInTheDocument();
     expect(screen.getByText('Generic PLA @0.4 nozzle')).toBeInTheDocument();
 
-    // Material sub-headers group the profiles by polymer (ABS / PLA).
-    expect(screen.getByText('ABS')).toBeInTheDocument();
-    expect(screen.getByText('PLA')).toBeInTheDocument();
+    // Material groups retain their order and accessible names without visible headings.
+    const groups = screen.getAllByRole('group');
+    expect(groups.map(group => group.getAttribute('aria-label'))).toEqual(['ABS', 'PLA']);
+    expect(within(groups[0]).getAllByRole('button').map(button => button.textContent)).toEqual([
+      'Generic ABS @0.4 nozzle',
+      'Generic ABS High Speed',
+    ]);
+    expect(within(groups[1]).getByRole('button')).toHaveTextContent('Generic PLA @0.4 nozzle');
+    expect(screen.queryByText('ABS')).not.toBeInTheDocument();
+    expect(screen.queryByText('PLA')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Generic ABS High Speed'));
     expect(onSelect).toHaveBeenCalledWith('Generic ABS High Speed', 'system');

@@ -25,7 +25,7 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { getErrorMessage } from '@/common/utils/apiErrors';
 import { BedSurfaceSettings } from '@/features/slicer/components/BedSurfaceSettings';
-import { getFilamentBedContext } from '@/features/slicer/utils/bedSurfaceTemperature';
+import { getNativeBedContext } from '@/features/slicer/utils/bedSurfaceTemperature';
 import { buildSlicerProfileJson } from '@/features/slicer/utils/slicerProfilePayload';
 import type { Model } from '@/types/models';
 
@@ -127,6 +127,16 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
   const effectiveMachineProfileId = selectedMachineProfileId
     || (machineProfiles.length > 0 ? machineProfiles[0].name : '');
   const effectiveMachineProfile = machineProfiles.find(profile => profile.name === effectiveMachineProfileId);
+  const bedMachineModel = effectiveMachineProfile?.printerModel ?? effectiveMachineProfile?.printer_model;
+  const bedManufacturer = effectiveMachineProfile?.manufacturer;
+  const { data: bedModelProfiles } = useQuery({
+    queryKey: ['workerMachineModels', bedManufacturer, bedMachineModel, effectiveEngineVersion ?? null],
+    queryFn: () => slicerProfilesService.getWorkerMachineModels(bedManufacturer!, bedMachineModel!, effectiveEngineVersion),
+    enabled: !!bedManufacturer && !!bedMachineModel,
+    staleTime: 30_000,
+  });
+  const bedModelId = bedModelProfiles?.length === 1 && typeof bedModelProfiles[0].settings.model_id === 'string'
+    ? bedModelProfiles[0].settings.model_id : undefined;
 
   const machineNames = effectiveMachineProfileId ? [effectiveMachineProfileId] : [];
 
@@ -184,13 +194,17 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
     },
   });
 
-  const bedContext = getFilamentBedContext(
-    effectiveMachineProfile?.settings,
-    processProfiles.find(profile => profile.name === effectiveProcessProfileId)?.settings,
-    bedTypeOverride,
-    effectiveMachineProfile?.manufacturer,
+  const bedContext = getNativeBedContext(
+    effectiveMachineProfile?.inheritanceResolved === true ? effectiveMachineProfile.settings : undefined,
+    bedModelId, bedManufacturer, bedTypeOverride,
   );
-  const selectedBedType = bedContext.supportMultiBedTypes === false ? '' : bedTypeOverride;
+  const selectedBedType = bedContext.supportMultiBedTypes === true ? bedTypeOverride : '';
+  const projectMayOverrideBed = model.fileType === '3mf'
+    || !model.fileName || model.fileName.toLowerCase().endsWith('.3mf');
+  const displayedBedContext = {
+    ...bedContext,
+    bedType: selectedBedType || (projectMayOverrideBed ? undefined : 'High Temp Plate'),
+  };
 
   const handleSubmit = useCallback(() => {
     setError(null);
@@ -207,7 +221,6 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
       setError('Select a process profile');
       return;
     }
-
     // Issue #578 dual-engine (Hicks R3, refined R4): the engines registry
     // query MUST have populated before we submit. Without it we would fall
     // through to an unpinned Orca job that any registered version could
@@ -222,27 +235,9 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
     const orcaEngine = registeredEngines.find(
       e => (e?.engine ?? '').toLowerCase() === 'orcaslicer',
     );
-    // Backend returns latest=null in TWO shapes (Hicks R4 #3, Vasquez R4):
-    //   1. Legacy / fresh-install: NO SlicerService rows registered — every
-    //      versionEntry.available is true so the UI selector remains usable
-    //      but we leave the job UNPINNED so a generic-capability legacy
-    //      worker can claim it.
-    //   2. All-offline: rows exist but nothing is fresh+online — every
-    //      versionEntry.available is false and the job would sit
-    //      unclaimable in the queue.
-    // The presence of at least one `available` entry is the only reliable
-    // signal that distinguishes legacy from all-offline.
     const pinnedVersion = orcaEngine?.latest ?? undefined;
-    const hasAnyAvailableVersion = orcaEngine
-      ? (orcaEngine.versionEntries ?? []).some(v => v.available)
-      : true;
-    if (
-      orcaEngine
-      && orcaEngine.versions.length > 0
-      && !pinnedVersion
-      && !hasAnyAvailableVersion
-    ) {
-      setError('No online OrcaSlicer worker is available to accept this job.');
+    if (!pinnedVersion) {
+      setError('No available OrcaSlicer version is registered. Start an updated worker and retry.');
       return;
     }
 
@@ -260,13 +255,13 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
         process: { source: 'system', name: effectiveProcessProfileId.replace(/^system:/, '') },
         filaments: [{ source: 'system', name: effectiveFilamentProfileId }],
       },
-      ...(pinnedVersion ? { slicerEngineVersion: pinnedVersion } : {}),
+      slicerEngineVersion: pinnedVersion,
       slicerProfileJson: buildSlicerProfileJson({
         machineProfileName: effectiveMachineProfileId,
         filamentProfileName: effectiveFilamentProfileId,
         processPresetId: effectiveProcessProfileId,
         overrides: {},
-        bedType: selectedBedType,
+        bedSelection: { version: 1, ...(selectedBedType ? { explicitBedType: selectedBedType } : {}) },
       }),
       requiredCapabilitiesJson: '[]',
       priority: 1,
@@ -363,7 +358,7 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
           id="qs-bed-type"
           selectedBedType={selectedBedType}
           onChange={setSelectedBedType}
-          context={bedContext}
+          context={displayedBedContext}
         />
 
         {error && <Alert type="error">{error}</Alert>}

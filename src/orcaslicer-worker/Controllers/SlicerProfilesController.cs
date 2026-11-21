@@ -21,6 +21,20 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
     private readonly CachedOrcaProfilesService? _cachedService = profileService as CachedOrcaProfilesService;
     private readonly ILogger<ProfilesController> _logger = logger;
 
+    /// <summary>Finds model metadata for an exact Orca manufacturer and model name.</summary>
+    [HttpGet("machine-models")]
+    [ProducesResponseType(typeof(IList<MachineModelProfileDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IList<MachineModelProfileDto>>> GetMachineModelsAsync(
+        [FromQuery] string manufacturer,
+        [FromQuery] string model,
+        CancellationToken ct)
+    {
+        IList<MachineModelProfileDto> profiles = await _profileService.ListAvailableMachineModelProfilesAsync(ct);
+        return Ok(profiles.Where(profile =>
+            string.Equals(profile.Manufacturer, manufacturer, StringComparison.Ordinal) &&
+            string.Equals(profile.Name, model, StringComparison.Ordinal)).ToList());
+    }
+
     /// <summary>
     /// Get all available slicer profiles organized by manufacturer and model hierarchy.
     /// </summary>

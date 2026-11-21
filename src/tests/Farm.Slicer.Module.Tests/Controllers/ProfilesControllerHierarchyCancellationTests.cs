@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Slicer.Module.Api.Controllers.Slicing;
+using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -19,6 +20,23 @@ namespace Farm.Slicer.Module.Tests.Controllers;
 /// </summary>
 public class ProfilesControllerHierarchyCancellationTests
 {
+    [Fact]
+    public async Task GetWorkerProfilesHierarchyAsync_ForwardsEngineVersion()
+    {
+        Mock<IProfilesService> profilesService = new(MockBehavior.Strict);
+        Mock<ICatalogServiceAdapter> catalogService = new(MockBehavior.Strict);
+        AllProfilesResponseDto hierarchy = new();
+        using HttpClient httpClient = new();
+        _ = profilesService
+            .Setup(s => s.GetWorkerProfilesHierarchyAsync(httpClient, CancellationToken.None, "2.4.2"))
+            .ReturnsAsync(hierarchy);
+
+        IActionResult result = await CreateController(profilesService, catalogService)
+            .GetWorkerProfilesHierarchyAsync(httpClient, CancellationToken.None, "2.4.2");
+
+        Assert.Same(hierarchy, Assert.IsType<OkObjectResult>(result).Value);
+    }
+
     [Fact]
     public async Task GetWorkerProfilesHierarchyAsync_ClientCancels_PropagatesOperationCanceledException()
     {
