@@ -3,6 +3,14 @@ using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure;
 
+/// <summary>Evidence state for whether the printer's API supports remote movement.</summary>
+public enum PrinterMovementSupportStatus
+{
+    Supported,
+    Unsupported,
+    Unknown,
+}
+
 /// <summary>
 /// Backend capabilities supported by a printer's backend implementation (Moonraker, PrusaLink, etc.).
 /// Represents what operations the backend client supports via its plugin interfaces.
@@ -26,6 +34,12 @@ public record PrinterBackendCapabilitiesDto(
     bool SupportsFilamentControl = false,
     bool SupportsObjectExclusion = false)
 {
+    /// <summary>Whether movement support is confirmed, rejected, or could not be determined.</summary>
+    public PrinterMovementSupportStatus MovementSupportStatus { get; init; } =
+        SupportsMovement
+            ? PrinterMovementSupportStatus.Supported
+            : PrinterMovementSupportStatus.Unknown;
+
     /// <summary>Whether the shared relative-move route has a verified implementation.</summary>
     public bool SupportsRelativeMovement { get; init; }
 

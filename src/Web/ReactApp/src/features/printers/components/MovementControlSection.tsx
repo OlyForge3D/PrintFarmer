@@ -2,7 +2,7 @@ import { PrinterCoordinateRow } from '@/features/printers/components/PrinterCoor
 import { PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
 import { MotionControlButton } from '@/features/printers/components/MotionControlButton';
 import { ControlPadButton, MoveDistanceSlider } from '@/common/components/ui';
-import type { MoveRequest } from '@/types/api';
+import type { MoveRequest, PrinterBackend, PrinterMovementSupportStatus } from '@/types/api';
 import {
   HomeIcon,
   DisableMotorsIcon,
@@ -38,6 +38,8 @@ interface MovementControlSectionProps {
   // Flags
   movementActionPending: boolean;
   movementUnavailable?: boolean;
+  movementSupportStatus?: PrinterMovementSupportStatus;
+  backend?: PrinterBackend;
   canMove: boolean;
   canHomeAll?: boolean;
   canHomeXY?: boolean;
@@ -78,6 +80,8 @@ export function MovementControlSection({
   homedAxes,
   movementActionPending,
   movementUnavailable,
+  movementSupportStatus,
+  backend,
   canMove,
   canHomeAll = canMove,
   canHomeXY = canMove,
@@ -315,7 +319,11 @@ export function MovementControlSection({
         onMove={onMove}
         onMoveTo={onMoveTo}
       />
-      <PrinterMotionHelp movementUnavailable={movementUnavailable} />
+      <PrinterMotionHelp
+        movementSupportStatus={movementSupportStatus}
+        movementUnavailable={movementUnavailable}
+        backend={backend}
+      />
     </div>
   );
 }

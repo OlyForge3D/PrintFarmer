@@ -10,6 +10,7 @@ final class PrinterBackendCapabilitiesTests: XCTestCase {
             XCTAssertFalse(caps.supportsBedTemperature)
             XCTAssertFalse(caps.supportsHoming)
             XCTAssertFalse(caps.supportsAbsoluteMovement)
+            XCTAssertEqual(caps.movementSupportStatus, .unknown)
             XCTAssertFalse(caps.supportsDisableMotors)
             XCTAssertFalse(caps.supportsExtrusion)
             XCTAssertFalse(caps.supportsZOffset)
@@ -215,9 +216,73 @@ final class PrinterBackendCapabilitiesTests: XCTestCase {
         XCTAssertNil(dto.printerName)
     }
 
+    func testMovementSupportStatus_decodesKnownValuesAndDefaultsUnknownValues() throws {
+        for (wireValue, expected) in [
+            ("Supported", PrinterMovementSupportStatus.supported),
+            ("Unsupported", .unsupported),
+            ("Unknown", .unknown),
+            ("FutureValue", .unknown)
+        ] {
+            let json = Data("""
+            {"printerId":"\(TestData.testUUID)","movementSupportStatus":"\(wireValue)"}
+            """.utf8)
+            let wire = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: json)
+            XCTAssertEqual(
+                PrinterBackendCapabilities(wire: wire).movementSupportStatus,
+                expected,
+                wireValue
+            )
+        }
+
+        let missingStatus = Data("""
+        {"printerId":"\(TestData.testUUID)"}
+        """.utf8)
+        let wire = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: missingStatus)
+        XCTAssertEqual(PrinterBackendCapabilities(wire: wire).movementSupportStatus, .unknown)
+
+        for (backend, expected) in [
+            ("PrusaLink", PrinterMovementSupportStatus.unknown),
+            ("Moonraker", .unsupported),
+            ("SDCP", .unsupported),
+            ("OctoPrint", .unsupported),
+            ("FlashForge", .unsupported)
+        ] {
+            let json = Data("""
+            {"printerId":"\(TestData.testUUID)","backend":"\(backend)"}
+            """.utf8)
+            let wire = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: json)
+            XCTAssertEqual(PrinterBackendCapabilities(wire: wire).movementSupportStatus, expected, backend)
+        }
+
+        let futureBackend = Data("""
+        {"printerId":"\(TestData.testUUID)","backend":"FutureBackend"}
+        """.utf8)
+        let futureWire = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: futureBackend)
+        XCTAssertEqual(PrinterBackendCapabilities(wire: futureWire).movementSupportStatus, .unknown)
+    }
+
+    func testMovementSupportStatus_legacyPositiveFlagPrecedesBackendFallback() throws {
+        let json = Data("""
+        {"printerId":"\(TestData.testUUID)","backend":"Moonraker","supportsMovement":true}
+        """.utf8)
+        let wire = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: json)
+        XCTAssertEqual(PrinterBackendCapabilities(wire: wire).movementSupportStatus, .supported)
+    }
+
+    func testMovementSupportStatus_falseOrMissingLegacyFlagKeepsBackendFallback() throws {
+        for fields in [#""supportsMovement":false,"#, ""] {
+            let json = Data("""
+            {"printerId":"\(TestData.testUUID)","backend":"Moonraker",\(fields)}
+            """.utf8)
+            let wire = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: json)
+            XCTAssertEqual(PrinterBackendCapabilities(wire: wire).movementSupportStatus, .unsupported, fields)
+        }
+    }
+
     func testGenericFlagsDoNotEnableSpecificOperations() throws {
         let json = Data("""
         {"printerId":"\(TestData.testUUID)","backend":"Moonraker",
+         "movementSupportStatus":"Unknown",
          "supportsMovement":true,"supportsTemperatureControl":true,
          "supportsControlOperations":true,"supportsFilamentControl":true}
         """.utf8)

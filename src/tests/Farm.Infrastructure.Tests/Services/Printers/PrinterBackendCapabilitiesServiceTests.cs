@@ -129,7 +129,16 @@ public class PrinterBackendCapabilitiesServiceTests
         Assert.Equal(sensorControl, dto.SupportsSensorControl);
         Assert.Equal(backend == PrinterBackend.Moonraker, dto.SupportsSpeedFactorControl);
         Assert.Equal(backend == PrinterBackend.Moonraker, dto.SupportsFlowFactorControl);
-        using JsonDocument json = JsonDocument.Parse(JsonSerializer.Serialize(dto, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        Assert.Equal(
+            homing
+                ? PrinterMovementSupportStatus.Supported
+                : PrinterMovementSupportStatus.Unsupported,
+            dto.MovementSupportStatus);
+        JsonSerializerOptions jsonOptions = new(JsonSerializerDefaults.Web);
+        jsonOptions.Converters.Add(new JsonStringEnumConverter());
+        using JsonDocument json = JsonDocument.Parse(JsonSerializer.Serialize(dto, jsonOptions));
+        Assert.Equal(dto.MovementSupportStatus.ToString(),
+            json.RootElement.GetProperty("movementSupportStatus").GetString());
         Assert.Equal(backend == PrinterBackend.Moonraker, json.RootElement.GetProperty("supportsSpeedFactorControl").GetBoolean());
         Assert.Equal(backend == PrinterBackend.Moonraker, json.RootElement.GetProperty("supportsFlowFactorControl").GetBoolean());
         Assert.Equal(
@@ -179,6 +188,9 @@ public class PrinterBackendCapabilitiesServiceTests
         Assert.Equal(supported, result.SupportsHoming);
         Assert.Equal(supported, result.SupportsHomingXY);
         Assert.Equal(supported, result.SupportsHomingZ);
+        Assert.Equal(
+            supported ? PrinterMovementSupportStatus.Supported : PrinterMovementSupportStatus.Unsupported,
+            result.MovementSupportStatus);
         Assert.False(result.SupportsAbsoluteMovement);
         Assert.Equal(supported ? new[] { "x", "y", "z" } : [], result.SupportedAxes);
         Assert.True(result.SupportsHotendTemperature);
@@ -230,11 +242,14 @@ public class PrinterBackendCapabilitiesServiceTests
     }
 
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task GetControlCapabilitiesAsync_InconclusiveMovementEvidence_IsNotCached(bool transportFailure)
+    [InlineData(HttpStatusCode.Unauthorized, false)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, false)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, true)]
+    public async Task GetControlCapabilitiesAsync_InconclusiveMovementEvidence_IsNotCached(
+        HttpStatusCode status,
+        bool transportFailure)
     {
-        using var handler = new PrusaMovementProbeHandler(HttpStatusCode.ServiceUnavailable) { FailNext = transportFailure };
+        using var handler = new PrusaMovementProbeHandler(status) { FailNext = transportFailure };
         using var http = new HttpClient(handler);
         var client = new PrusaLinkClient(http);
         var clients = new Mock<IBackendClientFactory>();
@@ -251,9 +266,17 @@ public class PrinterBackendCapabilitiesServiceTests
         var factory = new BackendCapabilityFactory(clients.Object, NullLogger<BackendCapabilityFactory>.Instance);
         var service = new PrinterBackendCapabilitiesService(repository.Object, factory, clients.Object, movementCache: cache);
 
-        Assert.False((await service.GetControlCapabilitiesAsync(printer.Id, default))!.SupportsHoming);
+        PrinterBackendCapabilitiesDto inconclusive =
+            (await service.GetControlCapabilitiesAsync(printer.Id, default))!;
+        Assert.Equal(PrinterMovementSupportStatus.Unknown, inconclusive.MovementSupportStatus);
+        Assert.False(inconclusive.SupportsMovement);
+        Assert.False(inconclusive.SupportsRelativeMovement);
+        Assert.False(inconclusive.SupportsHoming);
         handler.Status = HttpStatusCode.MethodNotAllowed;
-        Assert.True((await service.GetControlCapabilitiesAsync(printer.Id, default))!.SupportsHoming);
+        PrinterBackendCapabilitiesDto supported =
+            (await service.GetControlCapabilitiesAsync(printer.Id, default))!;
+        Assert.Equal(PrinterMovementSupportStatus.Supported, supported.MovementSupportStatus);
+        Assert.True(supported.SupportsHoming);
         Assert.True((await service.GetControlCapabilitiesAsync(printer.Id, default))!.SupportsHoming);
         Assert.Equal(2, handler.Methods.Count);
     }
@@ -833,6 +856,18 @@ public class PrinterBackendCapabilitiesServiceTests
                 Content = new StringContent(json, Encoding.UTF8, "application/json"),
             });
         }
+    }
+
+    [Fact]
+    public void MovementSupportStatus_DefaultMatchesMovementCapabilityEvidence()
+    {
+        var supported = new PrinterBackendCapabilitiesDto(
+            Guid.NewGuid(), "supported", PrinterBackend.Moonraker, SupportsMovement: true);
+        var unknown = new PrinterBackendCapabilitiesDto(
+            Guid.NewGuid(), "unknown", PrinterBackend.Moonraker);
+
+        Assert.Equal(PrinterMovementSupportStatus.Supported, supported.MovementSupportStatus);
+        Assert.Equal(PrinterMovementSupportStatus.Unknown, unknown.MovementSupportStatus);
     }
 
     [Fact]

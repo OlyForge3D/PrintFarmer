@@ -1,11 +1,29 @@
 import { usePrinterControlsMode } from '@/features/printers/hooks/use-printer-controls-mode';
+import { PrinterBackend, type PrinterMovementSupportStatus } from '@/types/api';
 
 /** Guided-mode motion help. Mode is chosen only in User Settings; Expert shows no help. */
-export function PrinterMotionHelp({ movementUnavailable = false }: { movementUnavailable?: boolean }) {
+export function PrinterMotionHelp({
+  movementSupportStatus,
+  movementUnavailable = false,
+  backend,
+}: {
+  movementSupportStatus?: PrinterMovementSupportStatus;
+  movementUnavailable?: boolean;
+  backend?: PrinterBackend;
+}) {
   const { mode } = usePrinterControlsMode();
-  if (movementUnavailable) return (
+  let supportStatus = movementSupportStatus;
+  if (supportStatus === undefined && movementUnavailable) {
+    supportStatus = backend === PrinterBackend.PrusaLink ? 'Unknown' : 'Unsupported';
+  }
+  if (supportStatus === 'Unknown') return (
     <p role="status" className="mt-2 text-xs text-pf-text-secondary">
-      Remote Home and jog controls are unavailable on this printer&apos;s API. Use the printer&apos;s physical controls.
+      PrintFarmer could not confirm remote Home and jog support. Check the printer connection and credentials. Use the printer&apos;s physical controls while remote motion is unavailable.
+    </p>
+  );
+  if (supportStatus === 'Unsupported') return (
+    <p role="status" className="mt-2 text-xs text-pf-text-secondary">
+      Remote Home and jog controls are not supported by this printer&apos;s API. Use the printer&apos;s physical controls.
     </p>
   );
   if (mode !== 'guided') return null;

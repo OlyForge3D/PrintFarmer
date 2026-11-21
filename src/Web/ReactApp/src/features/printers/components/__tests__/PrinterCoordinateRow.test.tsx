@@ -37,6 +37,11 @@ describe('shared coordinate entry', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('uses a touch-sized mobile target and retains compact desktop inputs', () => {
+    render(<Entry onMoveTo={vi.fn()} />);
+    expect(input()).toHaveClass('h-11', 'sm:h-8');
+  });
+
   it('Tabs a changed absolute target to only that axis, ignoring other drafts', async () => {
     const onMoveTo = vi.fn();
     const user = userEvent.setup();
@@ -158,5 +163,18 @@ describe('shared coordinate entry', () => {
     expect(screen.queryByText(/Tab or Enter sends/)).not.toBeInTheDocument();
     enter('4'); enter(''); fireEvent.keyDown(input(), { key: 'Enter' });
     expect(screen.getByRole('alert')).toBeVisible();
+  });
+
+  it('hides the homing hint in Expert while keeping unhomed coordinates disabled', () => {
+    accountMode = 'Expert';
+    render(<Entry homedAxes="xy" onMoveTo={vi.fn()} />);
+    expect(screen.queryByText('Movement requires the printer to report the selected axis as homed.')).not.toBeInTheDocument();
+    expect(input('Z')).toBeDisabled();
+  });
+
+  it('shows the homing hint in Guided when an axis is unhomed', () => {
+    render(<Entry homedAxes="xy" onMoveTo={vi.fn()} />);
+    expect(screen.getByText('Movement requires the printer to report the selected axis as homed.')).toBeVisible();
+    expect(input('Z')).toBeDisabled();
   });
 });
