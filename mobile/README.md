@@ -615,9 +615,11 @@ The in-repository mobile client is licensed under the
 ## Catalog visual and accessibility candidates
 
 `ui-coverage/catalog.json` preserves all 37 iOS row IDs from the shared web
-inventory using the same entry schema. This is **not full state coverage**:
-52 capture scenarios target 36 broad rows; the retired server-switcher row has no adapter and explicit
-fixture, reachability or state-inventory blockers. New adapters are candidates,
+inventory. This is **not full state coverage**: 49 capture scenarios target 35
+broad rows. The server-switcher and bin-scan rows have no adapter; the bin and
+part scan-result scenarios are retained as retired blockers because the scanner
+is spool-only since #3739. Other fixture, reachability and state-inventory blockers
+remain explicit. New adapters are candidates,
 not native execution evidence. A captured image and passing audit
 do not promote an entire broad row to covered. See each row's `reason`.
 

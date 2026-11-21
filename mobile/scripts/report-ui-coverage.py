@@ -36,15 +36,22 @@ def validate_catalog(catalog):
     if catalog["source"]["snapshot"] != SOURCE_SNAPSHOT or catalog["source"]["sha256"] != SOURCE_HASH:
         raise ValueError("Inventory provenance metadata differs from supplied source pin")
     scenarios = []
+    retired_scenarios = []
     for entry in entries:
         if entry["platform"] != "ios" or not re.fullmatch(r"ios\.[a-z-]+", entry["id"]):
             raise ValueError("Invalid iOS row identity")
         if entry["disposition"] != "blocked" or not entry["reason"]:
             raise ValueError("Inventory seeds must retain explicit coverage blockers")
         scenarios.extend(entry["scenarioIds"])
-    if len(set(scenarios)) != len(scenarios):
+        retired = entry.get("retiredScenarios", {})
+        if not isinstance(retired, dict) or any(not isinstance(reason, str) or not reason.strip()
+                                                for reason in retired.values()):
+            raise ValueError("Retired scenarios need explicit reasons")
+        retired_scenarios.extend(retired)
+    all_scenarios = scenarios + retired_scenarios
+    if len(set(all_scenarios)) != len(all_scenarios):
         raise ValueError("Scenario IDs must belong to exactly one row")
-    if any(not re.fullmatch(r"\d{2}-[a-z-]+", value) for value in scenarios):
+    if any(not re.fullmatch(r"\d{2}-[a-z-]+", value) for value in all_scenarios):
         raise ValueError("Unsafe scenario ID")
     allowed_overrides = {
         "appearance": {"light", "dark"},
@@ -115,6 +122,10 @@ def native_profile(directory, catalog, family, head):
 
 def report(catalog, attachments, family, head, blocked_reason=None):
     scenarios = validate_catalog(catalog)
+    for entry in catalog["entries"]:
+        for scenario in entry.get("retiredScenarios", {}):
+            if any(f"catalog.{scenario}.{extension}" in attachments for extension in ("png", "json")):
+                raise ValueError(f"Retired scenario cannot have native evidence: {scenario}")
     if family not in ("iPhone", "iPad") or not re.fullmatch(r"[0-9a-f]{40}", head):
         raise ValueError("Report needs an explicit device family and full source SHA")
     expected_profile = catalog["renderProfile"]
@@ -150,6 +161,11 @@ def report(catalog, attachments, family, head, blocked_reason=None):
     entries = []
     for entry in catalog["entries"]:
         row = dict(entry)
+        if "retiredScenarios" in row:
+            row["retiredScenarios"] = {
+                scenario: {"status": "blocked", "reason": reason}
+                for scenario, reason in row["retiredScenarios"].items()
+            }
         exercised = [value for value in row["scenarioIds"] if results[value]["status"] != "blocked"]
         # A handful of candidates cannot certify all states of a broad inventory row.
         failed = [value for value in exercised if results[value]["status"] == "accessibility-failure"]

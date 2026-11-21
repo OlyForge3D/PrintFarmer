@@ -199,32 +199,11 @@ final class UITestBootstrapTests: XCTestCase {
     func test_catalogScanner_requiresBothTestLaunchGates() {
         XCTAssertNil(UITestBootstrap.catalogBarcodeScanner(arguments: []))
         XCTAssertNil(UITestBootstrap.catalogBarcodeScanner(arguments: [
-            "--uitesting-catalog-scanner", "--uitesting-catalog-scan-bin"
+            "--uitesting-catalog-scanner", "--uitesting-catalog-scan-error"
         ]))
         XCTAssertNil(UITestBootstrap.catalogBarcodeScanner(arguments: [
-            "--uitesting", "--uitesting-catalog-scan-bin"
+            "--uitesting", "--uitesting-catalog-scan-error"
         ]))
-    }
-
-    func test_catalogScanner_returnsFixedBinBarcode() async throws {
-        let scanner = try XCTUnwrap(UITestBootstrap.catalogBarcodeScanner(arguments: [
-            "--uitesting", "--uitesting-catalog-scanner", "--uitesting-catalog-scan-bin"
-        ]))
-        XCTAssertTrue(scanner.isAvailable)
-        guard case .barcode(let barcode) = await scanner.scanBarcode() else {
-            return XCTFail("Expected the synthetic bin barcode.")
-        }
-        XCTAssertEqual(barcode, "BIN-A1")
-    }
-
-    func test_catalogScanner_returnsFixedPartBarcode() async throws {
-        let scanner = try XCTUnwrap(UITestBootstrap.catalogBarcodeScanner(arguments: [
-            "--uitesting", "--uitesting-catalog-scanner", "--uitesting-catalog-scan-part"
-        ]))
-        guard case .barcode(let barcode) = await scanner.scanBarcode() else {
-            return XCTFail("Expected the synthetic part barcode.")
-        }
-        XCTAssertEqual(barcode, "BRKT-01")
     }
 
     func test_catalogScanner_returnsPermissionFailureWithoutOpeningCamera() async throws {

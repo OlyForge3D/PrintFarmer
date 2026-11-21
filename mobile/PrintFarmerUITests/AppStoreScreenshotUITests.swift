@@ -504,25 +504,6 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         try capture("39-qr-scanner-unavailable")
     }
 
-    func testCaptureScannedBinAndEligibleJobs() throws {
-        try openSyntheticScan("--uitesting-catalog-scan-bin")
-        try require(app.navigationBars["Bin Scanned"])
-        try require(app.steppers["binScan.quantityStepper"])
-        try capture("29-bin-scan-result")
-        try tapRequired(app.buttons["binScan.harvestShortcut"])
-        try require(app.navigationBars["Select Completed Job"])
-        try require(app.buttons["Cancel"])
-        XCTAssertFalse(app.activityIndicators.firstMatch.exists)
-        try capture("30-eligible-job-picker")
-    }
-
-    func testCaptureScannedPart() throws {
-        try openSyntheticScan("--uitesting-catalog-scan-part")
-        try require(app.steppers["partScan.deltaStepper"])
-        try require(app.buttons["partScan.applyAdjustment"])
-        try capture("31-part-scan-result")
-    }
-
     func testCaptureScanPermissionError() throws {
         try openSyntheticScan("--uitesting-catalog-scan-error")
         try require(app.alerts["Scan Error"])

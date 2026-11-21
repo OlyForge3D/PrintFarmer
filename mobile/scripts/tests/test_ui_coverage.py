@@ -116,12 +116,34 @@ class CoverageReportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "provenance"):
             MODULE.validate_catalog(malformed)
 
+    def test_retired_scan_scenarios_remain_explicit_blockers(self):
+        result = MODULE.report(self.catalog, self.candidate("15-selected-part"), "iPhone", "a" * 40)
+        rows = {row["id"]: row for row in result["entries"]}
+        reason = "scanner is spool-only since #3739"
+        self.assertEqual(rows["ios.bin-scan-result"]["disposition"], "blocked")
+        self.assertEqual(rows["ios.bin-scan-result"]["retiredScenarios"], {
+            "29-bin-scan-result": {"status": "blocked", "reason": reason},
+            "30-eligible-job-picker": {"status": "blocked", "reason": reason},
+        })
+        self.assertEqual(rows["ios.selected-part"]["disposition"], "partial-exercised")
+        self.assertEqual(rows["ios.selected-part"]["retiredScenarios"], {
+            "31-part-scan-result": {"status": "blocked", "reason": reason},
+        })
+        self.assertIn(reason, rows["ios.selected-part"]["reason"])
+        with self.assertRaisesRegex(ValueError, "Retired scenario"):
+            MODULE.report(self.catalog, self.candidate("31-part-scan-result"), "iPhone", "a" * 40)
+
+        malformed = copy.deepcopy(self.catalog)
+        malformed["entries"][0]["scenarioIds"].append("31-part-scan-result")
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            MODULE.validate_catalog(malformed)
+
     def test_catalog_scenarios_match_real_capture_calls(self):
         import re
         source = (MOBILE / "PrintFarmerUITests/AppStoreScreenshotUITests.swift").read_text(encoding="utf-8")
         captures = re.findall(r'try capture\("([^"]+)"\)', source)
         self.assertEqual(set(MODULE.validate_catalog(self.catalog)), set(captures))
-        self.assertEqual(len(captures), 52)
+        self.assertEqual(len(captures), 49)
         self.assertIn("try app.performAccessibilityAudit(for: .all)", source)
         self.assertIn('issue.element?.debugDescription ?? "Element unavailable"', source)
         self.assertIn(

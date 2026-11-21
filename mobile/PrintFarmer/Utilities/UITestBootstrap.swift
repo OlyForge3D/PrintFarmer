@@ -2491,17 +2491,10 @@ enum UITestBootstrap {
     static func catalogBarcodeScanner(arguments: [String]) -> (any BarcodeScannerProtocol)? {
         guard arguments.contains(launchArgument),
               arguments.contains("--uitesting-catalog-scanner") else { return nil }
-        let result: BarcodeScanResult
-        if arguments.contains("--uitesting-catalog-scan-bin") {
-            result = .barcode("BIN-A1")
-        } else if arguments.contains("--uitesting-catalog-scan-part") {
-            result = .barcode("BRKT-01")
-        } else if arguments.contains("--uitesting-catalog-scan-error") {
-            result = .error(.permissionDenied)
-        } else {
+        guard arguments.contains("--uitesting-catalog-scan-error") else {
             preconditionFailure("Catalog scanner requires a fixed synthetic scan scenario.")
         }
-        return CatalogBarcodeScanner(result: result)
+        return CatalogBarcodeScanner(result: .error(.permissionDenied))
     }
 
     private final class CatalogBarcodeScanner: BarcodeScannerProtocol {
