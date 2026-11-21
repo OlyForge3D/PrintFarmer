@@ -36,6 +36,14 @@ describe('SlicerModeToggle', () => {
     expect(onChange).toHaveBeenCalledWith(next);
   });
 
+  it('keeps a fixed 26px target on every pointer type so the Process header does not grow', () => {
+    render(<SlicerModeToggle levels={pair} value="Basic" onChange={vi.fn()} />);
+
+    const button = screen.getByRole('button', { name: 'Settings view: Basic' });
+    expect(button).toHaveClass('h-6.5');
+    expect(button.className).not.toMatch(/min-h-/);
+  });
+
   it('renders nothing when there is only one level to choose from', () => {
     const { container } = render(<SlicerModeToggle levels={['Basic']} value="Basic" onChange={vi.fn()} />);
     expect(container).toBeEmptyDOMElement();
