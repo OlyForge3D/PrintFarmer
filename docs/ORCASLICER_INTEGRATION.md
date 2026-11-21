@@ -113,9 +113,11 @@ are not rewritten.
 
 These jobs require an engine version and a live worker advertising the matching
 `orcaslicer:<version>:project-bed-selection-v1` capability; otherwise submission
-returns HTTP 503. The worker rejects ambiguous or unreadable project settings
-and output whose bed metadata or temperatures cannot be verified. Existing
-jobs without the contract retain their legacy behavior.
+returns HTTP 503. The worker rejects ambiguous or unreadable project settings,
+mismatched bed metadata, and mismatched or unreadable bed temperature commands
+and macro parameters. Firmware macro internals are not available to the worker,
+so their temperatures cannot be verified from G-code alone. Existing jobs without
+the contract retain their legacy behavior.
 
 The slicer sidebar and Quick Slice show no nozzle or bed temperature text under
 filament selection. Review or change temperatures in the filament editor. Those

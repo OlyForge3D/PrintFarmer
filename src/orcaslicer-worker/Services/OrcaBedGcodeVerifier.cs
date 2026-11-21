@@ -188,27 +188,17 @@ internal static partial class OrcaBedGcodeVerifier
             _ => throw new InvalidDataException("G-code bed temperature formula is invalid."),
         };
 
-        bool initialSeen = false;
         foreach ((decimal temperature, bool isInitial, bool extrusionAfter) in commands)
         {
-            if (temperature == 0 && !extrusionAfter && initialSeen)
+            if (temperature == 0 && !extrusionAfter)
             {
                 continue;
             }
 
-            if (isInitial && temperature == initial)
-            {
-                initialSeen = true;
-            }
-            else if (isInitial || temperature != normal)
+            if (temperature != (isInitial ? initial : normal))
             {
                 throw new InvalidDataException("G-code bed temperature command does not match the selected plate.");
             }
-        }
-
-        if (!initialSeen)
-        {
-            throw new InvalidDataException("G-code does not contain the expected initial bed temperature.");
         }
     }
 

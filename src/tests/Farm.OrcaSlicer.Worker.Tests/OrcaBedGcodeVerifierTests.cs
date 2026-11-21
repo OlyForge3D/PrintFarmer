@@ -28,6 +28,14 @@ public sealed class OrcaBedGcodeVerifierTests
     }
 
     [Theory]
+    [InlineData("PRINT_START")]
+    [InlineData("PRINT_START\nG1 E1\nM140 S0")]
+    public async Task VerifyAsync_AcceptsOpaqueFirmwareMacroWithMatchingMetadata(string commands)
+    {
+        await VerifyAsync(commands);
+    }
+
+    [Theory]
     [InlineData("M140 S45")]
     [InlineData("M140 S60\nPRINT_START BED=45")]
     [InlineData("M140 S60\nPRINT_START BED=unknown")]
@@ -39,7 +47,6 @@ public sealed class OrcaBedGcodeVerifierTests
     [InlineData("M83\nM140 S60\nM140 S0\nG1 E1")]
     [InlineData("M82\nM140 S60\nM140 S0\nG1 E-3")]
     [InlineData("M140 S60\n;LAYER_CHANGE\n;LAYER_CHANGE\nM140 S45")]
-    [InlineData("PRINT_START")]
     public async Task VerifyAsync_RejectsMissingInvalidOrMismatchedCommands(string commands)
     {
         Func<Task> action = () => VerifyAsync(commands);
