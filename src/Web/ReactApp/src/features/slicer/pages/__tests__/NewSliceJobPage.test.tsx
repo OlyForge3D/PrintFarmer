@@ -1696,8 +1696,7 @@ describe('NewSliceJobPage', () => {
       renderWithProviders(<NewSliceJobPage />, { route: '/slicer?modelId=model-3d-1' });
       await screen.findByRole('option', { name: 'Default' });
       const filamentSection = await screen.findByTestId('single-filament-section');
-      fireEvent.click(within(filamentSection).getAllByRole('button')
-        .find(button => button.getAttribute('aria-haspopup') === 'dialog')!);
+      fireEvent.click(await within(filamentSection).findByRole('button', { name: /Generic PLA @MK4/ }));
       const filamentPicker = await screen.findByRole('dialog', { name: 'Filament selector' });
       fireEvent.change(within(filamentPicker).getByPlaceholderText('Search filaments...'), {
         target: { value: 'Generic PLA @MK4' },
