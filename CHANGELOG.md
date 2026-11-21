@@ -2,6 +2,13 @@
 
 ### Features
 
+- Regroup admin settings into Failure Detection, Costs & Energy, Planning,
+  Operator Features and a single System page (#3745). Move browser slicer modes
+  into Slicing, auto-tagging/custom fields into Data, and global maintenance
+  policy into Maintenance Settings. Combine NFC readers and bindings on one
+  Hardware page. Remove duplicate farm-rate editors while retaining per-record
+  overrides, persisted setting keys/API contracts and bounded legacy-link/pin migration.
+
 - Route Obico monitoring per print instead of permanently pinning printers
   (#3693). Reserve healthy pool capacity through warmup, pauses, and API
   restarts; release it when prints end. Unavailable monitoring never blocks
@@ -75,6 +82,33 @@
   genesis before its four general slots become operational.
 
 ### Fixes
+
+- The web slicer's settings-view control now sits beside the profile menu in
+  the Process header for all levels. Its pill shows Orca-style dots, and it no
+  longer takes space beside the Print Settings heading or the settings tabs (#3886).
+- The web slicer uses one right-aligned control for Simple, Basic and Advanced
+  settings. Filament selection no longer shows nozzle or bed temperature text,
+  and modifying a setting no longer changes its row height (#3880).
+- Restore compatible process presets for renamed Orca machine profiles, hide
+  Bed Type for single-bed machines, and remove vertical overflow from the web
+  slicer's settings tabs.
+
+- Keep Printer Dashboard maintenance/configuration banner dismissals across
+  refresh without hiding newer catalog revisions; respect dismissed
+  profile-import tasks on periodic scans. Clarify missing-import tasks and use a
+  consistent responsive three-column widget grid (#3837).
+
+- Gate web jog and coordinate entry on affirmative per-axis homing telemetry.
+  Discover PrusaLink motion support per printer without sending motion, disable
+  unsupported CORE One L/Buddy Home and jog controls, and distinguish explicit
+  endpoint rejection from unknown outcomes without duplicating safety warnings
+  (#3566). Preserve API-key-only authentication for supported legacy movement.
+
+- Reject passkey login for inactive accounts without issuing access or refresh
+  tokens. Main-API bearer authentication now checks current account status so
+  previously issued tokens stop working after deactivation (#3652). Recognized
+  account-store failures are logged and fail closed without masking cancellation
+  or unrelated programming errors.
 
 - Preserve native filament setting types when saving editor changes, including
   boolean vectors, percent suffixes and unedited extruder entries (#3643).

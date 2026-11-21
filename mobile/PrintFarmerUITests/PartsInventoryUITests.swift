@@ -30,6 +30,53 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
         XCTAssertTrue(app.buttons["partScan.applyAdjustment"].exists)
     }
 
+    func testAddSpoolSwatchesHaveMinimumTouchTargetsAndPaddedCornersSelectColor() {
+        shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8).tap()
+        let addSpool = app.buttons["inventory.addSpool"]
+        XCTAssertTrue(addSpool.waitForExistence(timeout: 8))
+        addSpool.tap()
+        let createFilament = app.switches["addSpool.createFilament"]
+        XCTAssertTrue(createFilament.waitForExistence(timeout: 8))
+        if createFilament.value as? String != "1" {
+            createFilament.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        }
+        let creatingFilament = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == '1'"), object: createFilament
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [creatingFilament], timeout: 3), .completed)
+
+        // Keep an index-bound container when the identifying row scrolls off screen.
+        guard let form = app.collectionViews.allElementsBoundByIndex.first(where: {
+            $0.switches["addSpool.createFilament"].exists
+        }) else {
+            XCTFail("The Add Spool form must contain the Create New Filament switch")
+            return
+        }
+        let red = app.buttons["Red"]
+        let hex = app.textFields["#RRGGBB"]
+        for _ in 0..<12 {
+            if red.exists && red.isHittable && hex.exists { break }
+            form.swipeUp()
+        }
+        XCTAssertTrue(red.isHittable, "The Red swatch must be reachable in the Add Spool form")
+        XCTAssertTrue(hex.exists, "The hex field below the swatches must be realized before reading its value")
+        for name in ["Black", "White", "Red"] {
+            let swatch = app.buttons[name]
+            XCTAssertTrue(swatch.exists, name)
+            XCTAssertEqual(swatch.label, name)
+            XCTAssertGreaterThanOrEqual(swatch.frame.width, 44, name)
+            XCTAssertGreaterThanOrEqual(swatch.frame.height, 44, name)
+        }
+
+        red.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.05)).tap()
+        let selected = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "selected == true"), object: red
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 3), .completed)
+        XCTAssertEqual(hex.value as? String, "#E53E3E")
+        XCTAssertFalse(app.buttons["Black"].isSelected)
+    }
+
     func testScanFromPrintedPartsSheetReturnsInPlace() {
         shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8).tap()
         app.buttons["inventory.actions"].tap()

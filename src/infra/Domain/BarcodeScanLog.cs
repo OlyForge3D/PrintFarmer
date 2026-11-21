@@ -12,6 +12,8 @@ public enum BarcodeScanAction
     BinScan = 4,
     PartScan = 5,
     Harvest = 6,
+    AliasResolve = 7,
+    AliasMapping = 8,
 }
 
 /// <summary>

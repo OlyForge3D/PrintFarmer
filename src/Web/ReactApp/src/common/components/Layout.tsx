@@ -24,6 +24,7 @@ import {
   CameraIcon,
 } from '@/common/components/icons/MdiIcons';
 import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
+import { FarmIdentityBrand } from '@/features/settings/components/FarmIdentityBrand';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import {
   canAccessDestination,
@@ -801,7 +802,7 @@ export function Layout() {
           className={clsx(
             'flex h-9 w-11 items-center justify-center rounded-lg transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
             isActive
-              ? 'bg-pf-accent-bg/18 text-pf-accent'
+              ? 'bg-pf-accent-bg/18 text-pf-accent-text'
               : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
           )}
         >
@@ -823,9 +824,10 @@ export function Layout() {
         onClick={handleClick}
         onKeyDown={handleKeyDown}
         className={clsx(
+          // impeccable-disable-next-line side-tab -- Existing active navigation indicator, not a decorative card border.
           'group flex items-center rounded-sm border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
           isActive
-            ? 'border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent'
+            ? 'border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent-text'
             : 'border-transparent text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
         )}
       >
@@ -1026,12 +1028,13 @@ export function Layout() {
           <div className="flex min-w-0 items-center gap-3">
             <PrintFarmerLogoIcon decorative className="h-7 w-7 shrink-0 text-pf-accent" />
             <div className="min-w-0">
-              <div className="truncate text-lg font-bold uppercase tracking-wide text-pf-text-primary font-bebas">PrintFarmer</div>
+              <FarmIdentityBrand />
             </div>
             <span
               className={clsx('ml-1 h-2.5 w-2.5 rounded-full', isConnected ? 'bg-pf-success' : 'bg-pf-error')}
               title={isConnected ? 'Connected' : 'Disconnected'}
               aria-label={isConnected ? 'Connected' : 'Disconnected'}
+              role="status"
             />
           </div>
 
@@ -1076,7 +1079,7 @@ export function Layout() {
             <div className="flex min-w-0 items-center gap-2">
               <PrintFarmerLogoIcon decorative className="h-7 w-7 shrink-0 text-pf-accent" />
               <div className="min-w-0">
-                <div className="truncate text-lg font-bold text-pf-text-primary font-bebas uppercase">PrintFarmer</div>
+                <FarmIdentityBrand />
               </div>
             </div>
           </div>
@@ -1163,7 +1166,7 @@ export function Layout() {
               <div className="flex min-w-0 items-center gap-3">
                 <PrintFarmerLogoIcon decorative className="h-7 w-7 text-pf-accent" />
                 <div className="min-w-0">
-                  <div className="truncate text-base font-semibold text-pf-text-primary font-bebas uppercase">PrintFarmer</div>
+                  <FarmIdentityBrand />
                 </div>
               </div>
               <Button

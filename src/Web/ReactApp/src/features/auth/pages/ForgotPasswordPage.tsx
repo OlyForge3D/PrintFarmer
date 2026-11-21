@@ -46,13 +46,15 @@ export function ForgotPasswordPage() {
       <div className="min-h-screen flex items-center justify-center bg-pf-bg-0">
         <div className="bg-pf-bg-1 rounded-lg shadow-xl max-w-md w-full mx-4 border border-pf-border">
           <div className="flex items-center justify-between p-6 border-b border-pf-border">
-            <div className="flex items-center gap-2">
-              <PrintFarmerLogo size={32} className="mr-2" />
-              <span className="text-xl font-bold tracking-tight text-pf-accent">PRINTFARMER</span>
-              <span className="text-xl font-semibold text-pf-text-primary flex items-center ml-3">
-                <EmailIcon className="h-5 w-5 mr-2" />
-                Reset Email Sent
-              </span>
+            <div className="flex min-w-0 items-center gap-3">
+              <PrintFarmerLogo size={32} className="shrink-0" />
+              <div className="min-w-0">
+                <span className="block text-sm font-bold tracking-tight text-pf-accent">PRINTFARMER</span>
+                <h1 className="flex items-center text-xl font-semibold text-pf-text-primary">
+                  <EmailIcon className="mr-2 h-5 w-5 shrink-0" />
+                  Reset Email Sent
+                </h1>
+              </div>
             </div>
             <Button
               type="button"
@@ -97,13 +99,15 @@ export function ForgotPasswordPage() {
     <div className="min-h-screen flex items-center justify-center bg-pf-bg-0">
       <div className="bg-pf-bg-1 rounded-lg shadow-xl max-w-md w-full mx-4 border border-pf-border">
         <div className="flex items-center justify-between p-6 border-b border-pf-border">
-          <div className="flex items-center gap-2">
-            <PrintFarmerLogo size={32} className="mr-2" />
-            <span className="text-xl font-bold tracking-tight text-pf-accent">PRINTFARMER</span>
-            <span className="text-xl font-semibold text-pf-text-primary flex items-center ml-3">
-              <EmailIcon className="h-5 w-5 mr-2" />
-              Forgot Password
-            </span>
+          <div className="flex min-w-0 items-center gap-3">
+            <PrintFarmerLogo size={32} className="shrink-0" />
+            <div className="min-w-0">
+              <span className="block text-sm font-bold tracking-tight text-pf-accent">PRINTFARMER</span>
+              <h1 className="flex items-center text-xl font-semibold text-pf-text-primary">
+                <EmailIcon className="mr-2 h-5 w-5 shrink-0" />
+                Forgot Password
+              </h1>
+            </div>
           </div>
           <Button
             type="button"
@@ -132,6 +136,7 @@ export function ForgotPasswordPage() {
 
             <FormField
               label="Email Address"
+              htmlFor="email"
               inline={false}
             >
               <Input

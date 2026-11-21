@@ -72,7 +72,7 @@ describe('NotificationBell', () => {
       </TestWrapper>
     );
 
-    const button = screen.getByRole('button', { name: 'Notifications (1 unread)' });
+    const button = screen.getByRole('button', { name: 'Notifications, 1 unread notification' });
     expect(button).toBeInTheDocument();
     expect(button).toHaveAttribute('title', '1 unread notification');
 
@@ -92,7 +92,7 @@ describe('NotificationBell', () => {
       </TestWrapper>
     );
 
-    const button = screen.getByRole('button', { name: 'Notifications (5 unread)' });
+    const button = screen.getByRole('button', { name: 'Notifications, 5 unread notifications' });
     expect(button).toBeInTheDocument();
     expect(button).toHaveAttribute('title', '5 unread notifications');
 

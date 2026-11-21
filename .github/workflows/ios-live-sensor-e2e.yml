@@ -46,7 +46,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
@@ -164,7 +164,7 @@ jobs:
 
       - name: Upload live sensor E2E evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ios-live-sensor-e2e
           # Disposable per-run database is excluded; credentials are random,

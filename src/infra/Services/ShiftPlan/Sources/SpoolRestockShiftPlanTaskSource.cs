@@ -87,20 +87,27 @@ public sealed class SpoolRestockShiftPlanTaskSource(
             initialCentralSource,
             ct).ConfigureAwait(false);
 
+        CanonicalSpoolIdentity[] orderedOccurrences = OrderOccurrences(initialOccurrences).ToArray();
+        DateTime projectionStartedAtUtc = _clock.GetUtcNow().UtcDateTime;
+        IReadOnlyDictionary<CanonicalSpoolIdentity, SpoolBurnRateProjectionDto> projections =
+            await projectionService.ProjectAsync(orderedOccurrences, ct).ConfigureAwait(false);
+        DateTime projectionCompletedAtUtc = _clock.GetUtcNow().UtcDateTime;
+
         List<ShiftPlanTaskSpec> specs = new(initialOccurrences.Count);
         HashSet<string> preservedSourceIds = new(StringComparer.Ordinal);
-        foreach (CanonicalSpoolIdentity identity in OrderOccurrences(initialOccurrences))
+        List<(CanonicalSpoolIdentity Identity, SpoolBurnRateProjectionDto Projection)> readyProjections = [];
+        foreach (CanonicalSpoolIdentity identity in orderedOccurrences)
         {
             ct.ThrowIfCancellationRequested();
             string sourceId = BuildSourceId(identity);
-            DateTime callStartedAtUtc = _clock.GetUtcNow().UtcDateTime;
-            SpoolBurnRateProjectionDto projection = await projectionService
-                .ProjectAsync(identity, ct)
-                .ConfigureAwait(false);
-            DateTime callCompletedAtUtc = _clock.GetUtcNow().UtcDateTime;
+            if (!projections.TryGetValue(identity, out SpoolBurnRateProjectionDto? projection))
+            {
+                throw new InvalidOperationException(
+                    $"Spool-restock projection omitted requested identity {sourceId}.");
+            }
 
             EnsureProjectionIdentity(identity, projection);
-            if (IsLocallyStale(projection, callStartedAtUtc, callCompletedAtUtc))
+            if (IsLocallyStale(projection, projectionStartedAtUtc, projectionCompletedAtUtc))
             {
                 _ = preservedSourceIds.Add(sourceId);
                 continue;
@@ -109,14 +116,7 @@ public sealed class SpoolRestockShiftPlanTaskSource(
             switch (projection.State)
             {
                 case SpoolBurnRateProjectionState.Ready:
-                    FilamentCoverageSpoolSnapshot spoolSnapshot = await spoolResolver
-                        .ResolveSpoolAsync(identity, ct)
-                        .ConfigureAwait(false);
-                    specs.Add(ToSpec(
-                        identity,
-                        projection,
-                        RequireMatchingSpool(identity, projection, spoolSnapshot),
-                        initialSettings));
+                    readyProjections.Add((identity, projection));
                     break;
 
                 case SpoolBurnRateProjectionState.InsufficientData:
@@ -133,6 +133,29 @@ public sealed class SpoolRestockShiftPlanTaskSource(
                 default:
                     throw new InvalidOperationException(
                         $"Projection for {sourceId} returned unknown state {projection.State}.");
+            }
+        }
+
+        if (readyProjections.Count > 0)
+        {
+            CanonicalSpoolIdentity[] readyIdentities = readyProjections
+                .Select(item => item.Identity)
+                .ToArray();
+            IReadOnlyDictionary<CanonicalSpoolIdentity, FilamentCoverageSpoolSnapshot> finalSpools =
+                await spoolResolver.ResolveAsync(readyIdentities, ct).ConfigureAwait(false);
+            foreach ((CanonicalSpoolIdentity identity, SpoolBurnRateProjectionDto projection) in readyProjections)
+            {
+                if (!finalSpools.TryGetValue(identity, out FilamentCoverageSpoolSnapshot? spoolSnapshot))
+                {
+                    throw new InvalidOperationException(
+                        $"Ready spool {BuildSourceId(identity)} was omitted from the final inventory observation.");
+                }
+
+                specs.Add(ToSpec(
+                    identity,
+                    projection,
+                    RequireMatchingSpool(identity, projection, spoolSnapshot),
+                    initialSettings));
             }
         }
 

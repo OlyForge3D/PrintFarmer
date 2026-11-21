@@ -2070,7 +2070,8 @@ public class PrintersService(
                 null,
                 p.InMaintenance,
                 p.IsEnabled,
-                p.Model != null && p.ServiceState != null && p.ServiceState.LastModelSyncAt != null && p.Model.UpdatedAt > p.ServiceState.LastModelSyncAt))
+                p.Model != null && p.ServiceState != null && p.ServiceState.LastModelSyncAt != null && p.Model.UpdatedAt > p.ServiceState.LastModelSyncAt,
+                p.Model != null ? p.Model.UpdatedAt : null))
             .ToListAsync(ct);
 
         IReadOnlyDictionary<Guid, PrinterStatusDto> cachedStatuses = _statusCache.GetAllStatuses();
@@ -2192,7 +2193,8 @@ public class PrintersService(
                     ShowExternalSpool: p.ShowExternalSpool,
                     ActiveExtruderId: status.ActiveExtruderId,
                     SpeedFactorPercent: status.SpeedFactorPercent,
-                    FlowFactorPercent: status.FlowFactorPercent));
+                    FlowFactorPercent: status.FlowFactorPercent,
+                    IpAddress: PrinterClientUrl.ExtractIpAddress(p.ServerUrl)));
             }
             catch (Exception ex)
             {
@@ -2245,7 +2247,8 @@ public class PrintersService(
                     UseModelDispatchDefaults: p.UseModelDispatchDefaults,
                     RowVersion: p.RowVersion is { Length: > 0 } ? Convert.ToBase64String(p.RowVersion) : null,
                     ShowExternalSpool: p.ShowExternalSpool,
-                    PrintGuardEnabled: p.PrintGuardEnabled));
+                    PrintGuardEnabled: p.PrintGuardEnabled,
+                    IpAddress: PrinterClientUrl.ExtractIpAddress(p.ServerUrl)));
             }
         }
 
@@ -3490,7 +3493,7 @@ public class PrintersService(
 
             return await movement.HomeAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not PrinterBackendUnsupportedException)
         {
             _logger.LogWarning(ex, "Failed to send home command to printer {Id}", id);
             return false;
@@ -3529,7 +3532,7 @@ public class PrintersService(
 
             return await movement.HomeXYAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not PrinterBackendUnsupportedException)
         {
             _logger.LogWarning(ex, "Failed to home XY on printer {Id}", id);
             return false;
@@ -3568,7 +3571,7 @@ public class PrintersService(
 
             return false;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not PrinterBackendUnsupportedException)
         {
             _logger.LogWarning(ex, "Failed to home Z on printer {Id}", id);
             return false;
@@ -3658,6 +3661,11 @@ public class PrintersService(
                 return ok ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
             }
 
+            return PrinterControlOutcome.BackendUnsupported;
+        }
+        catch (PrinterBackendUnsupportedException)
+        {
+            _logger.LogInformation("Printer {Id} does not expose a native movement endpoint", id);
             return PrinterControlOutcome.BackendUnsupported;
         }
         catch (PrinterBackendBusyException)

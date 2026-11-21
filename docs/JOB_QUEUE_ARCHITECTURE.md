@@ -254,9 +254,10 @@ ordinary HTTP using the configured credentials. Jog and absolute movement save
 and restore G-code state without a restore move. No position, homing, geometry,
 clearance, or temperature snapshot precedes an interactive command. Klipper
 decides whether motion is executable against its current state and configuration.
-Static native capabilities enable controls; telemetry remains observational,
-not an admission requirement. Relative jogging does not require absolute
-movement support. This is not a claim of collision-free motion or correct
+The API retains native motion semantics, but web jog and coordinate entry
+require explicit homing telemetry for the selected axis. Home acceptance is
+not homing evidence; unknown axes stay disabled. Relative jogging does not
+require absolute movement support. This is not a claim of collision-free motion or correct
 firmware configuration. Automated and calibration workflows retain their
 separate evidence requirements and attempt-bound lifecycle safeguards.
 
@@ -615,6 +616,23 @@ typed `printer.file_delete` operation and never persist or return backend
 exception text.
 
 ---
+
+### Recurring idle-window queue observations
+
+Maintenance shift-plan compilation reads fresh immutable job facts for all
+candidate printers in sequential batches of at most 500 distinct printer IDs.
+The SQL projection includes only printer-occupying states from the shared
+occupancy policy, plus `Queued` and `Assigned`; it does not materialize tracked
+job entities, G-code navigations, or terminal history. Generic queue-history
+queries are unchanged.
+
+Batching does not relax maintenance eligibility. Occupying jobs exclude their
+printer; queued/assigned jobs close its window immediately, even without an
+ETA. Ready/preconfirmed gates, scorer ordering and failures, operator-recovery
+exclusions, and original-input watermarks retain their existing semantics.
+Batch failures propagate before any windows are returned, so the compiler
+does not receive authoritative absence evidence from a failed maintenance
+source. With no applicable alerts, that source still skips idle evaluation.
 
 ## Components Overview
 

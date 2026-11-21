@@ -40,6 +40,14 @@ const arrowClasses: Record<TooltipPosition, string> = {
   right: 'right-full top-1/2 -translate-y-1/2 border-r-pf-bg-2 border-y-transparent border-l-transparent',
 };
 
+// Fill the visual gap so the pointer can reach the tooltip without leaving it.
+const hoverBridgeClasses: Record<TooltipPosition, string> = {
+  top: 'top-full left-0 h-2 w-full',
+  bottom: 'bottom-full left-0 h-2 w-full',
+  left: 'left-full top-0 w-2 h-full',
+  right: 'right-full top-0 w-2 h-full',
+};
+
 const EDGE_MARGIN = 4;
 
 /** Horizontal bounds the tooltip must stay inside: the viewport, narrowed by any clipping ancestor. */
@@ -177,7 +185,7 @@ export const Tooltip: React.FC<TooltipProps> = ({
           className={clsx(
             'absolute z-50 px-2 py-1 text-xs font-medium rounded-sm shadow-lg',
             'bg-pf-bg-2 text-pf-text-primary border border-pf-border',
-            'whitespace-nowrap pointer-events-none',
+            'whitespace-nowrap',
             'animate-in fade-in-0 zoom-in-95 duration-150',
             positionClasses[position],
             className
@@ -186,6 +194,7 @@ export const Tooltip: React.FC<TooltipProps> = ({
           aria-hidden={ariaMode === 'hidden' ? true : undefined}
         >
           {content}
+          <div aria-hidden="true" className={clsx('absolute', hoverBridgeClasses[position])} />
           <div
             ref={arrowRef}
             className={clsx(

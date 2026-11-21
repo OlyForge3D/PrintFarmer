@@ -1,6 +1,9 @@
 ﻿using System.Net;
+using System.Text.Json;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,6 +14,105 @@ namespace Farm.Web.Api.Tests.Security;
 [Collection(IntegrationTestCollection.Name)]
 public sealed class PrinterEndpointRedactionTests
 {
+    [Fact]
+    public async Task PrinterList_ProjectsOnlyStoredNumericIp_WithoutChangingVisibilityOrRedaction()
+    {
+        using var factory = CustomWebApplicationFactory.CreateWithIsolatedDatabase();
+        using HttpClient admin = await factory.CreateAdminClientAsync();
+        using HttpClient viewer = await factory.CreateAuthenticatedClientAsync(
+            username: "ip-projection-viewer",
+            email: "ip-projection-viewer@example.com");
+        using HttpClient anonymous = factory.CreateClient();
+        (string Address, string? ExpectedIp, bool Online, bool Disabled, double? TimeLeft)[] cases =
+        [
+            ("http://192.0.2.10:7125", "192.0.2.10", true, false, null),
+            ("https://[2001:db8::10]:8443", "2001:db8::10", false, false, null),
+            ("http://embedded-user:embedded-password@192.0.2.11:7125/path?token=printer-token#private", "192.0.2.11", true, false, null),
+            ("http://embedded-user:embedded-password@[2001:db8::11]:7125/path?token=printer-token#private", "2001:db8::11", true, false, null),
+            ("http://printer.internal:7125", null, false, false, null),
+            ("not a URL", null, false, false, null),
+            ("", null, false, false, null),
+            ("file://192.0.2.12/private", null, false, false, null),
+            ("http://192.0.2.13:7125", "192.0.2.13", false, true, null),
+            ("http://192.0.2.14:7125", "192.0.2.14", true, false, double.MaxValue),
+        ];
+        var printerIds = new List<Guid>();
+
+        await using (AsyncServiceScope scope = factory.Services.CreateAsyncScope())
+        {
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            IPrinterStatusCacheWriter statuses = scope.ServiceProvider.GetRequiredService<IPrinterStatusCacheWriter>();
+            var manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = "IP projection manufacturer" };
+            var model = new PrinterModel
+            {
+                Id = Guid.NewGuid(),
+                Name = "IP projection model",
+                ManufacturerId = manufacturer.Id,
+            };
+            _ = db.Manufacturers.Add(manufacturer);
+            _ = db.PrinterModels.Add(model);
+            foreach (var testCase in cases)
+            {
+                Guid id = Guid.NewGuid();
+                printerIds.Add(id);
+                _ = db.Printers.Add(new Printer
+                {
+                    Id = id,
+                    Name = $"IP projection {printerIds.Count}",
+                    ServerUrl = testCase.Address,
+                    OriginalServerUrl = "http://printer-original.internal:7125",
+                    ApiKey = "printer-api-key",
+                    Backend = (int)PrinterBackend.Moonraker,
+                    BackendPort = 7125,
+                    IsEnabled = !testCase.Disabled,
+                    ManufacturerId = manufacturer.Id,
+                    ModelId = model.Id,
+                });
+                if (testCase.Online)
+                {
+                    // Out-of-range completion time exercises the existing exception fallback.
+                    statuses.UpdateStatus(new PrinterStatusDto(
+                        id, IsOnline: true, State: "idle", PrintTimeLeftSeconds: testCase.TimeLeft));
+                }
+            }
+            await db.SaveChangesAsync();
+        }
+
+        using HttpResponseMessage adminResponse = await admin.GetAsync("/api/printers?includeDisabled=true");
+        adminResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        string json = await adminResponse.Content.ReadAsStringAsync();
+        using JsonDocument document = JsonDocument.Parse(json);
+        document.RootElement.GetArrayLength().Should().Be(cases.Length);
+        for (int i = 0; i < cases.Length; i++)
+        {
+            JsonElement printer = document.RootElement.EnumerateArray()
+                .Single(item => item.GetProperty("id").GetGuid() == printerIds[i]);
+            string? actualIp = printer.TryGetProperty("ipAddress", out JsonElement ip) ? ip.GetString() : null;
+            actualIp.Should().Be(cases[i].ExpectedIp, "only the stored numeric host is an IP");
+            printer.GetProperty("isOnline").GetBoolean().Should()
+                .Be(cases[i].Online && cases[i].TimeLeft == null);
+            printer.TryGetProperty("backendUrl", out _).Should().BeFalse();
+            printer.TryGetProperty("originalServerUrl", out _).Should().BeFalse();
+            printer.TryGetProperty("apiKey", out _).Should().BeFalse();
+        }
+        AssertSecretsAreAbsent(json, includePrinterHost: false);
+
+        using HttpResponseMessage viewerResponse = await viewer.GetAsync("/api/printers");
+        viewerResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using JsonDocument viewerDocument = JsonDocument.Parse(await viewerResponse.Content.ReadAsStringAsync());
+        viewerDocument.RootElement.GetArrayLength().Should().Be(cases.Count(item => !item.Disabled));
+        viewerDocument.RootElement.EnumerateArray().Should().NotContain(
+            item => item.GetProperty("id").GetGuid() == printerIds[8]);
+        viewerDocument.RootElement.EnumerateArray()
+            .Single(item => item.GetProperty("id").GetGuid() == printerIds[0])
+            .GetProperty("ipAddress").GetString().Should().Be("192.0.2.10");
+
+        using HttpResponseMessage disabledResponse = await viewer.GetAsync("/api/printers?includeDisabled=true");
+        disabledResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        using HttpResponseMessage anonymousResponse = await anonymous.GetAsync("/api/printers");
+        anonymousResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
     [Fact]
     public async Task PrinterConfigurationAndCameraRoutes_ExposePasswordOnlyInAdminDetails()
     {

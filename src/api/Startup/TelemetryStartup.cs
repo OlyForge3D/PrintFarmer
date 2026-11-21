@@ -11,6 +11,8 @@ namespace Farm.Web.Api.Startup;
 /// </summary>
 public static class TelemetryStartup
 {
+    private static readonly string[] ServerRequestUrlTags = ["url.full", "http.url", "http.target"];
+
     /// <summary>
     /// Adds PrintFarmer OpenTelemetry configuration (tracing + metrics).
     /// Skipped for tests and when <c>DISABLE_TELEMETRY=true</c> in configuration.
@@ -56,14 +58,12 @@ public static class TelemetryStartup
                     {
                         _ = activity.SetTag("http.request.method", httpRequest.Method);
                         _ = activity.SetTag("http.request.path", httpRequest.Path);
-                        if (httpRequest.QueryString.HasValue)
-                        {
-                            _ = activity.SetTag("http.request.query", httpRequest.QueryString.Value);
-                        }
+                        RedactServerRequestQuery(activity);
                     };
                     options.EnrichWithHttpResponse = (activity, httpResponse) =>
                     {
                         _ = activity.SetTag("http.response.status_code", httpResponse.StatusCode);
+                        RedactServerRequestQuery(activity);
                     };
                 })
                 .AddHttpClientInstrumentation(options =>
@@ -153,6 +153,25 @@ public static class TelemetryStartup
         } // end skip-telemetry guard
 
         return services;
+    }
+
+    private static void RedactServerRequestQuery(System.Diagnostics.Activity activity)
+    {
+        // Enrichment runs after instrumentation adds URL tags, including when its
+        // query-redaction opt-out is enabled. Reapply at response completion before exporters.
+        _ = activity.SetTag("url.query", null);
+        _ = activity.SetTag("http.request.query", null);
+        foreach (string tag in ServerRequestUrlTags)
+        {
+            if (activity.GetTagItem(tag) is string value)
+            {
+                int queryStart = value.IndexOf('?');
+                if (queryStart >= 0)
+                {
+                    _ = activity.SetTag(tag, value[..queryStart]);
+                }
+            }
+        }
     }
 
     // -------------------------------------------------------------------------

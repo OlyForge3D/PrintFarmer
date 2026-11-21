@@ -25,6 +25,7 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { getErrorMessage } from '@/common/utils/apiErrors';
 import { BedSurfaceSettings } from '@/features/slicer/components/BedSurfaceSettings';
+import { getFilamentBedContext } from '@/features/slicer/utils/bedSurfaceTemperature';
 import { buildSlicerProfileJson } from '@/features/slicer/utils/slicerProfilePayload';
 import type { Model } from '@/types/models';
 
@@ -65,7 +66,7 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
   const [selectedMachineProfileId, setSelectedMachineProfileId] = useState('');
   const [selectedFilamentProfileId, setSelectedFilamentProfileId] = useState('');
   const [selectedProcessProfileId, setSelectedProcessProfileId] = useState('');
-  const [selectedBedType, setSelectedBedType] = useState('');
+  const [bedTypeOverride, setSelectedBedType] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   // Fetch printers
@@ -125,10 +126,9 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
   // Effective machine: user selection or first available
   const effectiveMachineProfileId = selectedMachineProfileId
     || (machineProfiles.length > 0 ? machineProfiles[0].name : '');
+  const effectiveMachineProfile = machineProfiles.find(profile => profile.name === effectiveMachineProfileId);
 
-  const machineNames = useMemo(() => {
-    return effectiveMachineProfileId ? [effectiveMachineProfileId] : [];
-  }, [effectiveMachineProfileId]);
+  const machineNames = effectiveMachineProfileId ? [effectiveMachineProfileId] : [];
 
   // Fetch filament profiles
   const { data: filamentProfiles = [] } = useQuery<OrcaFilamentProfile[]>({
@@ -183,6 +183,14 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
       setError(getErrorMessage(err, 'Failed to submit slice job'));
     },
   });
+
+  const bedContext = getFilamentBedContext(
+    effectiveMachineProfile?.settings,
+    processProfiles.find(profile => profile.name === effectiveProcessProfileId)?.settings,
+    bedTypeOverride,
+    effectiveMachineProfile?.manufacturer,
+  );
+  const selectedBedType = bedContext.supportMultiBedTypes === false ? '' : bedTypeOverride;
 
   const handleSubmit = useCallback(() => {
     setError(null);
@@ -355,10 +363,7 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
           id="qs-bed-type"
           selectedBedType={selectedBedType}
           onChange={setSelectedBedType}
-          machineSettings={machineProfiles.find(profile => profile.name === effectiveMachineProfileId)?.settings}
-          manufacturer={machineProfiles.find(profile => profile.name === effectiveMachineProfileId)?.manufacturer}
-          processSettings={processProfiles.find(profile => profile.name === effectiveProcessProfileId)?.settings}
-          filaments={[filamentProfiles.find(profile => profile.name === effectiveFilamentProfileId)]}
+          context={bedContext}
         />
 
         {error && <Alert type="error">{error}</Alert>}

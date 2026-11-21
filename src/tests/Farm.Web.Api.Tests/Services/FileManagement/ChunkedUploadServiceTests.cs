@@ -7,8 +7,10 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Quota;
+using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Web.Api.Services;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -233,6 +235,82 @@ public class ChunkedUploadServiceTests : IDisposable
         // Assert
         Assert.True(status.IsCompleted);
         Assert.Equal(fileSize, status.UploadedBytes);
+    }
+
+    [Fact]
+    public async Task AppendChunkWithMetadataAsync_CompletedGcode_ReusesExtractionForThumbnailAndResult()
+    {
+        const string userId = "user123";
+        byte[] chunk = [0x3B, 0x20, 0x67, 0x63, 0x6F, 0x64, 0x65];
+        GcodeMetadataExtracted metadata = new() { ThumbnailData = [1, 2, 3] };
+        string thumbnailPath = Path.Join(_testDirectory, "saved-thumbnail.png");
+        Mock<IGcodeUploadQuotaService> quotaService = CreateMockQuotaService(allow: true);
+
+        _mockMetadataExtractor
+            .Setup(extractor => extractor.ExtractMetadataFromStreamAsync(It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(metadata);
+        _mockThumbnailExtractor
+            .Setup(extractor => extractor.SaveThumbnailAsync(metadata, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(thumbnailPath);
+
+        ChunkedUploadInitResult initResult = _service.InitializeUpload(
+            userId, "test.gcode", chunk.Length, _testDirectory, [".gcode"]);
+
+        ChunkedUploadAppendResult result = await _service.AppendChunkWithMetadataAsync(
+            initResult.UploadId, 0, chunk, userId, quotaService.Object);
+
+        Assert.True(result.Status.IsCompleted);
+        Assert.Equal(thumbnailPath, result.Status.ThumbnailPath);
+        Assert.Same(metadata, result.ExtractedMetadata);
+        _mockMetadataExtractor.Verify(
+            extractor => extractor.ExtractMetadataFromStreamAsync(It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        _mockThumbnailExtractor.Verify(
+            extractor => extractor.SaveThumbnailAsync(metadata, It.IsAny<CancellationToken>()),
+            Times.Once);
+        _mockThumbnailExtractor.Verify(
+            extractor => extractor.ExtractAndSaveThumbnailAsync(It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task AppendChunkWithMetadataAsync_MalformedBgcode_CompletesWithoutMetadataOrThumbnail()
+    {
+        const string userId = "user123";
+        byte[] chunk = [0x47, 0x43, 0x44, 0x45];
+        Mock<IGcodeUploadQuotaService> quotaService = CreateMockQuotaService(allow: true);
+        Mock<IStoragePathService> storage = new();
+        storage.Setup(service => service.GetThumbnailDirectory()).Returns(_testDirectory);
+        GcodeMetadataExtractorService metadataExtractor = new(NullLogger<GcodeMetadataExtractorService>.Instance);
+        GcodeThumbnailExtractorService thumbnailExtractor = new(
+            metadataExtractor,
+            storage.Object,
+            NullLogger<GcodeThumbnailExtractorService>.Instance);
+        ChunkedUploadService uploadService = new(
+            _mockFileManagement.Object,
+            thumbnailExtractor,
+            metadataExtractor,
+            _mockLogger.Object);
+
+        ChunkedUploadInitResult initResult = uploadService.InitializeUpload(
+            userId, "malformed.bgcode", chunk.Length, _testDirectory, [".bgcode"]);
+
+        ChunkedUploadAppendResult result = await uploadService.AppendChunkWithMetadataAsync(
+            initResult.UploadId, 0, chunk, userId, quotaService.Object);
+
+        Assert.True(result.Status.IsCompleted);
+        Assert.NotNull(result.Status.FinalFilePath);
+        Assert.True(File.Exists(result.Status.FinalFilePath));
+        Assert.Null(result.Status.ThumbnailPath);
+        Assert.Null(result.ExtractedMetadata);
+        _mockLogger.Verify(
+            logger => logger.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains("Failed to extract G-code metadata", StringComparison.Ordinal)),
+                It.Is<Exception?>(exception => exception is BinaryGcodeFormatException),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
     }
 
     [Fact]

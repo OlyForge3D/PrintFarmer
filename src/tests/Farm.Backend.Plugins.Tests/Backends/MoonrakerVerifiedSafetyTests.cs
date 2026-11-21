@@ -4,6 +4,7 @@ using System.Text.Json;
 using Farm.Backend.Plugin.Moonraker;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Gcode.PrinterFiles;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Settings;
@@ -15,6 +16,47 @@ namespace Farm.Backend.Plugins.Tests.Backends;
 
 public sealed class MoonrakerVerifiedSafetyTests
 {
+    [Theory]
+    [InlineData("printing")]
+    [InlineData("paused")]
+    [InlineData("unknown")]
+    [InlineData("error")]
+    [InlineData("failure")]
+    public async Task GetPrinterStatusAsync_LaterActivityNotIdle_DoesNotTrustEarlierIdleComposite(string activity)
+    {
+        using var handler = new InlineHandler(request =>
+        {
+            bool movement = request.RequestUri!.Query.Contains("webhooks=state", StringComparison.Ordinal);
+            if (movement && activity == "failure")
+            {
+                return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+            }
+
+            return request.RequestUri.AbsolutePath == "/printer/info"
+                ? JsonResponse("""{"result":{"state":"ready"}}""")
+                : JsonResponse($$$$$"""
+                    {"result":{"status":{"webhooks":{"state":"ready"},"print_stats":{"state":"{{{{{(movement ? activity : "standby")}}}}}"},"toolhead":{"homed_axes":"xyz"},"gcode_move":{}}}}
+                    """);
+        });
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings());
+        var breakers = new Mock<ICircuitBreakerService>();
+        breakers.Setup(service => service.GetCircuitBreaker(It.IsAny<string>(), null, null, null))
+            .Returns(new CircuitBreaker());
+        var statusClient = new MoonrakerStatusClient(client, breakers.Object,
+            new ManagedSpoolProviderHelper(Mock.Of<ISpoolmanStatusCache>(), NullLogger<ManagedSpoolProviderHelper>.Instance),
+            NullLogger<MoonrakerStatusClient>.Instance);
+        DateTime observedAt = DateTime.UtcNow;
+
+        PrinterStatusDto status = await statusClient.GetPrinterStatusAsync(
+            new Printer { Id = Guid.NewGuid(), Name = "Activity fixture", ServerUrl = "http://fixture.invalid", BackendPort = 7125 },
+            CancellationToken.None);
+
+        Assert.False(PrinterFileIndexPolicy.IsConfirmedIdle(new(status, observedAt), DateTime.UtcNow));
+        Assert.Equal(activity == "failure" ? null : activity, status.RawActivityState);
+        Assert.Equal(activity != "failure", status.IsOnline);
+    }
+
     [Fact]
     public async Task GetPrinterStatusAsync_AuthoritativeCompositeOffline_DoesNotUseSuccessfulMovementReadback()
     {

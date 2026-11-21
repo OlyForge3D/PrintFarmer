@@ -27,11 +27,12 @@ interface MachineCompatibleProfilesOptions {
   enabled: boolean;
   engineVersion?: string;
   summary?: boolean;
+  processMachineNames?: string[];
 }
 
 export function useMachineCompatibleProfiles(
   machineNames: string[],
-  { enabled, engineVersion, summary = false }: MachineCompatibleProfilesOptions,
+  { enabled, engineVersion, summary = false, processMachineNames = machineNames }: MachineCompatibleProfilesOptions,
 ) {
   const filamentProfilesQuery = useQuery<OrcaFilamentProfile[]>({
     queryKey: [
@@ -50,14 +51,14 @@ export function useMachineCompatibleProfiles(
   const processProfilesQuery = useQuery<OrcaProcessProfile[]>({
     queryKey: [
       'processProfilesForMachines',
-      machineNames,
+      processMachineNames,
       engineVersion ?? null,
       summary ? 'summary' : 'full',
     ],
     queryFn: () => summary
-      ? slicerProfilesService.getProcessProfilesForMachines(machineNames, engineVersion, 'summary')
-      : slicerProfilesService.getProcessProfilesForMachines(machineNames, engineVersion),
-    enabled: enabled && machineNames.length > 0,
+      ? slicerProfilesService.getProcessProfilesForMachines(processMachineNames, engineVersion, 'summary')
+      : slicerProfilesService.getProcessProfilesForMachines(processMachineNames, engineVersion),
+    enabled: enabled && processMachineNames.length > 0,
     staleTime: 30_000,
   });
 
@@ -67,6 +68,7 @@ export function useMachineCompatibleProfiles(
 export function isProcessProfileCompatibleWithMachine(
   profile: OrcaProcessProfile,
   selectedMachine: Pick<OrcaMachineProfile, 'name' | 'isHighFlowNozzle'> | null | undefined,
+  machineNames: readonly string[] = selectedMachine ? [selectedMachine.name] : [],
 ): boolean {
   const selectedMachineName = selectedMachine?.name ?? '';
   const compatiblePrinters = Array.isArray(profile.compatible_printers)
@@ -76,7 +78,7 @@ export function isProcessProfileCompatibleWithMachine(
   if (
     selectedMachineName
     && compatiblePrinters.length > 0
-    && !compatiblePrinters.some((printerName) => printerName === selectedMachineName)
+    && !compatiblePrinters.some((printerName) => machineNames.includes(printerName))
   ) {
     return false;
   }

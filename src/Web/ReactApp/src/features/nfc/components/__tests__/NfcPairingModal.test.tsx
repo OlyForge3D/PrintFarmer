@@ -69,7 +69,7 @@ describe('NfcPairingModal', () => {
       {},
       { timeout: 3_000 },
     );
-    await user.click(await screen.findByRole('option'));
+    await user.click(await screen.findByRole('button', { name: /PLA spool/ }));
     await user.click(screen.getByRole('button', { name: 'Link' }));
 
     await waitFor(() => {

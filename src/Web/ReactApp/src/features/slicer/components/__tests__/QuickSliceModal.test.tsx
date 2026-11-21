@@ -268,7 +268,7 @@ describe('QuickSliceModal', () => {
   });
 
   describe('bed type override', () => {
-    it('displays the inherited textured temperatures and submits only an explicit surface override', async () => {
+    it('hides the selector and submits no bed override for a single-bed machine', async () => {
       vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValueOnce([
         { name: 'Micron representative', manufacturer: 'Voron', settings: {
           curr_bed_type: 'Textured PEI Plate', support_multi_bed_types: '0',
@@ -277,19 +277,17 @@ describe('QuickSliceModal', () => {
       vi.mocked(slicerProfilesService.getFilamentProfilesForMachines).mockResolvedValueOnce([
         { name: 'PLA', material: 'PLA', nozzleTemperature: 210, bedTemperature: 0, printSpeed: 60, settings: {
           hot_plate_temp_initial_layer: ['0'], hot_plate_temp: ['0'],
-          textured_plate_temp_initial_layer: ['65'], textured_plate_temp: ['60'],
+          textured_plate_temp_initial_layer: ['0'], textured_plate_temp: ['0'],
         } },
       ]);
       renderModal();
-      await screen.findByText('Bed first layer: 65°C; other layers: 60°C');
-      expect(screen.getByLabelText('Bed Type')).toHaveValue('');
-      fireEvent.change(screen.getByLabelText('Bed Type'), { target: { value: 'High Temp Plate' } });
-      expect(screen.getByText('Bed first layer: 0°C; other layers: 0°C')).toBeInTheDocument();
       await waitFor(() => expect(screen.getByRole('button', { name: /^Slice$/ })).toBeEnabled());
+      expect(screen.queryByLabelText('Bed Type')).not.toBeInTheDocument();
+      expect(screen.queryByText(/\d+°C/)).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: /^Slice$/ }));
       await waitFor(() => expect(mockSubmitJob).toHaveBeenCalledOnce());
       expect(JSON.parse(mockSubmitJob.mock.calls[0][0].slicerProfileJson).overrides)
-        .toEqual({ curr_bed_type: 'High Temp Plate' });
+        .not.toHaveProperty('curr_bed_type');
     });
 
     it('defaults to "Inherit from profile"', async () => {

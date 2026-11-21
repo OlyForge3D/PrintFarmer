@@ -30,9 +30,12 @@ test('scopes SwiftUI views, theme source, and asset catalogs', () => {
 test('scopes shared design and reviewer policy artifacts', () => {
   for (const filePath of [
     '.impeccable/config.json',
+    '.impeccable/ui-count-ceiling.json',
+    'docs/design/ui-source-baseline.json',
     '.github/hooks/impeccable.json',
     '.github/workflows/ci.yml',
     '.github/workflows/design-detector.yml',
+    '.github/workflows/ui-count-ratchet.yml',
     '.github/workflows/squad-review-verdict.yml',
     '.github/copilot-instructions.md',
     '.github/pull_request_template.md',

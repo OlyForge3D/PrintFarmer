@@ -11,13 +11,12 @@ interface Props {
 
 export default function PrinterBulkControls({ selectedIds, printersById, onDelete, onBulkSetMaintenance }: Props) {
   const auth = useAuth();
-
   if (!selectedIds || selectedIds.length === 0) return null;
 
   const selectedPrinters = selectedIds.map(id => printersById[id]).filter(Boolean);
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       {auth.hasPermission('printers', 'delete') && (
         <Button variant="danger" size="sm" onClick={() => onDelete(selectedPrinters)}>
           Delete {selectedIds.length} Selected

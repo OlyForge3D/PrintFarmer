@@ -103,9 +103,18 @@ vi.mock('react-router', () => ({
   Link: ({ children, to }: { children: React.ReactNode; to: string }) => <a href={to}>{children}</a>,
 }));
 
-function renderModal(onClose = vi.fn(), onSwitchToRegister = vi.fn()) {
+function renderModal(
+  onClose = vi.fn(),
+  onSwitchToRegister = vi.fn(),
+  onLoginSuccess?: () => void,
+) {
   return render(
-    <LoginModal isOpen={true} onClose={onClose} onSwitchToRegister={onSwitchToRegister} />,
+    <LoginModal
+      isOpen={true}
+      onClose={onClose}
+      onSwitchToRegister={onSwitchToRegister}
+      onLoginSuccess={onLoginSuccess}
+    />,
   );
 }
 
@@ -162,6 +171,23 @@ describe('LoginModal — passkey sign-in', () => {
     await waitFor(() => {
       expect(onClose).toHaveBeenCalled();
     });
+  });
+
+  it('calls the success callback instead of closing after passkey login when provided', async () => {
+    mockLoginWithPasskey.mockResolvedValue(true);
+    const onClose = vi.fn();
+    const onLoginSuccess = vi.fn();
+    renderModal(onClose, vi.fn(), onLoginSuccess);
+
+    fireEvent.change(screen.getByPlaceholderText(/enter your username or email/i), {
+      target: { value: 'alice' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /sign in with passkey/i }));
+
+    await waitFor(() => {
+      expect(onLoginSuccess).toHaveBeenCalled();
+    });
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('does not call onClose after a failed passkey login', async () => {

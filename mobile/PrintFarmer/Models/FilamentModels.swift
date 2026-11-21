@@ -259,6 +259,30 @@ struct SpoolmanSpoolRequest: Codable, Sendable {
     var hasNfcTag: Bool?
 }
 
+struct SpoolmanTagScanRequest: Codable, Sendable {
+    let uid: String
+    let format: String?
+    let payloadB64: String?
+
+    init(uid: String, format: String? = nil, payloadB64: String? = nil) {
+        self.uid = uid
+        self.format = format
+        self.payloadB64 = payloadB64
+    }
+}
+
+struct SpoolmanTagLinkRequest: Codable, Sendable {
+    let uid: String
+}
+
+struct SpoolmanTagScanResponse: Codable, Sendable {
+    let matchedSpoolId: Int?
+    let matchedFilamentId: Int?
+    let spool: SpoolmanSpool?
+    let filament: SpoolmanFilament?
+    let created: Bool?
+}
+
 // MARK: - Set Active Spool Request (matches SetActiveSpoolRequest)
 
 struct SetActiveSpoolRequest: Codable, Sendable {

@@ -7,6 +7,7 @@ export default defineConfig({
   outputDir: '../../test-results/marketing',
   workers: 1,
   retries: 0,
+  updateSnapshots: 'none',
   timeout: 60_000,
   expect: { timeout: 20_000 },
   reporter: 'list',

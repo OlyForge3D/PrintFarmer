@@ -16,6 +16,8 @@ export interface FilamentBedContext {
 }
 
 function readNativeBoolean(value: unknown): boolean | undefined {
+  if (Array.isArray(value) && value.length === 1) [value] = value;
+  if (typeof value === 'string') value = value.trim().toLowerCase();
   if (value === true || value === 'true' || value === '1' || value === 1) return true;
   if (value === false || value === 'false' || value === '0' || value === 0) return false;
   return undefined;
@@ -28,9 +30,10 @@ export function getFilamentBedContext(
   const model = machine?.printer_model;
   const isBambu = ['bbl', 'bambu', 'bambu lab', 'bambulab'].includes(vendor ?? '')
     || (!vendor && typeof model === 'string' && model.trimStart().toLowerCase().startsWith('bambu lab'));
+  const supportMultiBedTypes = isBambu || readNativeBoolean(machine?.support_multi_bed_types);
   return {
-    bedType: resolveBedType(selectedBedType, process, machine),
-    supportMultiBedTypes: isBambu || readNativeBoolean(machine?.support_multi_bed_types),
+    bedType: resolveBedType(supportMultiBedTypes === false ? '' : selectedBedType, process, machine),
+    supportMultiBedTypes,
   };
 }
 
@@ -55,28 +58,4 @@ export function readBedType(value: unknown): string | undefined {
 
 export function resolveBedType(selectedBedType: string, process: Settings, machine: Settings): string | undefined {
   return selectedBedType || readBedType(process?.curr_bed_type) || readBedType(machine?.curr_bed_type);
-}
-
-function temperatures(value: unknown): Array<number | null> {
-  const values: unknown[] = Array.isArray(value) ? value : [value];
-  return values.length === 0 ? [null] : values.map(item => {
-    if (typeof item !== 'number' && (typeof item !== 'string' || !/^\d+(?:\.\d+)?$/.test(item.trim()))) {
-      return null;
-    }
-    const number = Number(item);
-    return Number.isFinite(number) && number >= 0 ? number : null;
-  });
-}
-
-/** Per-filament profile values only, not a prediction of start-G-code heating. */
-export function getBedSurfaceTemperatures(bedType: string | undefined, settings: Settings) {
-  const key = bedType ? BED_TEMPERATURE_KEYS.get(bedType) : undefined;
-  return {
-    firstLayer: temperatures(key ? settings?.[`${key}_initial_layer`] : undefined),
-    otherLayers: temperatures(key ? settings?.[key] : undefined),
-  };
-}
-
-export function formatBedTemperatures(values: Array<number | null>): string {
-  return values.map(value => value === null ? 'Unknown' : `${value}°C`).join(' / ');
 }

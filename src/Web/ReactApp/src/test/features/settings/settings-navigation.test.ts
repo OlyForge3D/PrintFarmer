@@ -6,19 +6,84 @@ import {
   buildSettingsCommandItems,
   getFuzzyMatchIndices,
   getFuzzyResult,
+  getSettingsCategoryDestinations,
   groupRankedResults,
   KIND_SECTION_ORDER,
   normalizeSearchQuery,
   rankSettingsCommandItems,
   resolveSettingsNavigationTarget,
-  SETTINGS_GROUP_TO_LOCATION,
   withRetainedQuery,
   type SettingsCommandItem,
 } from '@/features/settings/settings-navigation';
-import { SUB_PAGE_ALLOWED_GROUPS } from '@/features/settings/subpage-groups';
+import {
+  getSettingsSectionLocation,
+  getSettingsSectionPage,
+  SETTINGS_GROUP_TO_LOCATION,
+  SETTINGS_SECTION_TO_LOCATION,
+} from '@/features/settings/subpage-groups';
 import type { AdminDestination } from '@/features/admin/registry/adminDestinations';
 import type { SettingMetadata } from '@/common/components/SettingsPagelet';
 import type { SettingGroupMetadata } from '@/services/settingsApi';
+
+describe('getSettingsCategoryDestinations', () => {
+  it('includes Farm Identity with system categories and never adds personal settings', () => {
+    const cards = getSettingsCategoryDestinations({ hasRole: () => true, hasPermission: () => true });
+    expect(cards.map(card => card.label)).toEqual([
+      'Farm Identity',
+      'System',
+      'Failure Detection',
+      'Costs & Energy',
+      'Planning',
+      'Operator Features',
+      'Slicing',
+      'Hardware',
+      'Integrations',
+      'Quotas',
+      'Users',
+      'Data',
+    ]);
+    expect(cards.every(card => card.icon && card.description)).toBe(true);
+    expect(new Set(cards.map(card => card.path)).size).toBe(12);
+  });
+
+  it.each([
+    ['system_settings', [
+      'identity.details',
+      'system.',
+      'failure-detection.',
+      'costs.',
+      'planning.',
+      'operator-features.',
+      'slicing.defaults',
+      'integrations.connections',
+      'data.auto-tagging',
+    ]],
+    ['roles', ['users.roles']],
+    ['users', ['users.accounts']],
+    ['printers', ['hardware.printer-groups']],
+    ['nfc_devices', ['hardware.nfc']],
+    ['bed_type', ['slicing.bed-types']],
+    ['telegram', ['integrations.connections']],
+    ['quota', ['quotas.']],
+    ['tags', ['data.tags']],
+    ['catalog', []],
+    ['power_monitors', []],
+    ['locations', []],
+  ])('routes a %s-only delegate directly to their first authorized leaf', (resource, expected) => {
+    const cards = getSettingsCategoryDestinations({
+      hasRole: () => false,
+      hasPermission: (r, action) => r === resource && action === 'admin',
+    });
+    expect(cards.map(card => {
+      const params = new URLSearchParams(card.path.split('?')[1]);
+      return `${params.get('tab')}.${params.get('sub') ?? ''}`;
+    })).toEqual(expected);
+  });
+
+  it('does not invent a settings category for a user with no grants', () => {
+    expect(getSettingsCategoryDestinations({ hasRole: () => false, hasPermission: () => false })).toEqual([]);
+  });
+});
 
 describe('resolveSettingsNavigationTarget', () => {
   it('resolves the new appearance subtab without redirect aliases', () => {
@@ -62,8 +127,7 @@ describe('resolveSettingsNavigationTarget', () => {
   it('falls back to the first available category when tab is invalid', () => {
     expect(resolveSettingsNavigationTarget('not-real', undefined, 'system')).toEqual({
       scopeId: 'system',
-      categoryId: 'general',
-      subPageId: 'farm',
+      categoryId: 'system',
     });
   });
 
@@ -75,11 +139,48 @@ describe('resolveSettingsNavigationTarget', () => {
     });
   });
 
-  it('falls back within the route scope when the tab is not canonical', () => {
+  it('maps legacy General and Automation tabs to their replacement categories', () => {
     expect(resolveSettingsNavigationTarget('operations', 'workers', 'system')).toEqual({
       scopeId: 'system',
-      categoryId: 'general',
-      subPageId: 'farm',
+      categoryId: 'system',
+    });
+
+    expect(resolveSettingsNavigationTarget('general', 'farm', 'system')).toEqual({
+      scopeId: 'system',
+      categoryId: 'costs',
+    });
+    expect(resolveSettingsNavigationTarget('general', undefined, 'system')).toEqual({
+      scopeId: 'system',
+      categoryId: 'costs',
+    });
+    expect(resolveSettingsNavigationTarget('general', 'system', 'system')).toEqual({
+      scopeId: 'system',
+      categoryId: 'system',
+    });
+    expect(resolveSettingsNavigationTarget('general', 'automation', 'system')).toEqual({
+      scopeId: 'system',
+      categoryId: 'planning',
+    });
+    expect(resolveSettingsNavigationTarget('automation', undefined, 'system')).toEqual({
+      scopeId: 'system',
+      categoryId: 'planning',
+    });
+  });
+
+  it('uses section-aware legacy links and canonicalizes retired hardware sub-pages', () => {
+    expect(resolveSettingsNavigationTarget('general', 'farm', 'system', 'Obico.Enabled')).toEqual({
+      scopeId: 'system',
+      categoryId: 'failure-detection',
+    });
+    expect(resolveSettingsNavigationTarget('hardware', 'nfc-bindings', 'system')).toEqual({
+      scopeId: 'system',
+      categoryId: 'hardware',
+      subPageId: 'nfc',
+    });
+    expect(resolveSettingsNavigationTarget('hardware', 'custom-fields', 'system')).toEqual({
+      scopeId: 'system',
+      categoryId: 'data',
+      subPageId: 'custom-fields',
     });
   });
 });
@@ -93,8 +194,8 @@ describe('buildSettingsPath', () => {
 
   it('routes system scope to /admin/settings', () => {
     expect(
-      buildSettingsPath({ scopeId: 'system', categoryId: 'general', subPageId: 'farm' }),
-    ).toBe('/admin/settings?scope=system&tab=general&sub=farm');
+      buildSettingsPath({ scopeId: 'system', categoryId: 'system' }),
+    ).toBe('/admin/settings?scope=system&tab=system');
   });
 
   it('routes user scope to /settings and omits sub when not provided', () => {
@@ -107,11 +208,19 @@ describe('buildSettingsPath', () => {
     expect(
       buildSettingsPath({
         scopeId: 'system',
-        categoryId: 'general',
-        subPageId: 'farm',
-        field: 'FarmName',
+        categoryId: 'costs',
+        field: 'CostTracking.ElectricityRate',
       }),
-    ).toBe('/admin/settings?scope=system&tab=general&sub=farm&field=FarmName');
+    ).toBe('/admin/settings?scope=system&tab=costs&field=CostTracking.ElectricityRate');
+  });
+
+  it('routes maintenance field links to the maintenance settings tab', () => {
+    expect(buildSettingsPath({
+      scopeId: 'system',
+      categoryId: 'maintenance',
+      subPageId: 'settings',
+      field: 'MaintenanceAlerts.Enabled',
+    })).toBe('/maintenance?tab=settings&field=MaintenanceAlerts.Enabled');
   });
 });
 
@@ -147,19 +256,19 @@ describe('buildAdminDestinationCommandItems', () => {
 describe('buildSettingCommandItems', () => {
   const metadata: SettingMetadata[] = [
     {
-      key: 'FarmSettings',
-      className: 'FarmSettings',
-      displayName: 'Farm Settings',
-      group: 'General',
+      key: 'CostTracking',
+      className: 'CostTrackingSettings',
+      displayName: 'Cost Tracking',
+      group: 'Operations',
       properties: [
         {
-          name: 'FarmName',
+          name: 'ElectricityRate',
           type: 'string',
           attributes: [],
-          display: { name: 'Farm Name', description: 'Human-readable farm name.' },
+          display: { name: 'Electricity Rate', description: 'Default electricity rate.' },
         },
         {
-          name: 'MotdMessage',
+          name: 'Currency',
           type: 'string',
           attributes: [],
         },
@@ -173,30 +282,28 @@ describe('buildSettingCommandItems', () => {
     },
   ];
 
-  const groups: SettingGroupMetadata[] = [
-    { key: 'General', displayName: 'General', order: 0 },
-  ];
+  const groups: SettingGroupMetadata[] = [{ key: 'Operations', displayName: 'Operations', order: 0 }];
 
   it('emits one item per property with a field-scoped href', () => {
     const items = buildSettingCommandItems(metadata, groups);
-    const farmName = items.find((item) => item.id === 'setting.FarmSettings.FarmName');
-    expect(farmName).toBeDefined();
-    expect(farmName?.kind).toBe('setting');
-    expect(farmName?.label).toBe('Farm Name');
+    const electricityRate = items.find((item) => item.id === 'setting.CostTracking.ElectricityRate');
+    expect(electricityRate).toBeDefined();
+    expect(electricityRate?.kind).toBe('setting');
+    expect(electricityRate?.label).toBe('Electricity Rate');
     // Qualified with the section key — property names are not unique across
     // sections, and several sections render on the same page.
-    expect(farmName?.href).toContain('field=FarmSettings.FarmName');
-    expect(farmName?.href).toContain('scope=system');
-    expect(farmName?.href).toContain('tab=general');
+    expect(electricityRate?.href).toBe(
+      '/admin/settings?scope=system&tab=costs&field=CostTracking.ElectricityRate',
+    );
   });
 
   it('falls back to the property name when no display metadata is present', () => {
     const items = buildSettingCommandItems(metadata, groups);
-    const motd = items.find((item) => item.id === 'setting.FarmSettings.MotdMessage');
-    expect(motd?.label).toBe('MotdMessage');
+    const currency = items.find((item) => item.id === 'setting.CostTracking.Currency');
+    expect(currency?.label).toBe('Currency');
   });
 
-  it('routes the Job Queue group to the automation sub-page', () => {
+  it('routes the Job Queue group to Planning', () => {
     // `HistorySeedingBackgroundService` declares Group = "Job Queue". A group with
     // no entry here is silently skipped by the palette (`if (!location) continue`),
     // which is how that section ended up unreachable by any route.
@@ -205,7 +312,34 @@ describe('buildSettingCommandItems', () => {
     // backend section metadata. The real guard that every backend-declared group
     // has a location entry is tracked as issue #951.
     expect(SETTINGS_GROUP_TO_LOCATION['Job Queue']).toBeDefined();
-    expect(SETTINGS_GROUP_TO_LOCATION['Job Queue']?.subPageId).toBe('automation');
+    expect(SETTINGS_GROUP_TO_LOCATION['Job Queue']).toEqual({
+      scopeId: 'system',
+      categoryId: 'planning',
+    });
+  });
+
+  it.each([
+    ['CostTracking', 'Operations', '/admin/settings?scope=system&tab=costs&field=CostTracking.Enabled'],
+    ['Obico', 'Monitoring', '/admin/settings?scope=system&tab=failure-detection&field=Obico.Enabled'],
+    ['SlicerSettings', 'Operations', '/admin/settings?scope=system&tab=slicing&sub=defaults&field=SlicerSettings.Enabled'],
+    ['OperatorFeatures', 'Operations', '/admin/settings?scope=system&tab=operator-features&field=OperatorFeatures.Enabled'],
+    ['AutoTagging', 'Operations', '/admin/settings?scope=system&tab=data&sub=auto-tagging&field=AutoTagging.Enabled'],
+    ['QueuePlanning', 'Operations', '/admin/settings?scope=system&tab=planning&field=QueuePlanning.Enabled'],
+    ['ShiftPlan', 'Operations', '/admin/settings?scope=system&tab=planning&field=ShiftPlan.Enabled'],
+    ['SpoolCoverage', 'Operations', '/admin/settings?scope=system&tab=planning&field=SpoolCoverage.Enabled'],
+    ['HistorySeeding', 'Job Queue', '/admin/settings?scope=system&tab=planning&field=HistorySeeding.Enabled'],
+    ['MaintenanceAlerts', 'Maintenance', '/maintenance?tab=settings&field=MaintenanceAlerts.Enabled'],
+    ['PrintStatisticsSync', 'Maintenance', '/maintenance?tab=settings&field=PrintStatisticsSync.Enabled'],
+  ])('links real %s section metadata directly to its home', (key, group, href) => {
+    const section: SettingMetadata = {
+      key,
+      className: `${key}Settings`,
+      group,
+      properties: [{ name: 'Enabled', type: 'bool', attributes: [] }],
+    };
+
+    const [item] = buildSettingCommandItems([section], [{ key: group, displayName: group, order: 0 }]);
+    expect(item?.href).toBe(href);
   });
 
   it('disambiguates a property name shared by two sections on the same page', () => {
@@ -214,26 +348,28 @@ describe('buildSettingCommandItems', () => {
     // section rendered first, so the href must carry the section key.
     const shared: SettingMetadata[] = [
       {
-        key: 'ObicoSettings',
-        className: 'ObicoSettings',
-        group: 'General',
+        key: 'QueuePlanning',
+        className: 'QueuePlanningSettings',
+        group: 'Operations',
         properties: [{ name: 'Enabled', type: 'bool', attributes: [] }],
       },
       {
-        key: 'TelegramSettings',
-        className: 'TelegramSettings',
-        group: 'General',
+        key: 'ShiftPlan',
+        className: 'ShiftPlanSettings',
+        group: 'Operations',
         properties: [{ name: 'Enabled', type: 'bool', attributes: [] }],
       },
     ];
 
-    const items = buildSettingCommandItems(shared, groups);
-    const obico = items.find((item) => item.id === 'setting.ObicoSettings.Enabled');
-    const telegram = items.find((item) => item.id === 'setting.TelegramSettings.Enabled');
+    const items = buildSettingCommandItems(shared, [
+      { key: 'Operations', displayName: 'Operations', order: 0 },
+    ]);
+    const queuePlanning = items.find((item) => item.id === 'setting.QueuePlanning.Enabled');
+    const shiftPlan = items.find((item) => item.id === 'setting.ShiftPlan.Enabled');
 
-    expect(obico?.href).toContain('field=ObicoSettings.Enabled');
-    expect(telegram?.href).toContain('field=TelegramSettings.Enabled');
-    expect(obico?.href).not.toBe(telegram?.href);
+    expect(queuePlanning?.href).toContain('field=QueuePlanning.Enabled');
+    expect(shiftPlan?.href).toContain('field=ShiftPlan.Enabled');
+    expect(queuePlanning?.href).not.toBe(shiftPlan?.href);
   });
 
   it('skips sections whose group is not mapped to a settings location', () => {
@@ -247,80 +383,57 @@ describe('buildSettingCommandItems', () => {
   });
 });
 
-describe('SETTINGS_GROUP_TO_LOCATION', () => {
-  it('covers every group used by the settings backend that has a rendered destination', () => {
-    // Regression guard: if a new backend group ships without a mapping the
-    // palette will silently drop those settings. Explicitly assert the ones we
-    // rely on so anyone renaming a group in the shell has to update this map.
-    expect(SETTINGS_GROUP_TO_LOCATION.General).toBeDefined();
-    expect(SETTINGS_GROUP_TO_LOCATION.Slicing).toBeDefined();
-    expect(SETTINGS_GROUP_TO_LOCATION.Integrations).toBeDefined();
+describe('settings section locations', () => {
+  it('maps persisted setting groups to the approved settings homes', () => {
+    expect(SETTINGS_GROUP_TO_LOCATION).toEqual({
+      FarmIdentity: { scopeId: 'system', categoryId: 'identity', subPageId: 'details' },
+      System: { scopeId: 'system', categoryId: 'system' },
+      Networking: { scopeId: 'system', categoryId: 'system' },
+      Catalog: { scopeId: 'system', categoryId: 'system' },
+      Files: { scopeId: 'system', categoryId: 'system' },
+      Printers: { scopeId: 'system', categoryId: 'system' },
+      Operations: { scopeId: 'system', categoryId: 'planning' },
+      Monitoring: { scopeId: 'system', categoryId: 'failure-detection' },
+      Maintenance: { scopeId: 'system', categoryId: 'maintenance', subPageId: 'settings' },
+      'Job Queue': { scopeId: 'system', categoryId: 'planning' },
+      Integrations: { scopeId: 'system', categoryId: 'integrations', subPageId: 'connections' },
+      Slicing: { scopeId: 'system', categoryId: 'slicing', subPageId: 'defaults' },
+    });
   });
 
-  it('maps every group referenced from a sub-page\'s allowedGroups', () => {
-    // Adding a settings group requires editing BOTH `SUB_PAGE_ALLOWED_GROUPS`
-    // in `SettingsShell.tsx` AND `SETTINGS_GROUP_TO_LOCATION` here. Miss either
-    // and the group silently disappears from both the UI (the shell doesn't
-    // render it) and the command palette (`if (!location) continue`). This is
-    // exactly how the Job Queue group went missing in the first place.
-    const referencedGroups = new Set<string>();
-    for (const groups of Object.values(SUB_PAGE_ALLOWED_GROUPS)) {
-      for (const group of groups) {
-        referencedGroups.add(group);
-      }
-    }
-    for (const group of referencedGroups) {
-      expect(
-        SETTINGS_GROUP_TO_LOCATION[group],
-        `group "${group}" appears in a sub-page's allowedGroups but has no SETTINGS_GROUP_TO_LOCATION mapping`,
-      ).toBeDefined();
-    }
+  it('maps real section keys to their canonical homes, including browser slicer and maintenance settings', () => {
+    expect(SETTINGS_SECTION_TO_LOCATION).toEqual({
+      CostTracking: { scopeId: 'system', categoryId: 'costs' },
+      Obico: { scopeId: 'system', categoryId: 'failure-detection' },
+      SlicerSettings: { scopeId: 'system', categoryId: 'slicing', subPageId: 'defaults' },
+      OperatorFeatures: { scopeId: 'system', categoryId: 'operator-features' },
+      AutoTagging: { scopeId: 'system', categoryId: 'data', subPageId: 'auto-tagging' },
+      QueuePlanning: { scopeId: 'system', categoryId: 'planning' },
+      ShiftPlan: { scopeId: 'system', categoryId: 'planning' },
+      SpoolCoverage: { scopeId: 'system', categoryId: 'planning' },
+      HistorySeeding: { scopeId: 'system', categoryId: 'planning' },
+      MaintenanceAlerts: { scopeId: 'system', categoryId: 'maintenance', subPageId: 'settings' },
+      PrintStatisticsSync: { scopeId: 'system', categoryId: 'maintenance', subPageId: 'settings' },
+    });
+    expect(getSettingsSectionPage('SlicerSettings', 'Operations')).toBe('slicing.defaults');
+    expect(getSettingsSectionPage('FarmIdentity', 'FarmIdentity')).toBe('identity.details');
+    expect(getSettingsSectionPage('MaintenanceAlerts', 'Maintenance')).toBe('maintenance.settings');
   });
 
-  it('every mapped location is reachable from some sub-page\'s allowedGroups', () => {
-    // The reverse direction — every group with a palette mapping must also
-    // render on some page. If a group is mapped here but no sub-page owns it,
-    // the palette will deep-link to a page that doesn't display the setting.
-    const owningGroups = new Set<string>();
-    for (const groups of Object.values(SUB_PAGE_ALLOWED_GROUPS)) {
-      for (const group of groups) {
-        owningGroups.add(group);
-      }
-    }
-    for (const group of Object.keys(SETTINGS_GROUP_TO_LOCATION)) {
-      expect(
-        owningGroups.has(group),
-        `group "${group}" is mapped in SETTINGS_GROUP_TO_LOCATION but no sub-page's allowedGroups renders it`,
-      ).toBe(true);
-    }
+  it('prefers an exact section override to its broader metadata group', () => {
+    expect(getSettingsSectionLocation('CostTracking', 'Operations')).toEqual({
+      scopeId: 'system',
+      categoryId: 'costs',
+    });
+    expect(getSettingsSectionLocation('UnknownSection', 'Operations')).toEqual({
+      scopeId: 'system',
+      categoryId: 'planning',
+    });
   });
 
-  it('each sub-page\'s mapped locations resolve to that sub-page', () => {
-    // The palette lands the user on the sub-page pointed at by the group's
-    // SETTINGS_GROUP_TO_LOCATION entry. If those entries drift from the shell's
-    // wiring, clicking a Job Queue setting could route the user to (say) the
-    // Farm sub-page — where the field is nowhere to be seen.
-    for (const [subPageKey, groups] of Object.entries(SUB_PAGE_ALLOWED_GROUPS)) {
-      // Guard against silently mis-inferring the sub-page id if a nested key
-      // like "general.security.advanced" is ever introduced: `.split('.')` +
-      // destructuring on `[, expectedSubPageId]` would truncate to the middle
-      // segment, so this test would push the developer to map a group to the
-      // wrong sub-page. Force the failure to point at the guard instead.
-      const segments = subPageKey.split('.');
-      expect(
-        segments,
-        `SUB_PAGE_ALLOWED_GROUPS key "${subPageKey}" must be a "category.sub" pair — update this guard before introducing nested keys`,
-      ).toHaveLength(2);
-      const expectedSubPageId = segments[1];
-      for (const group of groups) {
-        const location = SETTINGS_GROUP_TO_LOCATION[group];
-        expect(location, `mapping missing for group "${group}"`).toBeDefined();
-        expect(
-          location.subPageId,
-          `group "${group}" is rendered on ${subPageKey} but SETTINGS_GROUP_TO_LOCATION points elsewhere`,
-        ).toBe(expectedSubPageId);
-      }
-    }
+  it('returns no location or page for an unknown section and group', () => {
+    expect(getSettingsSectionLocation('UnknownSection', 'Unmapped Group')).toBeUndefined();
+    expect(getSettingsSectionPage('UnknownSection', 'Unmapped Group')).toBeUndefined();
   });
 });
 

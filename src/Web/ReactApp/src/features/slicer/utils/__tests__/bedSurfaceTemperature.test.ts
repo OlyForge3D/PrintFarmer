@@ -1,44 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  formatBedTemperatures, getBedSurfaceTemperatures, getFilamentBedContext,
+  getFilamentBedContext,
   getSingleBedTemperatureKey, isBedTemperatureSettingVisible, resolveBedType,
 } from '@/features/slicer/utils/bedSurfaceTemperature';
 
-const micronFilament = {
-  hot_plate_temp: ['0'], hot_plate_temp_initial_layer: ['0'],
-  textured_plate_temp: ['60', '55'], textured_plate_temp_initial_layer: ['65', '60'],
-  cool_plate_temp: ['30'], cool_plate_temp_initial_layer: ['35'],
-};
-
 describe('native bed-surface profile values', () => {
-  it('uses the active surface, not the hot-plate summary or maximum across surfaces', () => {
-    expect(getBedSurfaceTemperatures('Textured PEI Plate', micronFilament))
-      .toEqual({ firstLayer: [65, 60], otherLayers: [60, 55] });
-    expect(getBedSurfaceTemperatures('Cool Plate', micronFilament))
-      .toEqual({ firstLayer: [35], otherLayers: [30] });
-    expect(getBedSurfaceTemperatures('High Temp Plate', micronFilament))
-      .toEqual({ firstLayer: [0], otherLayers: [0] });
-    expect(micronFilament.hot_plate_temp).toEqual(['0']);
-  });
-
-  it.each([undefined, 'Default Plate', 'Unknown plate'])('does not infer heat for %s', plate => {
-    expect(getBedSurfaceTemperatures(plate, micronFilament))
-      .toEqual({ firstLayer: [null], otherLayers: [null] });
-  });
-
-  it.each([undefined, '', [], ['bad'], ['60C'], [-1], [false], ['{bed_temp + 5}']])(
-    'reports unknown native values without inventing a temperature: %j', value => {
-      expect(getBedSurfaceTemperatures('Textured PEI Plate', { textured_plate_temp: value }).otherLayers)
-        .toEqual([null]);
-    },
-  );
-
-  it('keeps mixed unknown and zero entries and never fills in a missing first layer', () => {
-    const temperatures = getBedSurfaceTemperatures('Textured PEI Plate', { textured_plate_temp: ['0', 'bad', 40] });
-    expect(temperatures).toEqual({ firstLayer: [null], otherLayers: [0, null, 40] });
-    expect(formatBedTemperatures(temperatures.otherLayers)).toBe('0°C / Unknown / 40°C');
-  });
-
   it('follows explicit override, then process, then machine with no arbitrary fallback', () => {
     const machine = { curr_bed_type: 'Textured PEI Plate' };
     const process = { curr_bed_type: 'Cool Plate' };

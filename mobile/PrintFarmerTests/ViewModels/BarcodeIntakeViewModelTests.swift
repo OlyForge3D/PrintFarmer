@@ -57,14 +57,49 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
         service.filamentToSave = makeFilament(id: 8)
         service.importError = NetworkError.serverError(500)
 
-        await viewModel.handleScannedBarcode("ABC/DEF 12")
+        await viewModel.handleScannedBarcode("4006381333931")
         let succeeded = await viewModel.importUnknownBarcode(filamentId: 8)
 
         XCTAssertFalse(succeeded)
-        XCTAssertEqual(viewModel.pendingUnknownBarcode, "ABC/DEF 12")
+        XCTAssertEqual(viewModel.pendingUnknownBarcode, "4006381333931")
         XCTAssertNotNil(viewModel.errorMessage)
         XCTAssertTrue(viewModel.importedThisSession.isEmpty)
         XCTAssertFalse(viewModel.isBusy)
+    }
+
+    @MainActor
+    func testUnknownBarcodeSaveMappingFailureKeepsPendingAndNeverImports() async {
+        let (viewModel, service) = makeSubject()
+        service.filamentToResolve = nil
+        service.saveMappingError = NetworkError.serverError(400)
+
+        await viewModel.handleScannedBarcode("850078714923")
+        let succeeded = await viewModel.importUnknownBarcode(filamentId: 8)
+
+        XCTAssertFalse(succeeded)
+        XCTAssertEqual(viewModel.pendingUnknownBarcode, "850078714923")
+        XCTAssertNotNil(viewModel.errorMessage)
+        XCTAssertTrue(service.importCalls.isEmpty, "a spool must not be created when the barcode mapping was not persisted")
+        XCTAssertTrue(viewModel.importedThisSession.isEmpty)
+    }
+
+    @MainActor
+    func testSkippingUnknownBarcodeCancelsWithoutPersistingOrCreatingSpool() async {
+        let (viewModel, service) = makeSubject()
+        service.filamentToResolve = nil
+        service.filamentToSave = makeFilament(id: 8)
+
+        await viewModel.handleScannedBarcode("850078714923")
+        XCTAssertEqual(viewModel.pendingUnknownBarcode, "850078714923")
+        viewModel.skipUnknownBarcode()
+
+        XCTAssertNil(viewModel.pendingUnknownBarcode)
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertTrue(service.saveMappingCalls.isEmpty)
+        XCTAssertTrue(service.importCalls.isEmpty)
+        let importedAfterCancel = await viewModel.importUnknownBarcode(filamentId: 8)
+        XCTAssertFalse(importedAfterCancel, "a cancelled barcode must not be importable afterwards")
+        XCTAssertTrue(service.saveMappingCalls.isEmpty)
     }
 
     @MainActor
@@ -149,9 +184,9 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
         let (viewModel, service) = makeSubject()
         service.resolveError = NetworkError.serverError(500)
 
-        await viewModel.handleScannedBarcode("ABC123")
+        await viewModel.handleScannedBarcode("96385074")
 
-        XCTAssertEqual(viewModel.lastScannedBarcode, "ABC123")
+        XCTAssertEqual(viewModel.lastScannedBarcode, "96385074")
         XCTAssertNotNil(viewModel.errorMessage)
         XCTAssertTrue(viewModel.importedThisSession.isEmpty)
         XCTAssertNil(viewModel.pendingUnknownBarcode)
@@ -161,10 +196,448 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
         service.filamentToResolve = makeFilament(id: 9)
         service.spoolToImport = makeSpool(id: 99, filamentId: 9)
 
-        await viewModel.handleScannedBarcode("ABC123")
+        await viewModel.handleScannedBarcode("96385074")
 
         XCTAssertEqual(viewModel.importedThisSession.map(\.id), [99])
         XCTAssertNil(viewModel.errorMessage)
+    }
+
+    @MainActor
+    func testNonGtinValuesNeverResolveMapOrImportAsGtin() async {
+        // Barcode Intake's own camera also reports Code 128/39 and QR text.
+        // The server strips non-digits, so none of these may be resolved,
+        // mapped as a GTIN, or imported; they use the exact-match alias store.
+        let codes = ["LOT/850078714923", "ABC123", "SPL-AB12", "https://example.com/p/4006381333931", "X0022Z40I1"]
+        for code in codes {
+            let (viewModel, service) = makeSubject()
+            service.filamentToResolve = makeFilament(id: 7)
+            service.filamentsById = [7: makeFilament(id: 7)]
+            service.spoolToCreate = makeSpool(id: 70, filamentId: 7)
+
+            await viewModel.handleScannedBarcode(code)
+            XCTAssertEqual(viewModel.pendingUnknownBarcode, code, code)
+            XCTAssertTrue(viewModel.pendingCodeIsAlias, code)
+            let added = await viewModel.importUnknownBarcode(filamentId: 7)
+
+            XCTAssertTrue(added, code)
+            XCTAssertEqual(service.aliasLookups, [code], "\(code) is looked up verbatim")
+            XCTAssertEqual(service.aliasSaveCalls.map(\.code), [code], "\(code) is remembered verbatim")
+            XCTAssertEqual(service.createSpoolCalls, [7], code)
+            XCTAssertTrue(service.resolveBarcodes.isEmpty, "\(code) must not be resolved as a GTIN")
+            XCTAssertTrue(service.saveMappingCalls.isEmpty, "\(code) must not be mapped as a GTIN")
+            XCTAssertTrue(service.importCalls.isEmpty, "\(code) must not use GTIN import")
+        }
+    }
+
+    @MainActor
+    func testUnrememberableNonGtinValuesAreRejectedWithoutAnyServiceCall() async {
+        let codes = [String(repeating: "A", count: BarcodeIntakeViewModel.maxRememberedCodeLength + 1),
+                     "X0022\u{200B}Z40I1", "LINE\u{0007}BELL", "12345", "850078714924", "00224"]
+        for code in codes {
+            let (viewModel, service) = makeSubject()
+
+            await viewModel.handleScannedBarcode(code)
+            let imported = await viewModel.importUnknownBarcode(filamentId: 7)
+
+            XCTAssertEqual(viewModel.errorMessage, BarcodeIntakeViewModel.notProductBarcodeMessage)
+            XCTAssertNil(viewModel.pendingUnknownBarcode)
+            XCTAssertFalse(imported)
+            XCTAssertTrue(service.aliasLookups.isEmpty)
+            XCTAssertTrue(service.aliasSaveCalls.isEmpty)
+            XCTAssertTrue(service.resolveBarcodes.isEmpty)
+        }
+    }
+
+    func testRememberableCodeRuleMirrorsServerValidator() {
+        XCTAssertTrue(BarcodeIntakeViewModel.isRememberableCode("X0022Z40I1"))
+        XCTAssertTrue(BarcodeIntakeViewModel.isRememberableCode("  X0022Z40I1  "))
+        XCTAssertTrue(BarcodeIntakeViewModel.isRememberableCode("00224X"))
+        XCTAssertFalse(BarcodeIntakeViewModel.isRememberableCode("4006381333931"), "GTINs use the GTIN mapping")
+        XCTAssertFalse(BarcodeIntakeViewModel.isRememberableCode("0-12345-67890-5"), "separated GTINs too")
+        XCTAssertFalse(BarcodeIntakeViewModel.isRememberableCode(""))
+        XCTAssertFalse(BarcodeIntakeViewModel.isRememberableCode("12345"), "digit-only values are spool IDs")
+        XCTAssertFalse(BarcodeIntakeViewModel.isRememberableCode("850078714924"), "a bad-check-digit GTIN isn't an alias")
+        XCTAssertTrue(BarcodeIntakeViewModel.isRememberableCode(String(repeating: "a", count: 128)))
+        XCTAssertFalse(BarcodeIntakeViewModel.isRememberableCode(String(repeating: "a", count: 129)))
+        XCTAssertFalse(
+            BarcodeIntakeViewModel.isRememberableCode(String(repeating: "😀", count: 65)),
+            "length is measured in UTF-16 units like the server"
+        )
+    }
+
+    @MainActor
+    func testScanNextFnskuLooksUpRememberedCodeNotGtin() async throws {
+        let service = MockBarcodeIntakeService()
+        let scanner = MockScannerService()
+        scanner.barcodeScanResultToReturn = .barcode("X0022Z40I1")
+        let viewModel = BarcodeIntakeViewModel()
+        viewModel.configure(barcodeService: service, scanner: scanner)
+
+        viewModel.scanNext()
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertEqual(viewModel.pendingUnknownBarcode, "X0022Z40I1")
+        XCTAssertEqual(service.aliasLookups, ["X0022Z40I1"])
+        XCTAssertTrue(service.resolveBarcodes.isEmpty)
+        XCTAssertTrue(service.saveMappingCalls.isEmpty)
+        XCTAssertTrue(service.importCalls.isEmpty)
+    }
+
+    // MARK: - Remembered codes (FNSKU X0022Z40I1)
+
+    @MainActor
+    func testFnskuFirstScanWithExistingFilamentRemembersItAndAddsSpool() async {
+        let (viewModel, service) = makeSubject()
+        service.filamentsById = [7: makeFilament(id: 7), 8: makeFilament(id: 8)]
+        service.spoolToCreate = makeSpool(id: 70, filamentId: 8)
+
+        await viewModel.handleScannedBarcode("X0022Z40I1")
+        XCTAssertEqual(viewModel.pendingUnknownBarcode, "X0022Z40I1", "a genuine miss offers filament selection")
+        XCTAssertNil(viewModel.pendingAliasMatch)
+        XCTAssertTrue(service.aliasSaveCalls.isEmpty, "nothing is remembered before the user picks")
+        XCTAssertTrue(service.createSpoolCalls.isEmpty)
+
+        let added = await viewModel.importUnknownBarcode(filamentId: 8)
+
+        XCTAssertTrue(added)
+        XCTAssertEqual(service.aliasSaveCalls.map(\.filamentId), [8], "the explicitly picked filament is remembered")
+        XCTAssertEqual(service.createSpoolCalls, [8], "the spool uses that exact filament ID")
+        XCTAssertEqual(service.aliases["X0022Z40I1"]?.id, 8)
+        XCTAssertNil(service.aliases["00224"], "the FNSKU is never reduced to GTIN digits")
+        XCTAssertEqual(viewModel.importedThisSession.map(\.id), [70])
+        XCTAssertNil(viewModel.pendingUnknownBarcode)
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
+    @MainActor
+    func testFnskuFirstScanWithNewlyCreatedFilamentRemembersTheNewId() async {
+        // The Map sheet creates the filament first (gtin: nil for an alias
+        // code), then passes the new ID into importUnknownBarcode.
+        let (viewModel, service) = makeSubject()
+        service.filamentsById = [7: makeFilament(id: 7)]
+        await viewModel.handleScannedBarcode("X0022Z40I1")
+
+        let created = makeFilament(id: 42, gtin: nil)
+        service.filamentsById[42] = created
+        service.spoolToCreate = makeSpool(id: 71, filamentId: 42)
+        let added = await viewModel.importUnknownBarcode(filamentId: created.id)
+
+        XCTAssertTrue(added)
+        XCTAssertEqual(service.aliasSaveCalls.map(\.filamentId), [42])
+        XCTAssertEqual(service.createSpoolCalls, [42])
+        XCTAssertTrue(service.saveMappingCalls.isEmpty, "the new filament's GTIN mapping is untouched")
+    }
+
+    @MainActor
+    func testFnskuRescanPreselectsRememberedFilamentAndAddsAnotherSpoolOnlyAfterConfirmation() async {
+        let (viewModel, service) = makeSubject()
+        service.aliases = ["X0022Z40I1": makeFilament(id: 8)]
+        service.spoolToCreate = makeSpool(id: 72, filamentId: 8)
+
+        await viewModel.handleScannedBarcode("X0022Z40I1")
+
+        XCTAssertEqual(viewModel.pendingAliasMatch?.filament.id, 8)
+        XCTAssertEqual(viewModel.pendingAliasMatch?.code, "X0022Z40I1")
+        XCTAssertNil(viewModel.pendingUnknownBarcode)
+        XCTAssertTrue(service.createSpoolCalls.isEmpty, "a rescan never creates a spool without confirmation")
+
+        let first = await viewModel.confirmAliasMatch()
+        await viewModel.handleScannedBarcode("X0022Z40I1")
+        let second = await viewModel.confirmAliasMatch()
+
+        XCTAssertTrue(first)
+        XCTAssertTrue(second)
+        XCTAssertEqual(service.createSpoolCalls, [8, 8], "each confirmed rescan adds a new spool")
+        XCTAssertTrue(service.aliasSaveCalls.isEmpty)
+        XCTAssertNotNil(viewModel.lastResolvedFilament?.gtin)
+        XCTAssertNil(viewModel.lastResolvedBarcode, "a remembered FNSKU is never presented as a GTIN")
+        XCTAssertNil(viewModel.pendingAliasMatch)
+    }
+
+    @MainActor
+    func testCancellingRememberedMatchCreatesNothing() async {
+        let (viewModel, service) = makeSubject()
+        service.aliases = ["X0022Z40I1": makeFilament(id: 8)]
+        await viewModel.handleScannedBarcode("X0022Z40I1")
+
+        viewModel.cancelAliasMatch()
+
+        XCTAssertNil(viewModel.pendingAliasMatch)
+        XCTAssertTrue(service.createSpoolCalls.isEmpty)
+    }
+
+    @MainActor
+    func testRememberedFilamentDeletedOffersFilamentSelectionAgain() async {
+        let (viewModel, service) = makeSubject()
+        service.aliasLookupOverride = ScanCodeAliasLookup(
+            code: "X0022Z40I1",
+            state: .filamentMissing,
+            alias: ScanCodeAlias(id: 3, code: "X0022Z40I1", filamentId: 99, filament: nil)
+        )
+
+        await viewModel.handleScannedBarcode("X0022Z40I1")
+
+        XCTAssertNil(viewModel.pendingAliasMatch)
+        XCTAssertEqual(viewModel.pendingUnknownBarcode, "X0022Z40I1")
+        XCTAssertTrue(service.createSpoolCalls.isEmpty)
+    }
+
+    @MainActor
+    func testAliasLookupFailureShowsRetryAndNeverOffersCreation() async {
+        for error in [NetworkError.serverError(502), NetworkError.unauthorized, NetworkError.notFound] {
+            let (viewModel, service) = makeSubject()
+            service.aliasLookupError = error
+
+            await viewModel.handleScannedBarcode("X0022Z40I1")
+
+            XCTAssertNotNil(viewModel.errorMessage, "\(error)")
+            XCTAssertEqual(viewModel.retryAction, .lookup("X0022Z40I1"), "\(error)")
+            XCTAssertNil(viewModel.pendingUnknownBarcode, "a failed lookup is not proof the code is new: \(error)")
+            XCTAssertNil(viewModel.pendingAliasMatch)
+            XCTAssertTrue(service.aliasSaveCalls.isEmpty)
+            XCTAssertTrue(service.createSpoolCalls.isEmpty)
+
+            service.aliasLookupError = nil
+            service.aliases = ["X0022Z40I1": makeFilament(id: 8)]
+            await viewModel.retry()
+            XCTAssertEqual(viewModel.pendingAliasMatch?.filament.id, 8, "retry repeats the lookup")
+            XCTAssertNil(viewModel.retryAction)
+        }
+    }
+
+    @MainActor
+    func testAliasSaveFailureRetriesWithoutCreatingSpoolFirst() async {
+        let (viewModel, service) = makeSubject()
+        service.filamentsById = [8: makeFilament(id: 8)]
+        service.spoolToCreate = makeSpool(id: 73, filamentId: 8)
+        await viewModel.handleScannedBarcode("X0022Z40I1")
+        service.aliasSaveError = NetworkError.serverError(500)
+
+        let added = await viewModel.importUnknownBarcode(filamentId: 8)
+
+        XCTAssertFalse(added)
+        XCTAssertEqual(viewModel.retryAction, .remember(code: "X0022Z40I1", filamentId: 8))
+        XCTAssertTrue(service.createSpoolCalls.isEmpty, "no spool is created when the code wasn't remembered")
+
+        service.aliasSaveError = nil
+        await viewModel.retry()
+        XCTAssertEqual(service.aliasSaveCalls.count, 2)
+        XCTAssertEqual(service.createSpoolCalls, [8])
+        XCTAssertNil(viewModel.pendingUnknownBarcode)
+    }
+
+    @MainActor
+    func testSpoolCreationFailureAfterRememberingRetriesIdempotently() async {
+        let (viewModel, service) = makeSubject()
+        service.filamentsById = [8: makeFilament(id: 8)]
+        service.spoolToCreate = makeSpool(id: 74, filamentId: 8)
+        await viewModel.handleScannedBarcode("X0022Z40I1")
+        // A definite failure: the request never reached the server.
+        service.createSpoolError = NetworkError.serverUnreachable
+
+        let added = await viewModel.importUnknownBarcode(filamentId: 8)
+
+        XCTAssertFalse(added)
+        XCTAssertEqual(viewModel.retryAction, .addAliasSpool(code: "X0022Z40I1", filamentId: 8))
+        XCTAssertFalse(viewModel.spoolOutcomeUncertain)
+        XCTAssertEqual(service.aliases["X0022Z40I1"]?.id, 8, "the code stays remembered")
+        XCTAssertTrue(viewModel.importedThisSession.isEmpty)
+
+        service.createSpoolError = nil
+        await viewModel.retry()
+        XCTAssertEqual(service.aliasSaveCalls.map(\.filamentId), [8], "retry only adds the spool; the alias is not re-saved")
+        XCTAssertEqual(service.createSpoolCalls, [8, 8])
+        XCTAssertEqual(viewModel.importedThisSession.map(\.id), [74], "exactly one spool was created")
+        XCTAssertNil(viewModel.pendingUnknownBarcode)
+    }
+
+    @MainActor
+    func testRememberedMatchSpoolCreationFailureOffersRetry() async {
+        let (viewModel, service) = makeSubject()
+        service.aliases = ["X0022Z40I1": makeFilament(id: 8)]
+        service.filamentsById = [8: makeFilament(id: 8)]
+        service.spoolToCreate = makeSpool(id: 75, filamentId: 8)
+        service.createSpoolError = NetworkError.serverUnreachable
+        await viewModel.handleScannedBarcode("X0022Z40I1")
+
+        let added = await viewModel.confirmAliasMatch()
+
+        XCTAssertFalse(added)
+        XCTAssertEqual(viewModel.retryAction, .addAliasSpool(code: "X0022Z40I1", filamentId: 8))
+        service.createSpoolError = nil
+        await viewModel.retry()
+        XCTAssertEqual(viewModel.importedThisSession.map(\.id), [75])
+        XCTAssertEqual(service.createSpoolCalls, [8, 8])
+        XCTAssertTrue(service.aliasSaveCalls.isEmpty, "retrying a confirmation never writes the alias (admin-only)")
+        XCTAssertNil(viewModel.pendingUnknownBarcode, "retry never presents the Remember sheet")
+        XCTAssertNil(viewModel.pendingAliasMatch, "the confirmation card is cleared so it can't add a second spool")
+        XCTAssertEqual(viewModel.lastResolvedFilament?.id, 8)
+    }
+
+    @MainActor
+    func testUncertainSpoolCreationAfterConfirmationWithholdsRetry() async {
+        let uncertain: [Error] = [
+            NetworkError.timeout,
+            NetworkError.noConnection,
+            NetworkError.serverError(502),
+            NetworkError.transportError(URLError(.badServerResponse)),
+            // The server maps an upstream Spoolman timeout on create to 400.
+            NetworkError.clientError(400, nil),
+        ]
+        for error in uncertain {
+            let (viewModel, service) = makeSubject()
+            service.aliases = ["X0022Z40I1": makeFilament(id: 8)]
+            service.createSpoolError = error
+            await viewModel.handleScannedBarcode("X0022Z40I1")
+
+            let added = await viewModel.confirmAliasMatch()
+
+            XCTAssertFalse(added, "\(error)")
+            XCTAssertNil(viewModel.retryAction, "the spool may exist; retry could duplicate it: \(error)")
+            XCTAssertTrue(viewModel.spoolOutcomeUncertain, "\(error)")
+            XCTAssertEqual(viewModel.errorMessage, BarcodeIntakeViewModel.spoolOutcomeUncertainMessage)
+            XCTAssertNil(viewModel.pendingAliasMatch, "Add Spool is withdrawn: \(error)")
+            let again = await viewModel.confirmAliasMatch()
+            XCTAssertFalse(again)
+            XCTAssertEqual(service.createSpoolCalls, [8], "exactly one create attempt: \(error)")
+        }
+    }
+
+    @MainActor
+    func testUncertainSpoolCreationAfterRememberingWithholdsRetry() async {
+        let (viewModel, service) = makeSubject()
+        service.filamentsById = [8: makeFilament(id: 8)]
+        await viewModel.handleScannedBarcode("X0022Z40I1")
+        service.createSpoolError = NetworkError.timeout
+
+        let added = await viewModel.importUnknownBarcode(filamentId: 8)
+
+        XCTAssertFalse(added)
+        XCTAssertNil(viewModel.retryAction)
+        XCTAssertTrue(viewModel.spoolOutcomeUncertain)
+        XCTAssertEqual(viewModel.errorMessage, BarcodeIntakeViewModel.spoolOutcomeUncertainMessage)
+        XCTAssertEqual(service.aliases["X0022Z40I1"]?.id, 8, "the code is remembered so a rescan offers the filament")
+        XCTAssertEqual(service.createSpoolCalls, [8])
+
+        viewModel.skipUnknownBarcode()
+        XCTAssertFalse(viewModel.spoolOutcomeUncertain)
+    }
+
+    @MainActor
+    func testConfirmWhileBusyCreatesNothing() async {
+        let (viewModel, service) = makeSubject()
+        service.aliases = ["X0022Z40I1": makeFilament(id: 8)]
+        await viewModel.handleScannedBarcode("X0022Z40I1")
+        viewModel.isBusy = true
+
+        let added = await viewModel.confirmAliasMatch()
+
+        XCTAssertFalse(added)
+        XCTAssertTrue(service.createSpoolCalls.isEmpty)
+        XCTAssertNotNil(viewModel.pendingAliasMatch)
+    }
+
+    @MainActor
+    func testAppLinkIsNeverOfferedAsRememberedCode() async {
+        let (viewModel, service) = makeSubject()
+
+        await viewModel.handleScannedBarcode("printfarmer://printer/\(UUID().uuidString)/ready")
+
+        XCTAssertTrue(service.aliasLookups.isEmpty)
+        XCTAssertNil(viewModel.pendingUnknownBarcode)
+        XCTAssertEqual(viewModel.errorMessage, BarcodeIntakeViewModel.notProductBarcodeMessage)
+    }
+
+    @MainActor
+    func testConflictingAliasCreatesNothingAndExplains() async {
+        let (viewModel, service) = makeSubject()
+        service.filamentsById = [7: makeFilament(id: 7), 8: makeFilament(id: 8)]
+        await viewModel.handleScannedBarcode("X0022Z40I1")
+        // Another client remembered the code for filament 7 meanwhile.
+        service.aliases = ["X0022Z40I1": makeFilament(id: 7)]
+
+        let added = await viewModel.importUnknownBarcode(filamentId: 8)
+
+        XCTAssertFalse(added)
+        XCTAssertEqual(viewModel.errorMessage, BarcodeIntakeViewModel.aliasConflictMessage)
+        XCTAssertNil(viewModel.retryAction, "a conflict is not retryable")
+        XCTAssertNil(viewModel.pendingUnknownBarcode)
+        XCTAssertTrue(service.createSpoolCalls.isEmpty)
+        XCTAssertEqual(service.aliases["X0022Z40I1"]?.id, 7, "the existing link is not overwritten")
+    }
+
+    @MainActor
+    func testSkippingUnknownCodeRemembersNothing() async {
+        let (viewModel, service) = makeSubject()
+        await viewModel.handleScannedBarcode("X0022Z40I1")
+
+        viewModel.skipUnknownBarcode()
+
+        XCTAssertNil(viewModel.pendingUnknownBarcode)
+        XCTAssertTrue(service.aliasSaveCalls.isEmpty)
+        XCTAssertTrue(service.createSpoolCalls.isEmpty)
+    }
+
+    @MainActor
+    func testCatalogCascadesAlphabeticallyAndResetsDownstreamSelection() {
+        let selection = FilamentCatalogSelection()
+        selection.filaments = [
+            makeFilament(id: 5, name: "Zulu", material: "PLA", vendor: "Beta"),
+            makeFilament(id: 4, name: "alpha", material: "PLA", vendor: "Acme"),
+            makeFilament(id: 3, name: "Alpha", material: "PLA", vendor: "Acme"),
+            makeFilament(id: 2, name: "Other", material: "PETG", vendor: "Zulu"),
+            makeFilament(id: 1, name: "Absent", material: nil, vendor: nil),
+        ]
+        XCTAssertEqual(selection.materials.map(\.label), ["Not specified", "PETG", "PLA"])
+        XCTAssertTrue(selection.vendors.isEmpty)
+        XCTAssertTrue(selection.matchingFilaments.isEmpty)
+
+        selection.material = .value("PLA")
+        XCTAssertEqual(selection.vendors.map(\.label), ["Acme", "Beta"])
+        selection.vendor = .value("Acme")
+        XCTAssertEqual(selection.matchingFilaments.map(\.id), [3, 4], "equal names keep distinct filament IDs")
+        selection.filamentId = 4
+        XCTAssertEqual(selection.selectedFilament?.id, 4)
+        selection.vendor = .value("Beta")
+        XCTAssertNil(selection.filamentId)
+        XCTAssertEqual(selection.matchingFilaments.map(\.id), [5])
+        selection.filamentId = 4
+        XCTAssertNil(selection.selectedFilament, "a stale ID cannot be submitted")
+        selection.material = .value("PETG")
+        XCTAssertNil(selection.vendor)
+        XCTAssertNil(selection.filamentId)
+        XCTAssertEqual(selection.vendors.map(\.label), ["Zulu"])
+        selection.material = .unspecified
+        selection.vendor = .unspecified
+        XCTAssertEqual(selection.matchingFilaments.map(\.id), [1])
+        selection.filaments = []
+        XCTAssertNil(selection.material)
+        XCTAssertNil(selection.vendor)
+        XCTAssertNil(selection.filamentId)
+    }
+
+    @MainActor
+    func testCatalogFilamentNamesSortAndSelectedIdentityIsRemembered() async throws {
+        let (viewModel, service) = makeSubject()
+        let selection = FilamentCatalogSelection()
+        selection.filaments = [
+            makeFilament(id: 9, name: "zinc", material: "PLA", vendor: "Acme"),
+            makeFilament(id: 8, name: "Amber", material: "PLA", vendor: "Acme"),
+            makeFilament(id: 7, name: "blue", material: "PLA", vendor: "Acme"),
+        ]
+        service.filamentsById = Dictionary(uniqueKeysWithValues: selection.filaments.map { ($0.id, $0) })
+        service.spoolToCreate = makeSpool(id: 99, filamentId: 7)
+        await viewModel.handleScannedBarcode("X0022Z40I1")
+        selection.material = .value("PLA")
+        selection.vendor = .value("Acme")
+        XCTAssertEqual(selection.matchingFilaments.map(\.name), ["Amber", "blue", "zinc"])
+        selection.filamentId = 7
+        let selected = try XCTUnwrap(selection.selectedFilament)
+        let imported = await viewModel.importUnknownBarcode(with: selected)
+        XCTAssertTrue(imported)
+        XCTAssertEqual(service.aliases["X0022Z40I1"]?.id, 7)
+        XCTAssertEqual(service.createSpoolCalls, [7])
     }
 
     @MainActor
@@ -177,15 +650,18 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
 
     private func makeFilament(
         id: Int,
+        name: String? = "PLA Black",
+        material: String? = "PLA",
+        vendor: String? = "Prusa Research",
         gtin: String? = "00012345678905",
         articleNumber: String? = "PRM-PLA-BK"
     ) -> SpoolmanFilament {
         SpoolmanFilament(
             id: id,
-            name: "PLA Black",
-            material: "PLA",
+            name: name,
+            material: material,
             colorHex: "#000000",
-            vendor: "Prusa Research",
+            vendor: vendor,
             density: 1.24,
             diameter: 1.75,
             weight: 1000,

@@ -488,7 +488,7 @@ public class Printer : IRevisionedEntity
 
     public bool InMaintenance { get; set; } = false;
 
-    public bool IsEnabled { get; set; } = true; // If false, printer is hidden from normal user listings until approved by admin
+    public bool IsEnabled { get; set; } = true; // Out of Service printers are hidden from normal listings and excluded from monitoring and dispatch.
 
     // AutoDispatch Ready-Gate properties
 

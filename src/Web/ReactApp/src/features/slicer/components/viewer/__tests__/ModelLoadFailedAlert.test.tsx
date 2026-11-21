@@ -1,6 +1,18 @@
-import { render, screen } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
-import { ModelLoadFailedAlert } from '../ModelViewerErrorBoundary';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import {
+  ModelLoadFailedAlert,
+  ModelViewerErrorBoundary,
+  ViewerInitializationFailedAlert,
+} from '../ModelViewerErrorBoundary';
+
+function ThrowingViewer({ error }: { error: Error }): null {
+  throw error;
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 /**
  * Regression coverage for issue #1974: at a 390px mobile viewport, the
@@ -41,5 +53,63 @@ describe('ModelLoadFailedAlert (issue #1974)', () => {
     // otherwise-auto width and does not prevent the collapse.
     expect(alert).toHaveClass('w-64');
     expect(alert).toHaveClass('max-w-[80vw]');
+  });
+});
+
+describe('ViewerInitializationFailedAlert (issue #3828)', () => {
+  it('explains WebGL context creation failure without blaming a model', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    render(
+      <ModelViewerErrorBoundary
+        fallback={(error, retry) => (
+          <ViewerInitializationFailedAlert error={error} onRetry={retry} />
+        )}
+      >
+        <ThrowingViewer error={new Error('Error creating WebGL context.')} />
+      </ModelViewerErrorBoundary>,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'The 3D viewer could not start because a WebGL context could not be created.',
+    );
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Failed to load 3D model')).not.toBeInTheDocument();
+  });
+
+  it('preserves retry for unrelated viewer errors and recovers when the viewer can render again', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const error = new Error('WebGL shader compilation failed.');
+    let shouldFail = true;
+
+    function RecoverableViewer() {
+      if (shouldFail) {
+        throw error;
+      }
+
+      return <p>Viewer recovered</p>;
+    }
+
+    render(
+      <ModelViewerErrorBoundary
+        fallback={(caughtError, retry) => (
+          <ViewerInitializationFailedAlert error={caughtError} onRetry={retry} />
+        )}
+      >
+        <RecoverableViewer />
+      </ModelViewerErrorBoundary>,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent('The 3D viewer encountered an error.');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('WebGL context could not be created');
+    const retryButton = screen.getByRole('button', { name: 'Retry' });
+    expect(retryButton).toBeEnabled();
+    expect(retryButton).toHaveClass('min-h-11', 'min-w-11', 'sm:min-h-0', 'sm:min-w-0');
+    expect(screen.queryByText('Failed to load 3D model')).not.toBeInTheDocument();
+
+    shouldFail = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(screen.getByText('Viewer recovered')).toBeInTheDocument();
   });
 });

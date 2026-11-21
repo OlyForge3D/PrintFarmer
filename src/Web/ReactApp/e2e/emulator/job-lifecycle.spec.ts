@@ -109,6 +109,9 @@ test.describe('Job Lifecycle — Moonraker', () => {
     await expectPrinterStatus(card, 'Paused');
 
     await card.getByRole('button', { name: 'Cancel' }).click();
+    const confirmation = page.getByRole('dialog', { name: 'Cancel print?' });
+    await expect(confirmation).toBeVisible();
+    await confirmation.getByRole('button', { name: 'Cancel print', exact: true }).click();
 
     await expectPrinterStatus(card, 'Cancelled');
     await expect(card.getByRole('button', { name: /^(Pause|Resume)$/ })).toBeDisabled({ timeout: 15_000 });

@@ -13,6 +13,28 @@ public class StubSliceJobRepository : ISliceJobRepository
     public Task AddAsync(SliceJob job, CancellationToken ct = default) { Jobs.Add(job); return Task.CompletedTask; }
     public Task<SliceJob?> GetByIdAsync(Guid id, CancellationToken ct = default) => Task.FromResult(Jobs.Find(j => j.Id == id));
     public Task<IReadOnlyList<SliceJob>> GetByUserIdAsync(Guid userId, int? limit = null, int? offset = null, CancellationToken ct = default) => Task.FromResult((IReadOnlyList<SliceJob>)Jobs);
+    public Task<IReadOnlyList<SliceJobStatusProjection>> GetJobStatusProjectionsByUserIdAsync(
+        Guid userId,
+        int? limit = null,
+        int? offset = null,
+        CancellationToken ct = default)
+    {
+        IEnumerable<SliceJob> jobs = Jobs
+            .Where(job => job.UserId == userId)
+            .OrderByDescending(job => job.QueuedAt);
+        if (offset.HasValue)
+        {
+            jobs = jobs.Skip(offset.Value);
+        }
+
+        if (limit.HasValue)
+        {
+            jobs = jobs.Take(limit.Value);
+        }
+
+        return Task.FromResult<IReadOnlyList<SliceJobStatusProjection>>(
+            jobs.Select(SliceJobStatusProjection.From).ToList());
+    }
     public Task<IReadOnlyList<SliceJob>> GetByStatusAsync(string status, int? limit = null, CancellationToken ct = default) => Task.FromResult((IReadOnlyList<SliceJob>)Jobs.FindAll(j => j.Status == status));
     public Task<IReadOnlyDictionary<(SlicerEngineType Engine, string Status), int>> GetQueueCountsAsync(CancellationToken ct = default)
     {

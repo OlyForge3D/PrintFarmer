@@ -24,7 +24,7 @@ jobs:
     outputs:
       decisions: ${{ steps.triage-results.outputs.decisions }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Check triage script
         id: check-script
@@ -124,7 +124,7 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Ralph — Apply triage decision
         uses: actions/github-script@v9

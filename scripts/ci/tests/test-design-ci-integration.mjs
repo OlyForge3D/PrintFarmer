@@ -8,22 +8,20 @@ import yaml from 'js-yaml';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
-test('CodeQL exclusion is limited to the pinned upstream vendor folder', () => {
+test('CodeQL config keeps the pinned vendor folder query-eligible', () => {
   const source = read('.github/codeql/codeql-config.yml');
   const config = yaml.load(source);
+  assert.deepEqual(Object.keys(config).sort(), ['name', 'paths-ignore', 'queries']);
+  assert.equal(config.name, 'PrintFarmer CodeQL Config');
   assert.deepEqual(config.queries, [{ uses: 'security-and-quality' }]);
   assert.deepEqual(config['paths-ignore'], [
     '**/__tests__/**',
     '**/*.test.js', '**/*.test.jsx', '**/*.test.ts', '**/*.test.tsx',
     '**/*.spec.js', '**/*.spec.jsx', '**/*.spec.ts', '**/*.spec.tsx',
     'src/Web/ReactApp/e2e', 'src/Web/ReactApp/src/test',
-    'scripts/design/vendor/impeccable/**',
   ]);
-  assert.match(source, /Unmodified upstream Apache-2\.0 Impeccable 4\.0\.3/);
-  assert.match(source, /including fork heads.*not inherently trusted/);
-  assert.match(source, /excludes all[\s\S]*queries/);
-  assert.ok(source.split(/\r?\n/).some((line) =>
-    line === '  # https://github.com/OlyForge3D/PrintFarmer/issues/3707.'));
+  assert.ok(!config['paths-ignore'].some((pattern) =>
+    pattern.includes('scripts/design/vendor/impeccable')));
   const workflow = yaml.load(read('.github/workflows/codeql.yml'));
   const init = workflow.jobs.analyze.steps.find((step) => step.uses?.startsWith('github/codeql-action/init@'));
   assert.equal(init.with['config-file'], './.github/codeql/codeql-config.yml');
@@ -50,8 +48,14 @@ test('required CI tooling job runs the detector, not only an optional workflow',
   const job = workflow.jobs['ci-tools'];
   assert.equal(job.name, 'CI tooling tests');
   assert.equal(job.if, undefined);
+  const setupNode = job.steps.findIndex((step) => step.name === 'Setup Node');
+  const installDependencies = job.steps.findIndex((step) => step.name === 'Install design detector dependencies');
   const detection = job.steps.find((step) => step.run?.includes('scripts/design/check-ui-design.mjs'));
   assert.ok(detection, 'Existing required job must execute UI detection');
+  assert.ok(setupNode >= 0 && installDependencies > setupNode,
+    'Node and design detector dependencies must be set up before UI detection');
+  assert.equal(job.steps[installDependencies].run, 'npm ci --ignore-scripts');
+  assert.ok(installDependencies < job.steps.indexOf(detection));
   assert.equal(detection['continue-on-error'], undefined);
   assert.ok(detection.env.DESIGN_BASE_SHA, 'Base SHA must be passed as data');
   assert.ok(detection.env.DESIGN_HEAD_SHA, 'Head SHA must be passed as data');
@@ -72,6 +76,20 @@ test('required CI tooling job runs the detector, not only an optional workflow',
     assert.ok(job.steps.findIndex((step) => step.name === name) > restoreIndex,
       `${name} must validate the integration source, not the unmerged PR head`);
   }
+
+  const detectorWorkflow = yaml.load(read('.github/workflows/design-detector.yml'));
+  const detectorSteps = detectorWorkflow.jobs['design-detector'].steps;
+  const detectorSetupNode = detectorSteps.findIndex((step) => step.name === 'Set up Node');
+  const detectorInstallDependencies = detectorSteps.findIndex((step) => step.name === 'Install design detector dependencies');
+  const detectorScan = detectorSteps.findIndex((step) => step.name === 'Run changed UI design checks');
+  assert.ok(detectorSetupNode >= 0 && detectorInstallDependencies > detectorSetupNode,
+    'Standalone detector must set up Node and install dependencies');
+  assert.equal(detectorSteps[detectorSetupNode].uses,
+    'actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1',
+    'Standalone detector must use the verified immutable setup-node action pin');
+  assert.equal(detectorSteps[detectorInstallDependencies].run, 'npm ci --ignore-scripts');
+  assert.ok(detectorInstallDependencies < detectorScan,
+    'Standalone detector must install parser dependencies before scanning');
 });
 
 test('automatic design ceremony and Ralph shaping are wired to the reviewer', () => {

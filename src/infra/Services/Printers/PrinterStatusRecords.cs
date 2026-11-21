@@ -56,6 +56,10 @@ public record PrinterCompositeStatus(
     double? SpeedFactorPercent = null,
     double? FlowFactorPercent = null)
 {
+    /// <summary>Explicit backend print activity, never a system-readiness fallback.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? RawActivityState { get; init; }
+
     /// <summary>
     /// Backend-reported sensor entries, or null when not reported. Adapters must merge
     /// partial reports before assigning a complete snapshot to cached status or hub updates.

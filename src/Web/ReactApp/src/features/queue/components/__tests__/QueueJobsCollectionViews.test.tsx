@@ -129,17 +129,17 @@ describe("Queue view mode + collection renderers", () => {
         onMoveJob={onMoveJob}
       />,
     );
-    const moveUp = screen.getByRole("button", { name: "Move next.gcode up" });
-    const moveDown = screen.getByRole("button", { name: "Move benchy.gcode down" });
+    const moveUp = screen.getByRole("button", { name: "Move up next.gcode" });
+    const moveDown = screen.getByRole("button", { name: "Move down benchy.gcode" });
     moveUp.focus();
     await user.keyboard("{Enter}");
     expect(onMoveJob).toHaveBeenCalledWith("job-2", "job-1", "before");
     expect(moveDown).toBeEnabled();
     await user.click(moveDown);
     expect(onMoveJob).toHaveBeenLastCalledWith("job-1", "job-2", "after");
-    expect(screen.getByRole("button", { name: "Move next.gcode down" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Move urgent.gcode up" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Move urgent.gcode down" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move down next.gcode" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move up urgent.gcode" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move down urgent.gcode" })).toBeDisabled();
 
     onMoveJob.mockClear();
     rerender(

@@ -48,6 +48,22 @@ Visual-acceptance fixture images are included only in Debug builds.
 
 4. Build and run on a simulator or device (iOS 17+).
 
+## NFC spool tags
+
+The app reads the physical NFC UID first and resolves it through the connected
+PrintFarmer server and Spoolman. A linked spool opens directly. A tag linked to
+a filament opens spool intake for that filament; an unlinked tag can be linked
+to an existing spool or to a newly created spool after confirmation. A failed
+UID lookup is surfaced as an error, not treated as an unknown tag.
+
+OpenPrintTag writes use the `application/vnd.openprinttag` NDEF MIME record with
+CBOR payload on NFC-V/ISO15693 tags. PrintFarmer verifies the written NDEF
+message before registering the UID in Spoolman, so a link failure reports
+partial success rather than claiming the tag was registered. The app preserves
+legacy OpenSpool and prior PrintFarmer tag reads. ISO15693 UIDs use the
+uppercase E0-first bytes returned by CoreNFC; UID identity is independent of
+NDEF payload data.
+
 ## Testing
 
 The iOS CI matrix selects shipping Login, three-tab shell, Scan, harvest,
@@ -154,6 +170,26 @@ gates. Prefer state, command, accessibility and bounded-layout contracts over ne
 whole-screen references. Retained goldens still require strict precision, no
 skips and separate approved iPhone/iPad evidence. The guide does not authorize
 re-recording to hide runtime drift.
+
+### Connected scan-code intake checks
+
+The two `ScanStationUITests.testFnskuFirstScan…` scenarios can use production
+intake/spool clients against an isolated loopback API. Pass
+`TEST_RUNNER_PRINTFARMER_ALIAS_API_URL=http://127.0.0.1:<port>` and
+`TEST_RUNNER_PRINTFARMER_ALIAS_API_TOKEN` through `xcodebuild` using the runner
+above. Never use a production account or farm. This opt-in exists only in DEBUG
+UI-test launches; the scanner and unrelated shell services remain fixtures.
+
+Run each first-scan selector separately and reset the isolated fixture's
+`X0022Z40I1` alias before **each** run. The preflight requires `NotRemembered`
+and fails explicitly on stale fixtures or lookup errors. Seed filaments 41 and
+42 with material `PLA`, vendor `Fixture Vendor`, and name `PLA explicitly chosen`
+for the existing-filament scenario; the duplicate names exercise ID selection.
+The test selects 42, relaunches the app and confirms another spool.
+The new-filament scenario submits the form only in connected mode because the
+standard demo spool service is intentionally read-only. Verify the API database
+and distinct upstream spool IDs separately, and identify any fixture upstream
+or unavailable physical camera in the evidence.
 
 ## Updating App Store screenshots (manual)
 
@@ -270,6 +306,20 @@ the iPad detail column). It opens the existing barcode/QR and NFC flows for
 printer and spool tags. Filament retains Add spool and continuous barcode
 intake. The toolbar avatar opens **Account**, including **Settings**, **Manage
 Servers**, notifications and offline activity.
+
+**Add Spool** (including the manual form offered by Scan) requires choosing the
+exact existing filament, or enabling **Create New Filament** and confirming its
+name, material, color, density and diameter. A material/vendor resemblance is
+not a product identity. New filament creation completes first; the returned ID
+is used for the spool. Vendor selection uses an existing server vendor or None.
+An identified physical spool still opens that spool instead of creating one.
+
+Failed saves keep the form. A successfully created filament is reused if spool
+authorization must be retried, and **Retry Link** reuses the already-created
+spool. If a creation response is uncertain (including timeout/server failure),
+Save stays disabled: check Filament inventory before starting again to avoid
+duplicates. This mobile fix uses the existing filament/spool API and needs no
+new server migration; it does not add remembered scan-code aliases.
 
 When the server enables printed-parts inventory, the **Printed parts** toolbar
 button in Filament opens stock browsing and quantity adjustment as a secondary

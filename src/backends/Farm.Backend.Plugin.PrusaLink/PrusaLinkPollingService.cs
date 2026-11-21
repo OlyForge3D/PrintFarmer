@@ -356,6 +356,7 @@ public sealed class PrusaLinkPollingService(
                     ManagedSpoolProviderHelper spoolProvider = scope.ServiceProvider.GetRequiredService<ManagedSpoolProviderHelper>();
 
                     // Use the Credential property populated by the repository layer
+                    DateTime observationStartedAtUtc = DateTime.UtcNow;
                     long? originWatermark = await OriginWatermark
                         .CaptureAsync(watermarkReader, _logger, "PrusaLink status", ct)
                         .ConfigureAwait(false);
@@ -438,7 +439,7 @@ public sealed class PrusaLinkPollingService(
                     }
 
                     _statusCacheWriter.UpdateStatus(
-                        cacheUpdate with { RawActivityState = status.State }, originWatermark);
+                        cacheUpdate with { RawActivityState = status.State, ObservationStartedAtUtc = observationStartedAtUtc }, originWatermark);
 
                     var signalRUpdate = new PrinterStatusUpdate(
                         Id: printerId,

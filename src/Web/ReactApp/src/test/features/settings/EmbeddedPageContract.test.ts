@@ -88,8 +88,9 @@ describe('shell-mounted content honours the embedded contract', () => {
     // A tripwire: if the maps are refactored into another shape, the suite below
     // would silently pass on an empty list.
     expect(mounted.length).toBeGreaterThanOrEqual(20);
-    // 14 after Cameras moved to the top-level /cameras page (#3332).
-    expect(withHeader.length).toBeGreaterThanOrEqual(14);
+    // Count mounted page instances rather than unique component types: the
+    // regrouping reuses SettingsPage for multiple page keys.
+    expect(mounted.filter((page) => withHeader.includes(page.name)).length).toBeGreaterThanOrEqual(13);
   });
 
   it.each(mounted.filter((m) => withHeader.includes(m.name)).map((m) => [m.name, m.props] as const))(

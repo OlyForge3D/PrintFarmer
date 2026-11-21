@@ -11,6 +11,7 @@ interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSwitchToRegister: () => void;
+  onLoginSuccess?: () => void;
   surface?: AuthSurfaceVariant;
 }
 
@@ -18,6 +19,7 @@ export function LoginModal({
   isOpen,
   onClose,
   onSwitchToRegister,
+  onLoginSuccess,
   surface = 'modal',
 }: LoginModalProps) {
   const [username, setUsername] = useState('');
@@ -38,9 +40,13 @@ export function LoginModal({
     try {
       const success = await login({ username, password, rememberMe });
       if (success) {
-        onClose();
         setUsername('');
         setPassword('');
+        if (onLoginSuccess) {
+          onLoginSuccess();
+        } else {
+          onClose();
+        }
       }
     } finally {
       setIsLoading(false);
@@ -55,9 +61,13 @@ export function LoginModal({
     try {
       const success = await loginWithPasskey(username);
       if (success) {
-        onClose();
         setUsername('');
         setPassword('');
+        if (onLoginSuccess) {
+          onLoginSuccess();
+        } else {
+          onClose();
+        }
       }
     } catch (err: unknown) {
       const apiErr = err as { details?: string; message?: string };
@@ -126,7 +136,7 @@ export function LoginModal({
                 placeholder="Enter your password"
                 required
                 disabled={isLoading}
-                className="w-full pr-10"
+                className="w-full pr-12"
               />
               <Button
                 type="button"
@@ -134,7 +144,7 @@ export function LoginModal({
                 variant="subtle"
                 size="sm"
                 disabled={isLoading}
-                className="absolute right-3 top-1/2 !h-auto !p-0 -translate-y-1/2"
+                className="absolute right-1 top-1/2 !h-11 !w-11 !p-0 -translate-y-1/2"
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
               >
                 {showPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}

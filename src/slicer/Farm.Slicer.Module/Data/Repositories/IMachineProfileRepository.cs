@@ -15,6 +15,9 @@ public interface IMachineProfileRepository
     /// <param name="ct">Cancellation token.</param>
     Task<MachineProfile?> GetByIdAsync(Guid id, CancellationToken ct = default);
 
+    /// <summary>Gets non-system machine profiles owned by a specific user for a slicer engine.</summary>
+    Task<IReadOnlyList<MachineProfile>> GetOwnedNonSystemAsync(SlicerType engine, Guid userId, CancellationToken ct = default);
+
     /// <summary>Gets machine profiles for a slicer engine with optional user filtering.</summary>
     /// <param name="engine">The slicer engine type.</param>
     /// <param name="includeSystem">Whether to include system profiles.</param>

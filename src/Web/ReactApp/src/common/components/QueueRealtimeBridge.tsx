@@ -303,7 +303,6 @@ export function QueueRealtimeBridge() {
           queryKey: ['failure-detection-status'],
         });
       }) ?? (() => {});
-
     void refreshBoth();
     void printerSignalRService.connect();
 

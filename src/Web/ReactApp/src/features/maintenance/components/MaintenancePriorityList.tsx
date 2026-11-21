@@ -55,28 +55,28 @@ const severityConfig: Record<number, {
   4: { 
     label: 'Critical', 
     bgColor: 'bg-pf-error/10', 
-    textColor: 'text-pf-error', 
+    textColor: 'text-pf-error-text',
     borderColor: 'border-pf-error/30',
     icon: AlertCircleIcon 
   },
   3: { 
     label: 'High', 
     bgColor: 'bg-pf-warning/10', 
-    textColor: 'text-pf-warning', 
+    textColor: 'text-pf-warning-text',
     borderColor: 'border-pf-warning/30',
     icon: AlertCircleIcon 
   },
   2: { 
     label: 'Medium', 
     bgColor: 'bg-pf-warning/10', 
-    textColor: 'text-pf-warning', 
+    textColor: 'text-pf-warning-text',
     borderColor: 'border-pf-warning/30',
     icon: AlertCircleIcon 
   },
   1: { 
     label: 'Low', 
     bgColor: 'bg-pf-accent-bg/15', 
-    textColor: 'text-pf-accent', 
+    textColor: 'text-pf-accent-text',
     borderColor: 'border-pf-accent/30',
     icon: AlertCircleIcon 
   },

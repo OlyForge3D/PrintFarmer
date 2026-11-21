@@ -710,7 +710,7 @@ test('actual workflow connects inputs, pinned source checks, environment, build 
   const buildSteps = workflow.jobs.build.steps;
   const signSteps = workflow.jobs.sign.steps;
   const publishSteps = workflow.jobs.publish.steps;
-  const cosignInstaller = 'sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6';
+  const cosignInstaller = 'sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532';
   for (const [jobName, steps] of [['sign', signSteps], ['publish', publishSteps]]) {
     const installer = steps.find(step => step.uses?.startsWith('sigstore/cosign-installer@'));
     assert.equal(installer?.uses, cosignInstaller,

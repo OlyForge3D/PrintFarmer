@@ -219,7 +219,10 @@ export function MappingsTab() {
                 <div className="flex items-center gap-2 min-w-0">
                   <Badge variant={group.kind === 'gcode' ? 'info' : 'primary'} size="sm">
                     <span className="inline-flex items-center gap-1">
-                      <LayersIcon className="w-3 h-3" ariaLabel="" />
+                      <LayersIcon
+                        className="w-3 h-3"
+                        ariaLabel={group.kind === 'gcode' ? 'G-code output' : 'Project output'}
+                      />
                       {group.kind === 'gcode' ? 'G-code' : 'Project'}
                     </span>
                   </Badge>

@@ -7,6 +7,8 @@ internal sealed class PrinterState
 {
     public long? OriginWatermark { get; private set; }
 
+    public DateTime? ObservationStartedAtUtc { get; set; }
+
     public void IncludeOrigin(long? originWatermark)
     {
         OriginWatermark = originWatermark;
@@ -38,6 +40,8 @@ internal sealed class PrinterState
     public double? BedTarget { get; set; }
 
     public string? State { get; set; }
+
+    public string? RawActivityState { get; set; }
 
     /// <summary>
     /// Tracks the previous state for detecting state transitions (e.g., printing → standby).
