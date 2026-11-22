@@ -619,12 +619,15 @@ struct PrinterInstrumentPanelControls: View {
         accessibilityLabel: @escaping (Double) -> String,
         capsWidth: Bool = true
     ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 2))
+            : AnyLayout(HStackLayout(spacing: 2))
+        return VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(Color.pfTextSecondary)
                 .accessibilityAddTraits(.isHeader)
-            HStack(spacing: 2) {
+            layout {
                 ForEach(options, id: \.self) { value in
                     ControlActionButton(
                         title: label(value),
@@ -633,13 +636,13 @@ struct PrinterInstrumentPanelControls: View {
                         selected: selection.wrappedValue == value,
                         compact: true, textSize: 14, segmented: true, minimumHeight: 44
                     ) { selection.wrappedValue = value }
+                    .frame(maxWidth: .infinity)
                     .accessibilityAddTraits(selection.wrappedValue == value ? .isSelected : [])
                 }
             }
             .padding(2)
             .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: Self.cornerRadius))
         }
-        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         // Move caps to the jog pad; Tune rows span the full panel width.
         .frame(maxWidth: capsWidth ? Self.maximumJogPadWidth : .infinity)
         .frame(maxWidth: .infinity)

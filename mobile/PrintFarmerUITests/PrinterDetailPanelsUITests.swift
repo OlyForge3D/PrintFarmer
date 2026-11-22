@@ -1698,6 +1698,13 @@ final class Issue3259ControlIdleAccessibilityUITests: Issue3259ControlIdleUITest
         for _ in 0..<20 where !motion.isHittable { scrollDown() }
         XCTAssertTrue(motion.isHittable)
         attachScreen("control-largest-motion")
+        for value in ["1", "10", "50"] {
+            let step = app.buttons["printer.controls.jog.step.\(value)"]
+            for _ in 0..<20 where !step.isHittable { scrollDown() }
+            XCTAssertTrue(step.isHittable, "Jog distance \(value) remains reachable")
+            XCTAssertGreaterThan(step.frame.height, 44, "Jog distance \(value) grows with Dynamic Type")
+        }
+        attachScreen("control-largest-jog-distance")
     }
 }
 
