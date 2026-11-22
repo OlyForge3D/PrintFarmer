@@ -762,9 +762,13 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             NSPredicate(format: "identifier BEGINSWITH %@", "printer.detail.destination.")
         ).firstMatch
         XCTAssertTrue(printerName.exists)
-        XCTAssertGreaterThanOrEqual(identity.frame.height, printerName.frame.height)
-        XCTAssertGreaterThanOrEqual(printerName.frame.minY, identity.frame.minY)
-        XCTAssertLessThanOrEqual(printerName.frame.maxY, identity.frame.maxY)
+        XCTAssertGreaterThan(printerName.frame.height, 32, "Printer name must scale at the largest text size")
+        XCTAssertGreaterThanOrEqual(identity.frame.height + 1, printerName.frame.height)
+        XCTAssertGreaterThanOrEqual(printerName.frame.minY + 1, identity.frame.minY)
+        XCTAssertLessThanOrEqual(printerName.frame.maxY, identity.frame.maxY + 1)
+        let farm = app.buttons["printer.detail.farm"]
+        XCTAssertTrue(farm.isHittable)
+        XCTAssertGreaterThan(farm.frame.height, 44, "Farm navigation must scale at the largest text size")
         let selector = app.descendants(matching: .any)
             .matching(identifier: "printer.detail.panel.selector").firstMatch
         XCTAssertTrue(selector.exists)

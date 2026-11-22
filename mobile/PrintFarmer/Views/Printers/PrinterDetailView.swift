@@ -327,26 +327,33 @@ struct PrinterDetailView: View {
     }
 
     private var detailHeader: some View {
-        HStack {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
             Button {
                 Self.returnToFarm(router: router)
             } label: {
                 Text("‹ Farm")
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Color.pfAccent)
+                    .foregroundStyle(Color.pfTextPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("printer.detail.farm")
 
-            Spacer(minLength: 12)
+            if !dynamicTypeSize.isAccessibilitySize {
+                Spacer(minLength: 0)
+            }
 
             if let nativeWebURL = viewModel.nativeWebURL {
                 Link(destination: nativeWebURL) {
                     Text("Open in web ↗")
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Color.pfTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
                 }
@@ -356,9 +363,8 @@ struct PrinterDetailView: View {
             }
         }
         .padding(.horizontal, 16)
-        .frame(height: 48)
+        .frame(minHeight: 48)
         .background(Color.pfBackground)
-        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
     }
 
     private var pageContent: some View {
@@ -1320,6 +1326,7 @@ struct PrinterDetailView: View {
                 Text(previewImage != nil ? "Print preview" : "Camera")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Color.pfTextPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("printer.detail.camera.title")
 
@@ -1330,6 +1337,7 @@ struct PrinterDetailView: View {
                     Text("No camera available")
                         .font(.footnote)
                         .foregroundStyle(Color.pfTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.trailing, 8)
                         .accessibilityIdentifier("printer.detail.camera.unavailable")
                 }
@@ -1373,7 +1381,6 @@ struct PrinterDetailView: View {
             .frame(minHeight: 44)
             .padding(.leading, 12)
             .padding(.trailing, 4)
-            .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("printer.detail.camera.header")
 
