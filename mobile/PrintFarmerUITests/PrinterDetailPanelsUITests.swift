@@ -108,7 +108,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
 
     #if DEBUG
     @MainActor
-    class Issue3259MockupCaptureUITests: PrintFarmerUITestCase {
+    class Issue3259MockupTestBase: PrintFarmerUITestCase {
         /// #3509 sorts the Farm by state group, then name, so at large text sizes
         /// the card can sit below the fold or under the Scan dock. tap() targets its
         /// centre, so filter the Farm by name and tap the card's top edge clear of the dock.
@@ -194,6 +194,21 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             ]
         }
 
+        func attachScreen(_ name: String) {
+            let screenshot = XCUIScreen.main.screenshot()
+            let image = screenshot.image
+            let normalizedImage = UIGraphicsImageRenderer(size: image.size).image { _ in
+                image.draw(in: CGRect(origin: .zero, size: image.size))
+            }
+            let attachment = XCTAttachment(image: normalizedImage)
+            attachment.name = "Issue 3259 \(name)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
+    @MainActor
+    class Issue3259MockupCaptureUITests: Issue3259MockupTestBase {
         @discardableResult
         private func assertAccountToolbar() -> XCUIElement {
             let account = app.descendants(matching: .any)["navigation.account"]
@@ -637,18 +652,6 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 let printStateSuffix = ["Control", "Queue"].contains(panel) ? "-active-print" : ""
                 attachScreen("\(device)-\(size)-printer-\(panel.lowercased())\(printStateSuffix)")
             }
-        }
-
-        func attachScreen(_ name: String) {
-            let screenshot = XCUIScreen.main.screenshot()
-            let image = screenshot.image
-            let normalizedImage = UIGraphicsImageRenderer(size: image.size).image { _ in
-                image.draw(in: CGRect(origin: .zero, size: image.size))
-            }
-            let attachment = XCTAttachment(image: normalizedImage)
-            attachment.name = "Issue 3259 \(name)"
-            attachment.lifetime = .keepAlways
-            add(attachment)
         }
 
         private func swipeUp(on page: XCUIElement) {
@@ -1665,9 +1668,13 @@ final class Issue3484MissingRuntimeFactorsUITests: PrinterDetailPanelsUITests.Is
 }
 
 @MainActor
-final class Issue3259ControlIdleAccessibilityUITests: Issue3259ControlIdleUITests {
+final class Issue3259ControlIdleAccessibilityUITests: PrinterDetailPanelsUITests.Issue3259MockupTestBase {
     override var contentSizeCategory: String {
         "UICTContentSizeCategoryAccessibilityXXXL"
+    }
+
+    override var additionalLaunchArguments: [String] {
+        super.additionalLaunchArguments + ["--uitesting-issue3259-control-idle"]
     }
 
     func testPositionReadoutsAndMotionControlsAtLargestTextSize() {
