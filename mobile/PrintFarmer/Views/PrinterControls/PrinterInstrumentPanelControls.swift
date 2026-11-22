@@ -241,6 +241,7 @@ struct PrinterInstrumentPanelControls: View {
         .accessibilityLabel(Self.readoutAccessibilityLabel(
             axis: axis, value: value, homedAxes: viewModel.printer.homedAxes
         ))
+        .accessibilityAddTraits(.isStaticText)
         .accessibilityIdentifier("printer.controls.position.\(axis.lowercased())")
     }
 

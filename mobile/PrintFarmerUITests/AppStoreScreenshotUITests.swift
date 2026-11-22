@@ -379,6 +379,18 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         try capture("46-inline-idle-heat")
     }
 
+    func testPositionReadoutsAreStaticText() throws {
+        relaunchAppForTest(additionalArguments: ["--uitesting-issue3259-control-idle"])
+        try tapRequired(app.buttons["farm-card-10000000-0001-0000-0000-000000000001"])
+        let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
+        try tapRequired(selector.buttons["Control"])
+        for axis in ["x", "y", "z"] {
+            let readout = app.staticTexts["printer.controls.position.\(axis)"]
+            try require(readout)
+            XCTAssertTrue(readout.label.contains("position"))
+        }
+    }
+
     func testCaptureIdleSensors() throws {
         relaunchAppForTest(additionalArguments: [
             "--uitesting-issue3259-control-idle", "--uitesting-issue3496-tune-sensors"
