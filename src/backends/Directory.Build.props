@@ -8,11 +8,12 @@
   <!-- Import parent Directory.Build.props from /src -->
   <Import Project="../Directory.Build.props" />
 
-  <!-- Common NuGet Package References for Backend Infrastructure -->
+  <!-- Common framework and NuGet references for backend infrastructure -->
   <!-- These versions are synchronized across all backend projects -->
   <!-- Logging and dependency injection match the EF Core 10.0.12 dependency floor. -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.2.13" />
+    <!-- SignalR is provided by the shared ASP.NET Core framework. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.14" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.14" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
