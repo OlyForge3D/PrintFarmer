@@ -459,6 +459,19 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         try openFilament()
         try require(app.buttons["inventory.filter.all"])
         XCTAssertTrue(app.buttons["inventory.filter.all"].isHittable)
+        let filters = app.descendants(matching: .any)["inventory.filters"]
+        let all = app.buttons["inventory.filter.all"]
+        let loaded = app.buttons["inventory.filter.loaded"]
+        XCTAssertTrue(loaded.waitForExistence(timeout: 5))
+        XCTAssertEqual(all.frame.midY, loaded.frame.midY, accuracy: 1)
+        XCTAssertGreaterThan(loaded.frame.width, 120, "Loaded must not wrap within a narrow chip")
+        let filterScreenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        filterScreenshot.name = "filament-largest-filters"
+        filterScreenshot.lifetime = .keepAlways
+        add(filterScreenshot)
+        let originalX = all.frame.minX
+        filters.swipeLeft()
+        XCTAssertLessThan(all.frame.minX, originalX - 16, "Large filters must scroll")
         try tapRequired(app.buttons["inventory.addSpool"])
         try require(app.navigationBars["Add Spool"])
         for label in ["Total weight in grams", "Spool weight in grams"] {
