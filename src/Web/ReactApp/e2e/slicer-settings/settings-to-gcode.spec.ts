@@ -80,7 +80,8 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
   const tabs = dialog.getByRole('tab');
   const profile = metadata[kind];
   const ownerTab = profile.tabs.find(tab => tab.sections.some(section => section.fields.some(field => field.key === setting.key)));
-  const section = ownerTab?.sections.find(section => section.fields.some(field => field.key === setting.key));
+  if (!ownerTab) throw new Error(`${setting.key}: no editor tab owns this setting`);
+  const section = ownerTab.sections.find(section => section.fields.some(field => field.key === setting.key));
   const field = section?.fields.find(field => field.key === setting.key);
   const index = section?.fields.findIndex(field => field.key === setting.key) ?? -1;
   let start = index;
@@ -100,7 +101,7 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
     titles.push(`${plate} ${setting.key.endsWith('_initial_layer') ? 'first layer' : 'other layers'}`);
   }
   let control: Locator | undefined;
-  const tab = tabs.filter({ hasText: new RegExp(`^${(ownerTab?.name ?? 'Other Settings').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) });
+  const tab = tabs.filter({ hasText: new RegExp(`^${ownerTab.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) });
   await expect(tab).toHaveCount(1);
   await tab.click();
   await expect(tab).toHaveAttribute('aria-selected', 'true');
@@ -385,11 +386,11 @@ test('every registry setting has explicit editor-to-new-G-code evidence', async 
       continue;
     }
     const tabbed = metadata[row.profile].tabs.some(tab => tab.sections.some(section => section.fields.some(field => field.key === row.key)));
-    if (setting.mode === 'developer' || (!tabbed && !setting.mode)) {
+    if (setting.mode === 'developer' || !tabbed) {
       row.status = 'excluded';
       row.reason = setting.mode === 'developer'
         ? 'MetadataProfileRenderer explicitly hides this developer-mode key; no user editor path exists.'
-        : 'Internal orphan metadata: no tab field and no user-visible mode; MetadataProfileRenderer does not render this key.';
+        : 'Orphan metadata: no tab field; MetadataProfileRenderer does not render this key.';
     }
   }
   let negativeControl = 'not run';
