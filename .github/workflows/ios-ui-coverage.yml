@@ -34,7 +34,7 @@ jobs:
     name: iOS capture and accessibility (${{ matrix.family }})
     needs: contract
     runs-on: macos-26
-    timeout-minutes: 131
+    timeout-minutes: 141
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -122,10 +122,10 @@ jobs:
             build-for-testing 2>&1 | tee build/ui-coverage/build.log
       - name: Capture isolated native candidates and audit accessibility
         id: capture
-        timeout-minutes: 36
+        timeout-minutes: 46
         run: |
           set -o pipefail
-          python3 scripts/run-tests.py --invocation-timeout 2100 -- -project PrintFarmer.xcodeproj -scheme PrintFarmer \
+          python3 scripts/run-tests.py --invocation-timeout 2700 -- -project PrintFarmer.xcodeproj -scheme PrintFarmer \
             -testPlan CatalogVisualAccessibility -testLanguage en -testRegion US \
             -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
             -derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages \

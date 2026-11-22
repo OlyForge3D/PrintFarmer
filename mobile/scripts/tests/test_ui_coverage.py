@@ -352,8 +352,8 @@ class CoverageReportTests(unittest.TestCase):
         root_capture = workflow.split("        id: capture_root\n")[1].split("      - name:")[0]
         for capture in (operator_capture, root_capture):
             self.assertIn("test-without-building", capture)
-        self.assertIn("timeout-minutes: 36", operator_capture)
-        self.assertIn("scripts/run-tests.py --invocation-timeout 2100 --", operator_capture)
+        self.assertIn("timeout-minutes: 46", operator_capture)
+        self.assertIn("scripts/run-tests.py --invocation-timeout 2700 --", operator_capture)
         self.assertIn("timeout-minutes: 25", root_capture)
         self.assertNotIn("--invocation-timeout", root_capture)
         self.assertIn("-only-testing:PrintFarmerUITests/CatalogVisualAccessibilityUITests",
