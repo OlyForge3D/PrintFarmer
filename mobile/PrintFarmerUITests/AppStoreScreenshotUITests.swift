@@ -567,8 +567,10 @@ final class CatalogRootVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
     func testCaptureLogin() throws {
         XCUIDevice.shared.orientation = .portrait
         XCTAssertTrue(app.textFields["usernameField"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.textFields["usernameField"].label, "Username or Email")
         XCTAssertTrue(app.secureTextFields["passwordField"].exists)
         XCTAssertTrue(app.buttons["loginButton"].exists)
+        XCTAssertFalse(app.buttons["loginButton"].isEnabled)
         for identifier in ["login.server.expand", "login.demo"] {
             let button = app.buttons[identifier]
             XCTAssertTrue(button.exists, "\(identifier) must be available on the login screen.")
