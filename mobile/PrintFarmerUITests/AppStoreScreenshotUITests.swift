@@ -461,6 +461,16 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         XCTAssertTrue(app.buttons["inventory.filter.all"].isHittable)
         try tapRequired(app.buttons["inventory.addSpool"])
         try require(app.navigationBars["Add Spool"])
+        for label in ["Total weight in grams", "Spool weight in grams"] {
+            let field = app.textFields[label]
+            for _ in 0..<8 where !field.isHittable { app.swipeUp() }
+            XCTAssertTrue(field.isHittable, "\(label) must remain reachable")
+            XCTAssertGreaterThanOrEqual(field.frame.height, 44)
+        }
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "add-spool-largest-weight"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
     }
 
     func testCapturePartsAndSelectedPart() throws {

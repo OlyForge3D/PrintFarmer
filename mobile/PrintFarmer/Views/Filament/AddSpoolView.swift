@@ -383,31 +383,42 @@ struct AddSpoolView: View {
     // MARK: - Weight
 
     private var weightSection: some View {
-        Section("Weight") {
-            HStack {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout())
+        return Section("Weight") {
+            layout {
                 Text("Total Weight")
-                Spacer()
-                TextField("grams", value: $viewModel.totalWeightG, format: .number)
-                    #if os(iOS)
-                    .keyboardType(.decimalPad)
-                    #endif
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 100)
-                Text("g")
-                    .foregroundStyle(Color.pfTextSecondary)
+                if !dynamicTypeSize.isAccessibilitySize { Spacer() }
+                HStack {
+                    TextField("grams", value: $viewModel.totalWeightG, format: .number)
+                        #if os(iOS)
+                        .keyboardType(.decimalPad)
+                        #endif
+                        .multilineTextAlignment(.trailing)
+                        .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : 100, minHeight: 44)
+                        .accessibilityLabel("Total weight in grams")
+                    Text("g")
+                        .foregroundStyle(Color.pfTextSecondary)
+                        .accessibilityHidden(true)
+                }
             }
 
-            HStack {
+            layout {
                 Text("Spool Weight")
-                Spacer()
-                TextField("grams", value: $viewModel.spoolWeightG, format: .number)
-                    #if os(iOS)
-                    .keyboardType(.decimalPad)
-                    #endif
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 100)
-                Text("g")
-                    .foregroundStyle(Color.pfTextSecondary)
+                if !dynamicTypeSize.isAccessibilitySize { Spacer() }
+                HStack {
+                    TextField("grams", value: $viewModel.spoolWeightG, format: .number)
+                        #if os(iOS)
+                        .keyboardType(.decimalPad)
+                        #endif
+                        .multilineTextAlignment(.trailing)
+                        .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : 100, minHeight: 44)
+                        .accessibilityLabel("Spool weight in grams")
+                    Text("g")
+                        .foregroundStyle(Color.pfTextSecondary)
+                        .accessibilityHidden(true)
+                }
             }
         }
     }
