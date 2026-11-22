@@ -109,6 +109,7 @@ struct CertificateTrustView: View {
         .font(.system(.body, design: .monospaced))
         .textSelection(.enabled)
         .fixedSize(horizontal: false, vertical: true)
+        .accessibilityLabel("\(label), \(value)")
     }
   }
 

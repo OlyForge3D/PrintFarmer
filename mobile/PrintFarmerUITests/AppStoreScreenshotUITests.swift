@@ -749,7 +749,9 @@ final class CatalogRootVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
     func testCaptureSyntheticCertificate() throws {
         relaunchCatalogRoot("certificate")
         XCTAssertTrue(app.descendants(matching: .any)["certificateTrustSheet"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["certificateTrustEndpointText"].exists)
+        let endpoint = app.staticTexts.matching(identifier: "certificateTrustEndpointText")
+            .matching(NSPredicate(format: "label CONTAINS %@", "synthetic.printfarmer.invalid")).firstMatch
+        XCTAssertTrue(endpoint.exists)
         XCTAssertTrue(app.buttons["certificateTrustCancelButton"].exists)
         try capture("37-certificate-trust")
         app.buttons["certificateTrustCancelButton"].tap()
