@@ -81,6 +81,7 @@ struct CertificateTrustView: View {
             onDecision(true)
           }
           .buttonStyle(.borderedProminent)
+          .tint(Color.pfButtonPrimary)
           .accessibilityLabel("Trust this certificate for \(request.endpoint)")
           .accessibilityIdentifier("certificateTrustAcceptButton")
 
