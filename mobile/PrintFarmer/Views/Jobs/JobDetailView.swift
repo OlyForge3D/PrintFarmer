@@ -454,7 +454,7 @@ struct JobDetailView: View {
         return layout {
             Label(label, systemImage: icon)
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.pfTextPrimary)
                 .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : 120, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
 
