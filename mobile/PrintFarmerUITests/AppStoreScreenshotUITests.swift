@@ -302,6 +302,10 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         defer { XCUIDevice.shared.orientation = .portrait }
         try relaunchProfile(theme: "dark", contentSize: "UICTContentSizeCategoryAccessibilityXXXL")
         try capture("50-viewport-largest-text")
+        try tapRequired(shellDestinationButton(tabIdentifier: "tab.queue", timeout: 8))
+        try require(app.descendants(matching: .any)["jobList.section.printing"])
+        try tapRequired(shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8))
+        try require(app.buttons["farm-card-10000000-0001-0000-0000-000000000001"])
         try relaunchProfile(theme: "dark")
         XCUIDevice.shared.orientation = .landscapeLeft
         let deadline = ProcessInfo.processInfo.systemUptime + 10

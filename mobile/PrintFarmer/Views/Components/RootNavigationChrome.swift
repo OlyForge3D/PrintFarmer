@@ -35,7 +35,6 @@ extension View {
 private struct RootNavigationChromeModifier<ScreenActions: View>: ViewModifier {
     @Environment(AppRouter.self) private var router
     @Environment(\.horizontalSizeClass) private var sizeClass
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let tab: AppTab
     let screenActions: ScreenActions
@@ -73,8 +72,7 @@ private struct RootNavigationChromeModifier<ScreenActions: View>: ViewModifier {
         HStack(spacing: 12) {
             Text(tab.title)
                 .font(.headline.weight(.semibold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(Color.pfTextPrimary)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("navigation.title")
@@ -83,9 +81,8 @@ private struct RootNavigationChromeModifier<ScreenActions: View>: ViewModifier {
             accountButton
         }
         .padding(.horizontal, 16)
-        .frame(height: 52)
+        .frame(minHeight: 52)
         .background(Color.pfBackground)
-        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
     }
 
     private var accountButton: some View {

@@ -32,12 +32,12 @@ struct ContentView: View {
                                         .frame(width: 24)
                                     Text(tab.title)
                                         .font(.subheadline)
-                                        .lineLimit(1)
-                                        .minimumScaleFactor(0.65)
+                                        .fixedSize(horizontal: false, vertical: true)
                                         .frame(minHeight: Self.sidebarRowMinimumHeight, alignment: .leading)
                                     Spacer(minLength: 8)
                                     sidebarCountBadge(for: tab)
                                 }
+                                .foregroundStyle(Color.pfTextPrimary)
                             }
                             .listRowBackground(router.selectedTab == tab ? Color.pfAccent.opacity(0.15) : nil)
                             .accessibilityLabel(tab.title)
@@ -48,7 +48,6 @@ struct ContentView: View {
                     }
                     .listStyle(.sidebar)
                     .navigationTitle("PrintFarmer")
-                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         Button {
                             switch router.selectedTab {
@@ -63,8 +62,7 @@ struct ContentView: View {
                                     .foregroundStyle(Color.pfTextSecondary)
                                 Text("Settings")
                                     .font(.subheadline)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.75)
+                                    .fixedSize(horizontal: false, vertical: true)
                                     .foregroundStyle(Color.pfTextPrimary)
                                 if !dynamicTypeSize.isAccessibilitySize {
                                     Text("& servers")
@@ -80,7 +78,6 @@ struct ContentView: View {
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("sidebar.settings")
                         .background(Color.pfBackground)
-                        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                     }
                 } detail: {
                     tabContentView(for: router.selectedTab)
@@ -138,19 +135,17 @@ struct ContentView: View {
         } label: {
             Label("Scan", systemImage: "barcode.viewfinder")
                 .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 14)
                 .frame(minHeight: 44)
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white)
-        .background(Color.pfAccentBg, in: Capsule())
+        .background(Color.pfButtonPrimary, in: Capsule())
         .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
         .accessibilityLabel("Scan")
         .accessibilityHint("Opens barcode and NFC scanning for spools.")
         .accessibilityIdentifier("navigation.scan")
-        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
     }
 
     private var scanFooter: some View {
@@ -161,7 +156,6 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(Color.pfBackground)
-        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(Color.pfBorder)
@@ -184,10 +178,14 @@ struct ContentView: View {
                                 .frame(height: 21)
                             Text(tab.title)
                                 .font(.caption.weight(router.selectedTab == tab ? .semibold : .regular))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        .foregroundStyle(router.selectedTab == tab ? Color.pfAccent : Color.pfTextSecondary)
+                        .foregroundStyle(
+                            router.selectedTab == tab
+                                ? Color.adaptive(light: "#047857", dark: "#10b981")
+                                : Color.pfTextSecondary
+                        )
                         .frame(maxWidth: .infinity, minHeight: 50)
                         .contentShape(Rectangle())
                     }
@@ -212,7 +210,6 @@ struct ContentView: View {
             .accessibilityIdentifier("navigation.tabBar")
         }
         .background(Color.pfBackground)
-        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
     }
 
     private func presentPendingExternalScan() {
