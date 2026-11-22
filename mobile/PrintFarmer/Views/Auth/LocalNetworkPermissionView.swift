@@ -14,23 +14,39 @@ struct LocalNetworkPermissionView: View {
     private let networkAuth = LocalNetworkAuthorization()
 
     var body: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                content
+                    .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: didRequest)
+        .onDisappear { permissionTask?.cancel() }
+    }
+
+    private var content: some View {
         VStack(spacing: 24) {
             Spacer()
 
             Image(systemName: "network")
                 .font(.system(size: 72))
                 .foregroundStyle(Color.pfAccent)
+                .accessibilityHidden(true)
 
             Text("Local Network Access")
                 .font(.title)
                 .fontWeight(.bold)
                 .multilineTextAlignment(.center)
 
-            Text("PrintFarmer needs to connect to your local network to reach your print farm server.\n\nWhen prompted, please tap **Allow** to continue.")
-                .font(.body)
-                .foregroundStyle(Color.pfTextSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
+            VStack(spacing: 16) {
+                Text("PrintFarmer needs to connect to your local network to reach your print farm server.")
+                Text("When prompted, please tap **Allow** to continue.")
+            }
+            .font(.body)
+            .foregroundStyle(Color.pfTextSecondary)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 32)
 
             Spacer()
 
@@ -40,11 +56,12 @@ struct LocalNetworkPermissionView: View {
                 } label: {
                     Text("Continue")
                         .font(.headline)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity)
                         .padding()
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(Color.pfAccent)
+                .tint(Color.pfButtonPrimary)
                 .padding(.horizontal, 32)
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             } else {
@@ -58,13 +75,14 @@ struct LocalNetworkPermissionView: View {
                         } else {
                             Text("Enable Network Access")
                                 .font(.headline)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .frame(maxWidth: .infinity)
                     .padding()
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(Color.pfAccent)
+                .tint(Color.pfButtonPrimary)
                 .padding(.horizontal, 32)
                 .disabled(isRequesting)
             }
@@ -72,9 +90,6 @@ struct LocalNetworkPermissionView: View {
             Spacer()
                 .frame(height: 40)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .animation(.easeInOut(duration: 0.3), value: didRequest)
-        .onDisappear { permissionTask?.cancel() }
     }
 
     private func requestPermission() {

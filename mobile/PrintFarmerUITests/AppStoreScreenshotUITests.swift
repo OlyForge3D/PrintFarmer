@@ -616,6 +616,16 @@ final class CatalogRootVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         XCTAssertTrue(start.isHittable)
         start.tap()
         XCTAssertTrue(app.staticTexts["Local Network Access"].waitForExistence(timeout: 10))
+        let networkScreen = XCTAttachment(screenshot: app.screenshot())
+        networkScreen.name = "largest-text-local-network"
+        networkScreen.lifetime = .keepAlways
+        add(networkScreen)
+        let enableNetwork = app.buttons["Enable Network Access"]
+        XCTAssertTrue(enableNetwork.waitForExistence(timeout: 10))
+        if !enableNetwork.isHittable {
+            app.scrollViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(enableNetwork.isHittable)
     }
 
     func testCaptureLocalNetworkExplanation() throws {
