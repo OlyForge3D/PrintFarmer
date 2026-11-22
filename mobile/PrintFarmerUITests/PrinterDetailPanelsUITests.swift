@@ -514,7 +514,10 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 }
                 if panel == "Status" {
                     XCTAssertTrue(app.staticTexts["Print progress 64 percent"].waitForExistence(timeout: 5))
-                    XCTAssertTrue(app.staticTexts["benchy_0.2mm_PLA.gcode"].exists)
+                    XCTAssertEqual(
+                        app.staticTexts["printer.detail.job.name"].label,
+                        "Current print, benchy_0.2mm_PLA.gcode"
+                    )
                     let remainingTime = app.staticTexts
                         .matching(identifier: "printer.detail.job.fact.remaining")
                         .matching(NSPredicate(format: "label CONTAINS %@", "38m"))
@@ -805,6 +808,10 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                     statusContent.frame.maxY, page.frame.maxY + 1,
                     "The end of the Status content must fit or be reachable by scrolling"
                 )
+                let progress = app.staticTexts.matching(
+                    NSPredicate(format: "label BEGINSWITH %@", "Print progress ")
+                ).firstMatch
+                XCTAssertGreaterThan(progress.frame.height, 50, "Progress must scale at the largest text size")
                 for identifier in ["printer.detail.control.pause", "printer.detail.control.cancel"] {
                     let action = app.buttons[identifier]
                     XCTAssertTrue(action.isHittable, "\(identifier) must remain reachable at the largest text size")

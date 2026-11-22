@@ -1052,7 +1052,6 @@ struct PrinterDetailView: View {
         .accessibilityIdentifier("printer.detail.job")
     }
 
-    @ViewBuilder
     private func currentJobHeading(_ printer: Printer, jobName: String?) -> some View {
         let progress = viewModel.isActivelyPrinting
             ? printer.progress.flatMap { $0.isFinite ? min(max($0, 0), 1) : nil }
@@ -1061,30 +1060,24 @@ struct PrinterDetailView: View {
             "Print progress \(Int(($0 * 100).rounded())) percent"
         }
 
-        if dynamicTypeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: 4) {
-                if let progress, let progressLabel {
-                    Text("\(Int((progress * 100).rounded()))%")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                        .accessibilityLabel(progressLabel)
-                }
-                Text(jobName ?? "Printing")
-                    .font(.headline)
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+
+        return layout {
+            if let progress, let progressLabel {
+                Text("\(Int((progress * 100).rounded()))%")
+                    .font(.system(.largeTitle, design: .rounded, weight: .bold))
+                    .monospacedDigit()
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(progressLabel)
             }
-        } else {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                if let progress, let progressLabel {
-                    Text("\(Int((progress * 100).rounded()))%")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                        .accessibilityLabel(progressLabel)
-                }
-                Text(jobName ?? "Printing")
-                    .font(.headline)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+            Text(jobName ?? "Printing")
+                .font(.headline)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(jobName.map { "Current print, \($0)" } ?? "Printing")
+                .accessibilityIdentifier("printer.detail.job.name")
+            if !dynamicTypeSize.isAccessibilitySize {
                 Spacer(minLength: 0)
             }
         }
