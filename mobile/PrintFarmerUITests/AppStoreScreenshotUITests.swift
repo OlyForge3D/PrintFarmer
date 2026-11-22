@@ -328,6 +328,8 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
             list.swipeUp()
         }
         XCTAssertTrue(retry.isHittable)
+        XCTAssertGreaterThanOrEqual(retry.frame.width, 44)
+        XCTAssertGreaterThan(retry.frame.height, 44)
         let history = app.buttons["jobList.history.open"]
         for _ in 0..<8 where !history.isHittable {
             list.swipeDown()
