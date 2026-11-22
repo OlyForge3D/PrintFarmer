@@ -1,8 +1,44 @@
 import { describe, expect, it } from 'vitest';
 import {
   getFilamentBedContext,
+  getFilamentEditorBedContext,
+  getNativeBedContext,
+  getNativeDefaultBedType,
   getSingleBedTemperatureKey, isBedTemperatureSettingVisible, resolveBedType,
 } from '@/features/slicer/utils/bedSurfaceTemperature';
+
+describe('Orca printer preset bed defaults', () => {
+  it.each([
+    ['1', 'Cool Plate'],
+    ['2', 'Engineering Plate'],
+    ['3', 'High Temp Plate'],
+    ['4', 'Textured PEI Plate'],
+    ['5', 'Textured Cool Plate'],
+    ['6', 'Supertack Plate'],
+    ['0', 'High Temp Plate'],
+    ['bad', 'High Temp Plate'],
+  ])('maps native default %s to %s', (value, expected) => {
+    expect(getNativeDefaultBedType({ default_bed_type: value }, 'model')).toBe(expected);
+  });
+
+  it('uses the native model fallback only when a model is known', () => {
+    expect(getNativeDefaultBedType({}, 'BL-P001')).toBe('Cool Plate');
+    expect(getNativeDefaultBedType({}, 'C13')).toBe('Cool Plate');
+    expect(getNativeDefaultBedType({}, 'other')).toBe('High Temp Plate');
+    expect(getNativeDefaultBedType({}, undefined)).toBeUndefined();
+    expect(getNativeDefaultBedType({ default_bed_type: '7' }, 'other')).toBeUndefined();
+    expect(getNativeDefaultBedType(undefined, 'other')).toBeUndefined();
+  });
+
+  it('uses the default for single-bed printers and selection for multi-bed printers', () => {
+    expect(getNativeBedContext({ default_bed_type: '4' }, 'other', 'Qidi', 'Cool Plate'))
+      .toEqual({ supportMultiBedTypes: false, bedType: 'Textured PEI Plate' });
+    expect(getNativeBedContext({ default_bed_type: '4' }, 'other', 'BBL', 'Cool Plate'))
+      .toEqual({ supportMultiBedTypes: true, bedType: 'Cool Plate' });
+    expect(getNativeBedContext({ support_multi_bed_types: 'invalid' }, 'other', 'Qidi', ''))
+      .toEqual({ supportMultiBedTypes: undefined, bedType: 'High Temp Plate' });
+  });
+});
 
 describe('native bed-surface profile values', () => {
   it('follows explicit override, then process, then machine with no arbitrary fallback', () => {
@@ -12,6 +48,42 @@ describe('native bed-surface profile values', () => {
     expect(resolveBedType('', process, machine)).toBe('Cool Plate');
     expect(resolveBedType('', {}, machine)).toBe('Textured PEI Plate');
     expect(resolveBedType('', {}, {})).toBeUndefined();
+  });
+
+  describe('filament editor resolved plate', () => {
+    const resolved = { machineResolved: true, processResolved: true, projectMayOverride: false };
+    const context = (machine: Record<string, unknown> | undefined, process: Record<string, unknown> | undefined,
+      options = resolved, override = '', manufacturer = 'Qidi') =>
+      getFilamentEditorBedContext(machine, process, override, manufacturer, options);
+
+    it('uses Orca defaults for a fully resolved single-bed machine', () => {
+      expect(getSingleBedTemperatureKey(context({}, {}))).toBe('hot_plate_temp');
+    });
+
+    it('uses the emitted process plate before the machine plate, and an override before both', () => {
+      const machine = { curr_bed_type: 'Cool Plate' };
+      const process = { curr_bed_type: 'Textured PEI Plate' };
+      expect(getSingleBedTemperatureKey(context(machine, process))).toBe('textured_plate_temp');
+      expect(getSingleBedTemperatureKey(context(machine, process, resolved, 'High Temp Plate'))).toBe('hot_plate_temp');
+    });
+
+    it('does not infer defaults from incomplete profiles or an overriding 3MF', () => {
+      for (const options of [
+        { ...resolved, machineResolved: false },
+        { ...resolved, processResolved: false },
+        { ...resolved, projectMayOverride: true },
+      ]) {
+        expect(getSingleBedTemperatureKey(context({ curr_bed_type: 'Cool Plate' }, {}, options))).toBeUndefined();
+      }
+    });
+
+    it('keeps all plates for Bambu, multi-bed and unrecognized plate or flag', () => {
+      expect(getSingleBedTemperatureKey(context({}, {}, resolved, '', 'BBL'))).toBeUndefined();
+      expect(getSingleBedTemperatureKey(context({ support_multi_bed_types: '1' }, {}))).toBeUndefined();
+      expect(getSingleBedTemperatureKey(context({ support_multi_bed_types: 'invalid' }, {}))).toBeUndefined();
+      expect(getSingleBedTemperatureKey(context({}, { curr_bed_type: 'Unknown Plate' }))).toBeUndefined();
+      expect(getSingleBedTemperatureKey(context({}, { curr_bed_type: null }))).toBeUndefined();
+    });
   });
 });
 

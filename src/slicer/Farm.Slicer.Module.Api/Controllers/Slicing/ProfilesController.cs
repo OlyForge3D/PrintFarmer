@@ -761,16 +761,18 @@ public class ProfilesController(
     /// </summary>
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <param name="engineVersion">Optional exact engine version to query.</param>
     [HttpGet("worker-hierarchy")]
     [ProducesResponseType(typeof(AllProfilesResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> GetWorkerProfilesHierarchyAsync(
         [FromServices] HttpClient httpClient,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromQuery] string? engineVersion = null)
     {
         try
         {
-            AllProfilesResponseDto? profiles = await _profilesService.GetWorkerProfilesHierarchyAsync(httpClient, ct);
+            AllProfilesResponseDto? profiles = await _profilesService.GetWorkerProfilesHierarchyAsync(httpClient, ct, engineVersion);
             return Ok(profiles ?? new AllProfilesResponseDto());
         }
         catch (HttpRequestException ex)
@@ -790,6 +792,28 @@ public class ProfilesController(
         {
             _logger.LogError("Error fetching profiles hierarchy from OrcaSlicer worker: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, "Error fetching profiles from worker");
+        }
+    }
+
+    /// <summary>Gets model metadata from the worker selected for the requested engine version.</summary>
+    [HttpGet("worker-machine-models")]
+    [ProducesResponseType(typeof(IReadOnlyList<MachineModelProfileDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetWorkerMachineModelsAsync(
+        [FromServices] HttpClient httpClient,
+        [FromQuery] string manufacturer,
+        [FromQuery] string model,
+        [FromQuery] string? engineVersion,
+        CancellationToken ct)
+    {
+        try
+        {
+            return Ok(await _profilesService.GetWorkerMachineModelsAsync(httpClient, manufacturer, model, engineVersion, ct));
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", LogSanitizer.Sanitize(ex.Message));
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
         }
     }
 

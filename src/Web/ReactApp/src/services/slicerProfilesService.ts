@@ -174,6 +174,12 @@ export interface WorkerHierarchyResponse {
   processProfiles?: Record<string, OrcaProcessProfile[]>;
 }
 
+export interface OrcaMachineModelProfile {
+  name: string;
+  manufacturer: string;
+  settings: Record<string, unknown>;
+}
+
 /**
  * Result from deleting all system profiles.
  */
@@ -211,6 +217,7 @@ export interface OrcaMachineProfile {
   printerVariant?: string;
   instantiation?: boolean;
   inherits?: string;
+  inheritanceResolved?: boolean | null;
   buildVolumeX?: number;
   buildVolumeY?: number;
   buildVolumeZ?: number;
@@ -276,6 +283,7 @@ export interface OrcaProcessProfile {
   compatible_printers?: string[] | null;
   instantiation?: boolean;
   inherits?: string;
+  inheritanceResolved?: boolean | null;
   settings?: Record<string, unknown>;
 }
 
@@ -674,8 +682,20 @@ export const slicerProfilesService = {
    * Returns system profiles directly from the worker without database storage.
    * @returns Worker hierarchy with system profiles organized by manufacturer and model
    */
-  async getWorkerHierarchy(): Promise<WorkerHierarchyResponse> {
-    const res = await apiClient.get<WorkerHierarchyResponse>('/slicer/profiles/worker-hierarchy');
+  async getWorkerHierarchy(engineVersion?: string): Promise<WorkerHierarchyResponse> {
+    const params = new URLSearchParams();
+    if (engineVersion) params.set('engineVersion', engineVersion);
+    const query = params.toString();
+    const res = await apiClient.get<WorkerHierarchyResponse>(
+      `/slicer/profiles/worker-hierarchy${query ? `?${query}` : ''}`,
+    );
+    return res.data;
+  },
+
+  async getWorkerMachineModels(manufacturer: string, model: string, engineVersion?: string): Promise<OrcaMachineModelProfile[]> {
+    const params = new URLSearchParams({ manufacturer, model });
+    if (engineVersion) params.set('engineVersion', engineVersion);
+    const res = await apiClient.get<OrcaMachineModelProfile[]>(`/slicer/profiles/worker-machine-models?${params}`);
     return res.data;
   },
 

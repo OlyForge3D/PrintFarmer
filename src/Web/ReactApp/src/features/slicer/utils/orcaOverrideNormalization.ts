@@ -52,6 +52,13 @@ export function normalizeOrcaOverrides(overrides: Record<string, unknown>): Reco
   return out;
 }
 
+/** Only user changes to the process bed setting may override a project's bed. */
+export function getEditedProcessBedType(value: unknown, original: unknown): unknown {
+  const unwrap = (candidate: unknown) =>
+    Array.isArray(candidate) && candidate.length === 1 ? candidate[0] : candidate;
+  return JSON.stringify(unwrap(value)) === JSON.stringify(unwrap(original)) ? undefined : value;
+}
+
 export interface BuildProcessOverridesInput {
   /** Current editor state (native-typed). */
   slicerSettings: OrcaProcessSettings;

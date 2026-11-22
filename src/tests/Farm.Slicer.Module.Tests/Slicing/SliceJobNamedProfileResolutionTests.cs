@@ -864,6 +864,44 @@ public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime, IDispo
         (await completion.Content.ReadAsStringAsync()).Should().Contain("profile_hash_mismatch");
     }
 
+    [Fact]
+    public async Task Submit_ExplicitCustomMachine_MaterializesInheritedSettingsAndNativeIdentity()
+    {
+        Guid userId = await GetAuthenticatedUserIdAsync();
+        await AddProfilesAsync(userId, CustomFilamentName);
+        ConfigureExplicitStock();
+        SubmitSliceJobRequest request = await ExplicitRequestAsync(userId);
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        MachineProfile selected = await db.MachineProfiles.SingleAsync();
+        selected.RawJson = """{"inherits":"Intermediate","printer_model":"Custom","custom_key":"child"}""";
+        db.MachineProfiles.Add(new MachineProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Intermediate",
+            SlicerType = SlicerType.OrcaSlicer,
+            CreatedByUserId = userId,
+            IsPublic = false,
+            RawJson = """{"inherits":"Base Machine","custom_key":"parent","parent_key":"retained"}""",
+        });
+        await db.SaveChangesAsync();
+
+        using HttpResponseMessage response = await _client.PostAsJsonAsync("/api/slice", request);
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        SliceJob job = await db.SliceJobs.AsNoTracking().SingleAsync();
+        using JsonDocument document = JsonDocument.Parse(job.MachineProfileJson!);
+        JsonElement profile = document.RootElement;
+        profile.GetProperty("type").GetString().Should().Be("machine");
+        profile.GetProperty("name").GetString().Should().Be("Test Machine");
+        profile.GetProperty("from").GetString().Should().Be("user");
+        profile.GetProperty("inherits").GetString().Should().Be("Base Machine");
+        profile.GetProperty("printer_model").GetString().Should().Be("Custom");
+        profile.GetProperty("custom_key").GetString().Should().Be("child");
+        profile.GetProperty("parent_key").GetString().Should().Be("retained");
+        profile.GetProperty("printable_height").GetString().Should().Be("280");
+        job.MachineProfileSha256.Should().Be(Sha256(job.MachineProfileJson!));
+    }
+
     [Theory]
     [InlineData("missing-machine")]
     [InlineData("wrong-type-process")]
@@ -879,6 +917,11 @@ public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime, IDispo
     [InlineData("malformed-native")]
     [InlineData("ambiguous-stock")]
     [InlineData("missing-stock")]
+    [InlineData("missing-machine-parent")]
+    [InlineData("cyclic-machine-parent")]
+    [InlineData("ambiguous-machine-parent")]
+    [InlineData("unresolved-machine-parent")]
+    [InlineData("private-machine-parent")]
     public async Task Submit_InvalidExplicitIdentity_RejectsWithoutQueuing(string scenario)
     {
         Guid userId = await GetAuthenticatedUserIdAsync();
@@ -888,7 +931,7 @@ public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime, IDispo
         SliceProfileSelections selections = request.ProfileSelections!;
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
-        using HttpClient? nonAdminClient = scenario == "private-filament"
+        using HttpClient? nonAdminClient = scenario is "private-filament" or "private-machine-parent"
             ? await _factory.CreateOperatorClientAsync("slicing", "submit")
             : null;
         switch (scenario)
@@ -944,6 +987,41 @@ public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime, IDispo
                 selections.Filaments = [Stock(CustomFilamentName)];
                 ConfigureExplicitStock().FilamentProfiles.Clear();
                 break;
+            case "missing-machine-parent":
+                (await db.MachineProfiles.SingleAsync()).RawJson = """{"inherits":"Missing"}""";
+                break;
+            case "cyclic-machine-parent":
+                (await db.MachineProfiles.SingleAsync()).RawJson = """{"inherits":"Test Machine"}""";
+                break;
+            case "ambiguous-machine-parent":
+                db.MachineProfiles.Add(new MachineProfile
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Base Machine",
+                    SlicerType = SlicerType.OrcaSlicer,
+                    CreatedByUserId = userId,
+                    IsPublic = false,
+                    RawJson = """{"inherits":"Other"}""",
+                });
+                break;
+            case "unresolved-machine-parent":
+                ConfigureExplicitStock().MachineProfiles["Test"].Single(p => p.Name == "Base Machine").InheritanceResolved = false;
+                break;
+            case "private-machine-parent":
+                (await db.MachineProfiles.SingleAsync()).IsPublic = true;
+                (await db.ProcessProfiles.SingleAsync()).IsPublic = true;
+                (await db.FilamentProfiles.SingleAsync()).IsPublic = true;
+                (await db.MachineProfiles.SingleAsync()).RawJson = """{"inherits":"Private Parent"}""";
+                db.MachineProfiles.Add(new MachineProfile
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Private Parent",
+                    SlicerType = SlicerType.OrcaSlicer,
+                    CreatedByUserId = userId,
+                    IsPublic = false,
+                    RawJson = """{"inherits":"Base Machine"}""",
+                });
+                break;
         }
         await db.SaveChangesAsync();
 
@@ -978,7 +1056,11 @@ public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime, IDispo
         {
             MachineProfiles = new()
             {
-                ["Test"] = [new MachineProfileDto { Name = "Test Machine", Settings = NativeSettings("""{"printer_model":"Stock","nozzle_diameter":["0.4"]}""") }],
+                ["Test"] =
+                [
+                    new MachineProfileDto { Name = "Test Machine", Settings = NativeSettings("""{"printer_model":"Stock","nozzle_diameter":["0.4"]}""") },
+                    new MachineProfileDto { Name = "Base Machine", InheritanceResolved = true, Settings = NativeSettings("""{"printable_height":"280"}""") },
+                ],
             },
             ProcessProfiles = new()
             {
@@ -998,6 +1080,9 @@ public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime, IDispo
     {
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        MachineProfile machine = await db.MachineProfiles.SingleAsync();
+        machine.RawJson = """{"inherits":"Base Machine","printer_model":"Test","nozzle_diameter":["0.4"]}""";
+        await db.SaveChangesAsync();
         return new SubmitSliceJobRequest
         {
             UserId = userId,

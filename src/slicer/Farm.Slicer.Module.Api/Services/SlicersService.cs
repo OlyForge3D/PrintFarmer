@@ -893,6 +893,13 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
             }
 
             int imported = 0;
+
+            // DTO fields can change between releases, so content hashes alone cannot identify
+            // already-imported profiles protected by the unowned name indexes.
+            HashSet<string> existingMachineNames = await LoadExistingProfileIdentitiesAsync(
+                async token => (await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.CreatedByUserId == null).Select(p => (p.Name ?? string.Empty).Trim()), ct);
+            HashSet<string> existingProcessNames = await LoadExistingProfileIdentitiesAsync(
+                async token => (await _profileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.CreatedByUserId == null).Select(p => ProcessIdentity(p.Name, p.PrinterModelId)), ct);
             HashSet<string> processedMachineModelHashes = new(StringComparer.OrdinalIgnoreCase);
             HashSet<string> processedMachineHashes = new(StringComparer.OrdinalIgnoreCase);
             HashSet<string> processedFilamentHashes = new(StringComparer.OrdinalIgnoreCase);
@@ -973,6 +980,12 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                         List<MachineProfileDto> instantiable = profiles.MachineProfiles.Where(p => p.Instantiation).ToList();
                         foreach (MachineProfileDto machineProfile in instantiable)
                         {
+                            string machineName = machineProfile.Name ?? modelDisplayName;
+                            if (!existingMachineNames.Add(machineName.Trim()))
+                            {
+                                continue;
+                            }
+
                             string profileJson = JsonSerializer.Serialize(machineProfile);
                             string profileHash = ComputeProfileHash(profileJson);
 
@@ -992,7 +1005,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                             MachineProfile systemProfile = new MachineProfile
                             {
                                 Id = Guid.NewGuid(),
-                                Name = machineProfile.Name ?? modelDisplayName,
+                                Name = machineName,
                                 Manufacturer = manufacturerName,
                                 Description = $"OrcaSlicer machine profile for {modelDisplayName}" + (machineProfile.NozzleDiameter.HasValue ? $" ({machineProfile.NozzleDiameter}mm nozzle)" : string.Empty),
                                 SlicerType = SlicerType.OrcaSlicer,
@@ -1073,6 +1086,12 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                         List<ProcessProfileDto> instantiable = profiles.ProcessProfiles.Where(p => p.Instantiation).ToList();
                         foreach (ProcessProfileDto processProfile in instantiable)
                         {
+                            string processName = string.IsNullOrEmpty(processProfile.Name) ? $"{processProfile.Quality} ({processProfile.LayerHeight}mm)" : processProfile.Name;
+                            if (!existingProcessNames.Add(ProcessIdentity(processName, printerModelId)))
+                            {
+                                continue;
+                            }
+
                             string profileJson = JsonSerializer.Serialize(processProfile);
                             string profileHash = ComputeProfileHash(profileJson);
 
@@ -1092,7 +1111,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                             ProcessProfile systemProfile = new ProcessProfile
                             {
                                 Id = Guid.NewGuid(),
-                                Name = string.IsNullOrEmpty(processProfile.Name) ? $"{processProfile.Quality} ({processProfile.LayerHeight}mm)" : processProfile.Name,
+                                Name = processName,
                                 Description = processProfile.Description ?? $"OrcaSlicer process profile: {processProfile.Quality} quality at {processProfile.LayerHeight}mm layer height",
                                 SlicerType = SlicerType.OrcaSlicer,
                                 SlicerDistribution = CalibrationContractConstants.SlicerDistribution,

@@ -15,6 +15,28 @@ namespace Farm.OrcaSlicer.Worker.Tests;
 public sealed class CustomProfileCompatibilityGateTests
 {
     [Fact]
+    public async Task GetMachineModelsAsync_UsesExactManufacturerAndModel()
+    {
+        var target = new MachineModelProfileDto { Name = "X Plus", Manufacturer = "Qidi" };
+        var duplicate = new MachineModelProfileDto { Name = "X Plus", Manufacturer = "Qidi" };
+        var controller = new ProfilesController(
+            new StubProfilesService(new ProcessProfileDto(), [
+                target,
+                duplicate,
+                new MachineModelProfileDto { Name = "X Plus", Manufacturer = "Other" },
+                new MachineModelProfileDto { Name = "x plus", Manufacturer = "Qidi" }
+            ]),
+            NullLogger<ProfilesController>.Instance);
+
+        ActionResult<IList<MachineModelProfileDto>> response =
+            await controller.GetMachineModelsAsync("Qidi", "X Plus", CancellationToken.None);
+
+        OkObjectResult ok = response.Result.Should().BeOfType<OkObjectResult>().Subject;
+        ok.Value.Should().BeAssignableTo<IList<MachineModelProfileDto>>()
+            .Which.Should().Equal(target, duplicate);
+    }
+
+    [Fact]
     public async Task ExactCustomMachineName_SatisfiesDiscoveryAndExecutionGates()
     {
         const string machineName = "Farm Test 0.6 nozzle";
@@ -69,11 +91,13 @@ public sealed class CustomProfileCompatibilityGateTests
             .Equal(machineName);
     }
 
-    private sealed class StubProfilesService(ProcessProfileDto process) : ISlicerProfilesService
+    private sealed class StubProfilesService(
+        ProcessProfileDto process,
+        IList<MachineModelProfileDto>? models = null) : ISlicerProfilesService
     {
         public Task<IList<MachineModelProfileDto>> ListAvailableMachineModelProfilesAsync(
             CancellationToken ct = default) =>
-            Task.FromResult<IList<MachineModelProfileDto>>([]);
+            Task.FromResult(models ?? (IList<MachineModelProfileDto>)[]);
 
         public Task<IList<MachineProfileDto>> ListAvailableMachineProfilesAsync(
             CancellationToken ct = default) =>

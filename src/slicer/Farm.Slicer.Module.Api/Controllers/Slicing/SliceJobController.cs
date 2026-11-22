@@ -119,6 +119,18 @@ public partial class SliceJobController(
                 "Priority must be between 0 (Low) and 3 (Critical).");
         }
 
+        if (!ProjectBedSelectionContract.TryParse(request.SlicerProfileJson, out ProjectBedSelectionContract? bedSelection, out string? bedSelectionError))
+        {
+            return SlicerApiProblems.InvalidRequest(this, "invalid_bed_selection", bedSelectionError!);
+        }
+
+        if (bedSelection is not null &&
+            (request.SlicerEngine != SlicerEngineType.OrcaSlicer || string.IsNullOrWhiteSpace(request.SlicerEngineVersion)))
+        {
+            return SlicerApiProblems.InvalidRequest(this, "invalid_bed_selection",
+                "Project bed selection requires OrcaSlicer and a registered engine version.");
+        }
+
         // Issue #2229: a caller can bypass the frontend's #2223 inline validation entirely by
         // POSTing negative print-setting overrides (perimeters/wall_loops, infill density,
         // top/bottom shell layers) directly to this endpoint. Reject those here, before the job
@@ -379,6 +391,22 @@ public partial class SliceJobController(
                 new { error = "The selected engine's profiles are unavailable. Retry when its worker is online.", code = "slice_profiles_unavailable" });
         }
 
+        if (bedSelection is not null)
+        {
+            // Claim matching is OR-any; this one tag implies both version and contract support.
+            string capability = $"orcaslicer:{job.SlicerEngineVersion}:{ProjectBedSelectionContract.Capability}";
+            if (!await HasProjectBedWorkerAsync(capability, ct))
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                {
+                    error = "No online OrcaSlicer worker for the selected version supports project bed selection. Update or start a compatible worker and retry.",
+                    code = "project_bed_worker_unavailable"
+                });
+            }
+
+            job.RequiredCapabilitiesJson = JsonSerializer.Serialize(new[] { capability });
+        }
+
         try
         {
             await _jobRepository.AddAsync(job, ct);
@@ -401,6 +429,39 @@ public partial class SliceJobController(
             Status = job.Status,
             QueuedAt = job.QueuedAt,
         });
+    }
+
+    private async Task<bool> HasProjectBedWorkerAsync(string capability, CancellationToken ct)
+    {
+        const int pageSize = 100;
+        DateTime cutoff = DateTime.UtcNow.AddSeconds(-WorkerStatus.OnlineFreshnessSeconds);
+        int offset = 0;
+        IReadOnlyList<Worker> workers;
+        do
+        {
+            ct.ThrowIfCancellationRequested();
+            workers = await _workerRepository.GetAllAsync(pageSize, offset);
+            foreach (Worker worker in workers)
+            {
+                if (worker.LastHeartbeat is null || worker.LastHeartbeat < cutoff)
+                {
+                    return false;
+                }
+
+                if (!worker.IsDisabled &&
+                    worker.TotalSlots > 0 &&
+                    worker.Status is WorkerStatus.Online or WorkerStatus.Busy &&
+                    WorkerClaimIdentity.FromRegisteredWorker(worker).Capabilities.Contains(capability, StringComparer.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            offset += workers.Count;
+        }
+        while (workers.Count == pageSize);
+
+        return false;
     }
 
     private static string ResolveEngineName(int engine)

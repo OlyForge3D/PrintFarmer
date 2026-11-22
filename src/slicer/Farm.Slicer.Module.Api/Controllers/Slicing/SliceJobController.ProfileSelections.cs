@@ -69,30 +69,26 @@ public partial class SliceJobController
             return StatusCode(StatusCodes.Status503ServiceUnavailable);
         }
 
-        AllProfilesResponseDto? stock = null;
-        if (selections.Machine.Source == "system" || selections.Process.Source == "system" ||
-            selections.Filaments.Any(selection => selection.Source == "system"))
+        if (_profilesService is null || _httpClientFactory is null)
         {
-            if (_profilesService is null || _httpClientFactory is null)
-            {
-                return StatusCode(StatusCodes.Status503ServiceUnavailable);
-            }
+            return StatusCode(StatusCodes.Status503ServiceUnavailable);
+        }
 
-            try
-            {
-                using HttpClient client = _httpClientFactory.CreateClient();
-                stock = await _profilesService.GetWorkerProfilesHierarchyAsync(client, ct, job.SlicerEngineVersion);
-            }
-            catch (HttpRequestException exception)
-            {
-                _logger.LogWarning(exception, "Explicit profile library unavailable for job {JobId}", job.Id);
-                return StatusCode(StatusCodes.Status503ServiceUnavailable);
-            }
+        AllProfilesResponseDto? stock;
+        try
+        {
+            using HttpClient client = _httpClientFactory.CreateClient();
+            stock = await _profilesService.GetWorkerProfilesHierarchyAsync(client, ct, job.SlicerEngineVersion);
+        }
+        catch (HttpRequestException exception)
+        {
+            _logger.LogWarning(exception, "Explicit profile library unavailable for job {JobId}", job.Id);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable);
+        }
 
-            if (stock is null)
-            {
-                return StatusCode(StatusCodes.Status503ServiceUnavailable);
-            }
+        if (stock is null)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable);
         }
 
         bool CanRead(bool system, bool publicProfile, Guid? owner, SlicerType engine, string name, SliceProfileSelection selection) =>
@@ -106,7 +102,7 @@ public partial class SliceJobController
             MachineProfile? machine = await _machineProfileRepository.GetByIdAsync(machineId, ct);
             machineJson = machine is not null && !string.IsNullOrWhiteSpace(machine.RawJson) &&
                 CanRead(machine.IsSystem, machine.IsPublic, machine.CreatedByUserId, machine.SlicerType, machine.Name, selections.Machine)
-                ? ExtractFlatNativeProfileJson(machine.RawJson) : null;
+                ? await ResolveCustomMachineAsync(machine, stock!, userId, ct) : null;
         }
         else
         {
@@ -222,4 +218,107 @@ public partial class SliceJobController
             string.Equals(getName(profile), name, StringComparison.OrdinalIgnoreCase)).ToList();
         return matches.Count == 1 ? JsonSerializer.Serialize(getSettings(matches[0])) : null;
     }
+
+    private async Task<string?> ResolveCustomMachineAsync(
+        MachineProfile selected, AllProfilesResponseDto stock, Guid userId, CancellationToken ct)
+    {
+        IReadOnlyList<MachineProfile> visible = await _machineProfileRepository!.GetByEngineAsync(
+            SlicerType.OrcaSlicer, includeSystem: false,
+            PrintFarmerPermissions.IsFarmAdmin(User) ? null : userId, ct);
+        List<JsonObject> layers = [];
+        HashSet<Guid> visited = [];
+        MachineProfile current = selected;
+        while (visited.Add(current.Id))
+        {
+            string? flat = current.RawJson is null ? null : ExtractFlatNativeProfileJson(current.RawJson);
+            JsonObject? layer;
+            try
+            {
+                layer = flat is null ? null : JsonNode.Parse(flat) as JsonObject;
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+
+            if (layer is null)
+            {
+                return null;
+            }
+
+            if (layer["settings"] is JsonObject nested)
+            {
+                foreach (KeyValuePair<string, JsonNode?> property in nested)
+                {
+                    layer[property.Key] = property.Value?.DeepClone();
+                }
+
+                _ = layer.Remove("settings");
+            }
+
+            if (layer.TryGetPropertyValue("type", out JsonNode? type) &&
+                (type is not JsonValue typeValue ||
+                 !typeValue.TryGetValue(out string? typeName) || typeName != "machine"))
+            {
+                return null;
+            }
+
+            layers.Add(layer);
+            string? from = ReadString(layer, "from");
+            string? parent = ReadString(layer, from == "system" ? "name" : "inherits");
+            if (string.IsNullOrWhiteSpace(parent))
+            {
+                return null;
+            }
+
+            List<MachineProfileDto> systemMatches = stock.MachineProfiles.Values
+                .SelectMany(profiles => profiles)
+                .Where(profile => string.Equals(profile.Name, parent, StringComparison.Ordinal))
+                .ToList();
+            List<MachineProfile> customMatches = from == "system" ? [] : visible
+                .Where(profile => string.Equals(profile.Name, parent, StringComparison.Ordinal))
+                .ToList();
+            if (systemMatches.Count + customMatches.Count != 1)
+            {
+                return null;
+            }
+
+            if (systemMatches.Count == 1)
+            {
+                MachineProfileDto basis = systemMatches[0];
+                if (basis.InheritanceResolved != true)
+                {
+                    return null;
+                }
+
+                JsonObject? merged = JsonSerializer.SerializeToNode(basis.Settings) as JsonObject;
+                if (merged is null)
+                {
+                    return null;
+                }
+
+                foreach (JsonObject child in layers.AsEnumerable().Reverse())
+                {
+                    foreach (KeyValuePair<string, JsonNode?> property in child)
+                    {
+                        merged[property.Key] = property.Value?.DeepClone();
+                    }
+                }
+
+                // Orca's CLI compares a user preset's inherited system name against process compatibility.
+                merged["type"] = "machine";
+                merged["name"] = selected.Name;
+                merged["from"] = "user";
+                merged["inherits"] = basis.Name;
+                return merged.ToJsonString();
+            }
+
+            current = customMatches[0];
+        }
+
+        return null;
+    }
+
+    private static string? ReadString(JsonObject value, string key) =>
+        value[key] is JsonValue json && json.TryGetValue(out string? result) ? result : null;
 }

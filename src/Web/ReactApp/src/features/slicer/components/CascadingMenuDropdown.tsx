@@ -409,11 +409,7 @@ export function FilamentProfileDropdown({
                     const matProfiles = materials[mat];
 
                     return (
-                      <div key={`${mfr}:${mat}`}>
-                        {/* Material sub-header so users can scan by polymer. */}
-                        <div className="pl-7 pr-3 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-pf-text-muted">
-                          {mat}
-                        </div>
+                      <div key={`${mfr}:${mat}`} role="group" aria-label={mat}>
                         {matProfiles.map(prof => {
                           const isSelected = !selectedCustomProfileId && prof.name === selectedProfileName;
                           return (

@@ -2549,6 +2549,24 @@ public class ProfilesService(
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<MachineModelProfileDto>> GetWorkerMachineModelsAsync(
+        HttpClient httpClient, string manufacturer, string model, string? engineVersion, CancellationToken ct)
+    {
+        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync(engineVersion, ct);
+        if (string.IsNullOrEmpty(workerUrl))
+        {
+            throw new HttpRequestException("OrcaSlicer worker not found in registry");
+        }
+
+        string url = $"{workerUrl}/api/profiles/machine-models?manufacturer={Uri.EscapeDataString(manufacturer)}&model={Uri.EscapeDataString(model)}";
+        using HttpResponseMessage response = await httpClient.GetAsync(url, ct);
+        response.EnsureSuccessStatusCode();
+        string json = await response.Content.ReadAsStringAsync(ct);
+        return JsonSerializer.Deserialize<List<MachineModelProfileDto>>(json, CaseInsensitiveJsonOptions)
+            ?? throw new JsonException("Worker returned empty machine model metadata");
+    }
+
+    /// <inheritdoc />
     public async Task<AllProfilesResponseDto?> GetCatalogFilteredWorkerHierarchyAsync(HttpClient httpClient, CancellationToken ct)
     {
         AllProfilesResponseDto? workerHierarchy = await GetWorkerProfilesHierarchyAsync(httpClient, ct);

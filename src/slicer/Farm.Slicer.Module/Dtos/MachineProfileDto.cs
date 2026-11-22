@@ -29,6 +29,9 @@ public class MachineProfileDto
     [JsonPropertyName("inherits")]
     public string? Inherits { get; set; }
 
+    /// <summary>Whether the worker resolved the complete inheritance chain.</summary>
+    public bool? InheritanceResolved { get; set; }
+
     // ── Nozzle ────────────────────────────────────────────────────────────
     public double? NozzleDiameter { get; set; }
 

@@ -83,7 +83,7 @@ current worker release.
   - Pinned to a version → `["orcaslicer:<version>"]` only. No generic `orcaslicer` capability.
   - Unpinned → `["orcaslicer"]` only.
   This is deliberate: `EfSliceJobRepository.ClaimNextJobAsync` uses OR-match, so a mixed capability set would let a wrong-version worker claim a pinned job.
-- Workers advertise their supported capabilities via `WorkerCapabilityProvider`, including `orcaslicer`, `orcaslicer:<Worker:EngineVersion>`, `orcaslicer:native-profile-selections-v1`, `orcaslicer:<Worker:EngineVersion>:native-profile-selections-v1`, `stl-processing`, and `gcode-generation`. Both `SlicerRegistrationClient` and `QueueConsumerService` use the same provider.
+- Workers advertise their supported capabilities via `WorkerCapabilityProvider`, including `orcaslicer`, `orcaslicer:<Worker:EngineVersion>`, `orcaslicer:native-profile-selections-v1`, `orcaslicer:<Worker:EngineVersion>:native-profile-selections-v1`, `orcaslicer:<Worker:EngineVersion>:project-bed-selection-v1`, `stl-processing`, and `gcode-generation`. Both `SlicerRegistrationClient` and `QueueConsumerService` use the same provider.
 - `GET /api/slicers/engines` returns `[{ engine, versions[], latest }]` for the React version picker.
 
 ### Deploying a second (previous) worker
@@ -104,11 +104,20 @@ Advanced. If only Simple is enabled, no control is shown.
 
 ### Bed surfaces and filament temperatures
 
-The web slicer and Quick Slice hide **Bed Type** for single-bed machine profiles
-and preserve the profile's bed surface. Where the selector is available, an
-explicit choice is submitted as
-`overrides.curr_bed_type` and included in the native process configuration; it
-does not rewrite the filament's temperature arrays.
+The web slicer and Quick Slice hide **Bed Type** for single-bed machine
+profiles. New Orca jobs submit a versioned `bedSelection` contract rather than
+an automatic `overrides.curr_bed_type`. An explicit user selection takes
+precedence over a 3MF plate setting, then a project-global setting; when none is
+present, the worker uses **High Temp Plate**. Mixed per-plate project settings
+are preserved when no explicit selection is made. Filament temperature arrays
+are not rewritten.
+
+These jobs require an engine version and a live worker advertising the matching
+`orcaslicer:<version>:project-bed-selection-v1` capability; otherwise submission
+returns HTTP 503. The worker rejects ambiguous or unreadable project settings
+and requires an unambiguous output for the selected plate. It trusts OrcaSlicer's
+generated G-code rather than checking bed temperature commands or macros.
+Existing jobs without the contract retain their legacy behavior.
 
 The slicer sidebar and Quick Slice show no nozzle or bed temperature text under
 filament selection. Review or change temperatures in the filament editor. Those
@@ -125,9 +134,18 @@ and leaves all pairs visible. Hiding a surface never deletes its values or
 changes profile inheritance; saving an edit preserves other surfaces and the
 remaining native vector entries.
 
-This matches OrcaSlicer v2.4.0's
+For fully resolved Orca profiles, an absent `support_multi_bed_types` uses
+Orca's single-bed default. OrcaSlicer 2.4.2's own default bed type depends on
+the machine and model; the versioned PrintFarmer job contract instead uses the
+precedence and fallback above. The editor keeps all pairs visible when inheritance is
+incomplete or a 3MF may supply its own plate setting; it does not guess the
+contents of the project. Older workers without resolution information also
+retain all pairs.
+
+This follows OrcaSlicer v2.4.2's
+[configuration defaults](https://github.com/OrcaSlicer/OrcaSlicer/blob/v2.4.2/src/libslic3r/PrintConfig.cpp),
 [filament visibility rule](https://github.com/SoftFever/OrcaSlicer/blob/6d9eb1792f50d11ea12d60526b6ace58666354fd/src/slic3r/GUI/Tab.cpp)
-and [native surface-key lookup](https://github.com/SoftFever/OrcaSlicer/blob/6d9eb1792f50d11ea12d60526b6ace58666354fd/src/libslic3r/PrintConfig.hpp).
+and [native surface-key lookup](https://github.com/OrcaSlicer/OrcaSlicer/blob/v2.4.2/src/libslic3r/PrintConfig.hpp).
 It does not establish the cause of an existing failed physical print without
 that job's profiles, effective surface and generated start G-code.
 
@@ -1471,7 +1489,7 @@ Both functions are driven by `orca-settings-version-delta.ts`, a hand-maintained
 
 `MetadataProfileEditor` (used by `SlicerSettingsPanel` and therefore by `NewSliceJobPage`) accepts an optional `engineVersion?: string` prop and calls `getMetadataForVersion(engineVersion)` inside a `useMemo`. All tabs/sections/settings the user sees come from the returned scoped bundle — so:
 
-- 2.4-added fields disappear from tabs and from the "Other Settings" fallback when the job is pinned to 2.3.1.
+- 2.4-added fields disappear from tabs when the job is pinned to 2.3.1.
 - Renamed fields render under the version-correct key (older key on 2.3.1, newer key on 2.4.1) when a rename is declared in the delta.
 
 `NewSliceJobPage` computes `effectiveEngineVersion = selectedEngineVersion ?? latestAvailableForEngine` and passes it to `<SlicerSettingsPanel>`. A dedicated `useEffect` on `effectiveEngineVersion` runs `scrubSettingsForVersion` against **all three** in-flight settings state objects atomically — `advancedProcessSettings` (dynamic dict), `slicerSettings` (typed OrcaProcessSettings the inline editor writes to), and `originalProcessSettings` (baseline snapshot used by `diffProcessOverrides` at submit time). This is what makes the added/removed/renamed guarantee real:
