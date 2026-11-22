@@ -248,10 +248,11 @@ struct JobListView: View {
                             HStack {
                                 Label("Queued", systemImage: "tray.full")
                                     .font(.subheadline.weight(.semibold))
+                                    .fixedSize(horizontal: false, vertical: true)
                                 Spacer()
                                 Text(viewModel.queueSectionCountText(for: viewModel.queuedJobs.count))
                                     .font(.caption.monospacedDigit())
-                                    .foregroundStyle(Color.pfTextTertiary)
+                                    .foregroundStyle(Color.pfTextSecondary)
                             }
                             if viewModel.canReorderQueue && !viewModel.reorderableQueuedJobs.isEmpty {
                                 Text("Drag to reorder")
@@ -276,7 +277,6 @@ struct JobListView: View {
                         }
                     }
                 }
-                .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("jobList.section.queued")
             }
@@ -335,8 +335,7 @@ struct JobListView: View {
         HStack {
             Label("Recent failures", systemImage: "exclamationmark.triangle")
                 .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
+                .fixedSize(horizontal: false, vertical: true)
             Spacer()
             Menu {
                 Button {
@@ -348,7 +347,7 @@ struct JobListView: View {
                 .accessibilityIdentifier("jobList.history.select")
             } label: {
                 Image(systemName: "ellipsis")
-                    .frame(width: 32, height: 32)
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("Job history")
@@ -356,9 +355,8 @@ struct JobListView: View {
             .accessibilityIdentifier("jobList.history.open")
             Text("\(count)")
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(Color.pfTextTertiary)
+                .foregroundStyle(Color.pfTextSecondary)
         }
-        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
         .accessibilityElement(children: .contain)
     }
 
@@ -366,13 +364,13 @@ struct JobListView: View {
         HStack {
             Label(title, systemImage: systemImage)
                 .font(.subheadline.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
             Spacer()
             Text(countText)
                 .font(.caption.monospacedDigit())
                 .monospacedDigit()
-                .foregroundStyle(Color.pfTextTertiary)
+                .foregroundStyle(Color.pfTextSecondary)
         }
-        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
     }

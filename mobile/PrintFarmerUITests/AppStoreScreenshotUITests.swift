@@ -317,6 +317,21 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         try capture("51-viewport-landscape")
     }
 
+    func testQueueHeadersAtLargestText() throws {
+        try relaunchProfile(theme: "dark", contentSize: "UICTContentSizeCategoryAccessibilityXXXL")
+        try tapRequired(shellDestinationButton(tabIdentifier: "tab.queue", timeout: 8))
+        try require(app.descendants(matching: .any)["jobList.section.printing"])
+        let list = app.descendants(matching: .any)["jobList.root"]
+        try require(list)
+        let history = app.buttons["jobList.history.open"]
+        for _ in 0..<8 where !history.isHittable {
+            list.swipeUp()
+        }
+        try tapRequired(history)
+        try tapRequired(app.buttons["jobList.history.select"])
+        try require(app.descendants(matching: .any)["jobList.history"])
+    }
+
     private func relaunchProfile(
         theme: String, contentSize: String = "UICTContentSizeCategoryL"
     ) throws {
