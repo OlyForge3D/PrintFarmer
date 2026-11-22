@@ -34,6 +34,7 @@ struct NFCWriteView: View {
                 }
                 .padding()
             }
+            .accessibilityIdentifier("nfcWrite.preview")
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 8) {
                     actionButtons

@@ -294,7 +294,6 @@ struct JobListView: View {
                             retryTask = Task { await viewModel.loadJobs() }
                         }
                     }
-                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                 } header: {
                     recentFailuresHeader(count: 0)
                         .accessibilityIdentifier("jobList.section.recent-failures")
@@ -652,23 +651,12 @@ struct JobListView: View {
 
     private func recentFailureRow(_ item: QueueHistoryEntry) -> some View {
         let jobID = UUID(uuidString: item.id)
-        return Group {
-            if dynamicTypeSize.isAccessibilitySize {
-                HStack(alignment: .top, spacing: 8) {
-                    recentFailureNavigationLink(item, id: jobID)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    if let jobID {
-                        rerunFailedJobButton(id: jobID)
-                    }
-                }
-            } else {
-                HStack(alignment: .top, spacing: 12) {
-                    recentFailureNavigationLink(item, id: jobID)
-                        .layoutPriority(1)
-                    if let jobID {
-                        rerunFailedJobButton(id: jobID)
-                    }
-                }
+        return HStack(alignment: .top, spacing: dynamicTypeSize.isAccessibilitySize ? 8 : 12) {
+            recentFailureNavigationLink(item, id: jobID)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+            if let jobID {
+                rerunFailedJobButton(id: jobID)
             }
         }
     }
@@ -700,8 +688,7 @@ struct JobListView: View {
         } label: {
             Text("Retry")
                 .font(.subheadline.weight(.semibold))
-                .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
-                .foregroundStyle(Color.pfAccent)
+                .foregroundStyle(Color.pfTextPrimary)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
                 .contentShape(Rectangle())
@@ -722,28 +709,26 @@ struct JobListView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(item.jobName)
                                 .font(.subheadline)
-                                .dynamicTypeSize(.xxxLarge)
-                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
                             StatusBadge(jobStatus: .failed)
-                                .dynamicTypeSize(.xxxLarge)
                         }
                     }
                     VStack(alignment: .leading, spacing: 4) {
                         Text(recentFailureSummary(item))
                             .font(.caption)
-                            .dynamicTypeSize(.xxxLarge)
                             .foregroundStyle(Color.pfError)
+                            .fixedSize(horizontal: false, vertical: true)
                         if let printerName = item.printerName {
                             Text(printerName)
                                 .font(.caption)
-                                .dynamicTypeSize(.xxxLarge)
                                 .foregroundStyle(Color.pfTextSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         if let completedAt = item.completedAt {
                             Text(completedAt.formatted(date: .omitted, time: .shortened))
                                 .font(.caption2)
-                                .dynamicTypeSize(.xxxLarge)
-                                .foregroundStyle(Color.pfTextTertiary)
+                                .foregroundStyle(Color.pfTextSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
@@ -773,7 +758,7 @@ struct JobListView: View {
                             if let completedAt = item.completedAt {
                                 Text(completedAt.formatted(date: .omitted, time: .shortened))
                                     .font(.caption2)
-                                    .foregroundStyle(Color.pfTextTertiary)
+                                    .foregroundStyle(Color.pfTextSecondary)
                                     .lineLimit(1)
                             }
                         }

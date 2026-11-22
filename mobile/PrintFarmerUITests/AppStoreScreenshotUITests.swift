@@ -323,9 +323,14 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         try require(app.descendants(matching: .any)["jobList.section.printing"])
         let list = app.descendants(matching: .any)["jobList.root"]
         try require(list)
+        let retry = app.buttons["job.retry.30000000-0003-0000-0000-000000000009"]
+        for _ in 0..<12 where !retry.isHittable {
+            list.swipeUp()
+        }
+        XCTAssertTrue(retry.isHittable)
         let history = app.buttons["jobList.history.open"]
         for _ in 0..<8 where !history.isHittable {
-            list.swipeUp()
+            list.swipeDown()
         }
         try tapRequired(history)
         try tapRequired(app.buttons["jobList.history.select"])
@@ -504,14 +509,16 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         spool.press(forDuration: 1)
         try tapRequired(app.buttons["Write NFC Tag"])
         try require(app.buttons["Write Tag"])
-        let preview = app.scrollViews.firstMatch
+        let preview = app.scrollViews["nfcWrite.preview"]
         try require(preview)
         let finalField = app.staticTexts["spool_id"]
-        for _ in 0..<8 where !finalField.isHittable {
+        let write = app.buttons["Write Tag"]
+        for _ in 0..<8 where !finalField.isHittable || finalField.frame.maxY > write.frame.minY {
             preview.swipeUp()
         }
         XCTAssertTrue(finalField.isHittable)
-        XCTAssertTrue(app.buttons["Write Tag"].isHittable)
+        XCTAssertLessThanOrEqual(finalField.frame.maxY, write.frame.minY)
+        XCTAssertTrue(write.isHittable)
     }
 
     func testCaptureHistoryJobAndHarvest() throws {
