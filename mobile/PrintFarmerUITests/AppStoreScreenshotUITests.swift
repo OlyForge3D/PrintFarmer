@@ -457,6 +457,12 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
     func testAddSpoolAtLargestText() throws {
         try relaunchProfile(theme: "dark", contentSize: "UICTContentSizeCategoryAccessibilityXXXL")
         try openFilament()
+        let destination = app.buttons["sidebar.filament"].exists
+            ? app.buttons["sidebar.filament"] : app.buttons["tab.filament"]
+        let destinationText = destination.staticTexts["Filament"]
+        XCTAssertTrue(destinationText.exists)
+        XCTAssertGreaterThan(destinationText.frame.width, 120, "Filament must not wrap mid-word")
+        XCTAssertLessThanOrEqual(destinationText.frame.maxX, app.windows.firstMatch.frame.maxX, "Selected destination must be fully visible")
         try require(app.buttons["inventory.filter.all"])
         XCTAssertTrue(app.buttons["inventory.filter.all"].isHittable)
         let filters = app.descendants(matching: .any)["inventory.filters"]
@@ -484,6 +490,19 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         screenshot.name = "add-spool-largest-weight"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+    }
+
+    func testShellDestinationsAtLargestText() throws {
+        try relaunchProfile(theme: "dark", contentSize: "UICTContentSizeCategoryAccessibilityXXXL")
+        for name in ["queue", "filament", "farm"] {
+            let destination = shellDestinationButton(tabIdentifier: "tab.\(name)", timeout: 10)
+            destination.tap()
+            XCTAssertTrue(destination.isSelected, "\(name) must remain reachable")
+            let text = destination.staticTexts[name.capitalized]
+            XCTAssertTrue(text.exists)
+            XCTAssertGreaterThanOrEqual(text.frame.minX, app.windows.firstMatch.frame.minX)
+            XCTAssertLessThanOrEqual(text.frame.maxX, app.windows.firstMatch.frame.maxX)
+        }
     }
 
     func testCapturePartsAndSelectedPart() throws {
