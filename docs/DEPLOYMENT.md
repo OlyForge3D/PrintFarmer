@@ -46,6 +46,14 @@ cd Web/ReactApp && npm run dev
 
 ## Docker Deployment
 
+Backend plugins use the shared ASP.NET Core framework. Use ASP.NET Core runtime
+10.0.15 or a later 10.0 patch to address
+[CVE-2026-114146](https://github.com/advisories/GHSA-67wp-ghc2-fw2g);
+verify the runtime in the deployed image rather than relying on its tag. Updating
+a framework-dependent container normally means rebuilding or pulling an updated
+image and replacing the container. Self-contained applications must be rebuilt
+and redeployed.
+
 ### Docker (Automated)
 
 **Best for:** Most users, production deployment, quick setup
