@@ -565,6 +565,25 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         try capture("19-harvest")
     }
 
+    func testJobDetailsAtLargestText() throws {
+        captureContentSize = "UICTContentSizeCategoryAccessibilityXXXL"
+        app.launchArguments = ["--uitesting"] + additionalLaunchArguments
+        relaunchAppForTest(additionalArguments: ["--uitesting-catalog-read-only", "--uitesting-catalog-history"])
+        XCUIDevice.shared.orientation = .portrait
+        openJobHistoryMenuAndSelect()
+        try tapRequired(app.buttons["job.row.30000000-0003-0000-0000-000000000007"])
+        let detail = app.scrollViews.containing(.button, identifier: "jobDetail.harvestToInventory").firstMatch
+        try require(detail)
+        let filename = detail.staticTexts["benchy_calibration.gcode"].firstMatch
+        for _ in 0..<12 where !filename.isHittable { detail.swipeUp() }
+        try require(filename)
+        XCTAssertTrue(filename.isHittable)
+        XCTAssertGreaterThan(filename.frame.height, 40)
+        let harvest = app.buttons["jobDetail.harvestToInventory"]
+        for _ in 0..<12 where !harvest.isHittable { detail.swipeUp() }
+        XCTAssertTrue(harvest.isHittable)
+    }
+
     func testCaptureSpoolPicker() throws {
         XCUIDevice.shared.orientation = .portrait
         try tapRequired(app.buttons["farm-card-10000000-0001-0000-0000-000000000001"])

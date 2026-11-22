@@ -10,6 +10,7 @@ func canHarvestToInventory(job: PrintJob, partsInventoryEnabled: Bool) -> Bool {
 
 struct JobDetailView: View {
     @Environment(ServiceContainer.self) private var services
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var viewModel: JobDetailViewModel
     @State private var activeTasks: [Task<Void, Never>] = []
     @State private var showingHarvestSheet = false
@@ -207,7 +208,7 @@ struct JobDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Details")
                 .font(.headline)
-                .accessibilityLabel("\(job.name), job detail. Details")
+                .accessibilityValue(job.name)
                 .accessibilityIdentifier(
                     "job.detail.destination.\(job.id.uuidString.lowercased())"
                 )
@@ -428,7 +429,7 @@ struct JobDetailView: View {
                         .fontWeight(.semibold)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(Color.pfSuccess)
+                .tint(Color.pfButtonPrimary)
                 .accessibilityIdentifier("jobDetail.harvestToInventory")
             } else if let harvestedAt = job.harvestedAt {
                 Label {
@@ -447,17 +448,21 @@ struct JobDetailView: View {
     // MARK: - Helpers
 
     private func infoRow(label: String, value: String, icon: String) -> some View {
-        HStack {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout())
+        return layout {
             Label(label, systemImage: icon)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-                .frame(width: 120, alignment: .leading)
+                .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : 120, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
 
-            Spacer()
+            if !dynamicTypeSize.isAccessibilitySize { Spacer() }
 
             Text(value)
                 .font(.subheadline)
-                .lineLimit(1)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 6)
     }
