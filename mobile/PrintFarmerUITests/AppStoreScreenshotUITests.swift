@@ -414,6 +414,15 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         try capture("10-notifications")
     }
 
+    func testNotificationRetryTouchTarget() throws {
+        try openAccount()
+        try tapRequired(app.buttons["account.destination.notifications"])
+        let retry = app.buttons["notifications.retry"]
+        try require(retry)
+        XCTAssertGreaterThanOrEqual(retry.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(retry.frame.height, 44)
+    }
+
     func testCaptureServersAndEditor() throws {
         try openAccount()
         try tapRequired(app.buttons["account.destination.manageServers"])
