@@ -411,6 +411,15 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         try capture("13-add-spool")
     }
 
+    func testAddSpoolAtLargestText() throws {
+        try relaunchProfile(theme: "dark", contentSize: "UICTContentSizeCategoryAccessibilityXXXL")
+        try openFilament()
+        try require(app.buttons["inventory.filter.all"])
+        XCTAssertTrue(app.buttons["inventory.filter.all"].isHittable)
+        try tapRequired(app.buttons["inventory.addSpool"])
+        try require(app.navigationBars["Add Spool"])
+    }
+
     func testCapturePartsAndSelectedPart() throws {
         relaunchAppForTest(additionalArguments: ["--uitesting-catalog-read-only", "--uitesting-catalog-parts"])
         try openFilament()

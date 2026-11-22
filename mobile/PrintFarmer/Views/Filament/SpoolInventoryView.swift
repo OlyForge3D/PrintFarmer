@@ -205,7 +205,6 @@ struct SpoolInventoryView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 8)
-        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("inventory.filters")
     }
@@ -270,12 +269,12 @@ struct SpoolInventoryView: View {
                 + (viewModel.showOnlyMissingNFC ? 1 : 0)
             Text(activeCount == 0 ? "More" : "More \(activeCount)")
                 .font(.caption.weight(.medium))
-                .fixedSize(horizontal: !allowsWrapping, vertical: false)
+                .fixedSize(horizontal: !allowsWrapping, vertical: allowsWrapping)
                 .foregroundStyle(activeCount > 0 ? .white : Color.pfTextSecondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(
-                    activeCount > 0 ? Color.pfAccent : Color.pfBackgroundTertiary,
+                    activeCount > 0 ? Color.pfButtonPrimary : Color.pfBackgroundTertiary,
                     in: Capsule()
                 )
         }
@@ -355,7 +354,7 @@ struct SpoolInventoryView: View {
                 .padding(.vertical, 6)
                 .frame(minHeight: 44)
                 .background(
-                    selected ? Color.pfAccent : Color.pfBackgroundTertiary,
+                    selected ? Color.pfButtonPrimary : Color.pfBackgroundTertiary,
                     in: Capsule()
                 )
         }
@@ -371,8 +370,10 @@ struct SpoolInventoryView: View {
                     } label: {
                         Label("Add spool", systemImage: "plus")
                             .font(.subheadline.weight(.semibold))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.vertical, 8)
                             .frame(maxWidth: .infinity, minHeight: 48)
-                            .foregroundStyle(Color.pfAccent)
+                            .foregroundStyle(Color.pfTextPrimary)
                             .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
                             .overlay {
                                 RoundedRectangle(cornerRadius: 12)
@@ -385,7 +386,6 @@ struct SpoolInventoryView: View {
                     .buttonStyle(.plain)
                     .accessibilityHint("Opens the form to register a filament spool.")
                     .accessibilityIdentifier("inventory.addSpool")
-                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
 
                     inventoryActions
                 }
