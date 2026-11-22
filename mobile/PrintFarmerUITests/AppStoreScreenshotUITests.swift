@@ -473,6 +473,7 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         try require(bracket)
         try capture("14-parts-inventory")
         try tapRequired(bracket)
+        try require(app.staticTexts["Part Details"])
         try require(app.steppers["partScan.deltaStepper"])
         try require(app.buttons["partScan.applyAdjustment"])
         try capture("15-selected-part")

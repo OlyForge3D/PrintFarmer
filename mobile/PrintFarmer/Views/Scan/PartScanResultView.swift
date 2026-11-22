@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// Shown after the unified scan station (#714) resolves a scanned code to a
-/// printed-part SKU. Displays on-hand/reorder state and supports a manual
+/// Shows a selected printed-part SKU's on-hand/reorder state and supports a manual
 /// stock adjustment (miscount correction or QC reject) — harvest deltas are
 /// recorded only through the atomic harvest flow, not here.
 struct PartScanResultView: View {
@@ -18,7 +17,7 @@ struct PartScanResultView: View {
     @State private var activeTasks: [Task<Void, Never>] = []
     private let warningText = Color.adaptive(light: "#92400e", dark: "#fbbf24")
 
-    init(part: PartInventoryResponse, navigationTitle: String = "Part Scanned", onAdjusted: ((PartAdjustmentResponse) -> Void)? = nil) {
+    init(part: PartInventoryResponse, navigationTitle: String = "Part Details", onAdjusted: ((PartAdjustmentResponse) -> Void)? = nil) {
         self.part = part
         self.navigationTitle = navigationTitle
         self.onAdjusted = onAdjusted
@@ -48,7 +47,7 @@ struct PartScanResultView: View {
                         LabeledContent("Default Bin", value: "\(binName) (\(part.defaultBinCode ?? "—"))")
                     }
                 } header: {
-                    Text("Scanned Part")
+                    Text("Part Details")
                 }
 
                 Section {
