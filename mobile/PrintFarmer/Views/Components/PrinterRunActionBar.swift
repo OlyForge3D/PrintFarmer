@@ -61,17 +61,12 @@ public struct PrinterRunActionBar: View {
             VStack(spacing: 10) {
                 let primary = visible.filter { $0.kind != .emergencyStop }
                 if !primary.isEmpty {
-                    if shouldStack {
-                        VStack(spacing: 10) {
-                            ForEach(primary, id: \.kind) { descriptor in
-                                actionButton(for: descriptor)
-                            }
-                        }
-                    } else {
-                        HStack(spacing: 12) {
-                            ForEach(primary, id: \.kind) { descriptor in
-                                actionButton(for: descriptor)
-                            }
+                    let layout = shouldStack
+                        ? AnyLayout(VStackLayout(spacing: 10))
+                        : AnyLayout(HStackLayout(spacing: 12))
+                    layout {
+                        ForEach(primary, id: \.kind) { descriptor in
+                            actionButton(for: descriptor)
                         }
                     }
                 }
@@ -138,7 +133,6 @@ public struct PrinterRunActionBar: View {
             HStack(spacing: 8) {
                 Image(systemName: PrinterRunActionLabels.systemImage(for: .emergencyStop))
                 Text(PrinterRunActionLabels.title(for: .emergencyStop))
-                    .lineLimit(shouldStack ? 2 : nil)
             }
             .fixedSize(horizontal: false, vertical: true)
             .foregroundStyle(Color.white)
@@ -151,10 +145,6 @@ public struct PrinterRunActionBar: View {
             .background(Color.pfErrorFill, in: RoundedRectangle(cornerRadius: 8))
             .contentShape(RoundedRectangle(cornerRadius: 8))
             .fontWeight(.semibold)
-            // Keep the complete emergency label legible instead of breaking
-            // "Emergency" mid-word at accessibility sizes; VoiceOver keeps
-            // the full, uncapped "Emergency Stop" label below.
-            .dynamicTypeSize(shouldStack ? .xxxLarge : dynamicTypeSize)
         }
         // Solid red fill with a white label in both appearances; the shared
         // fill colour keeps white text above 4.5:1 contrast.

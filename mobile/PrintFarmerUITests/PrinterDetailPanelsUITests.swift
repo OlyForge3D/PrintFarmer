@@ -516,12 +516,12 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                     XCTAssertTrue(app.staticTexts["Print progress 64 percent"].waitForExistence(timeout: 5))
                     XCTAssertTrue(app.staticTexts["benchy_0.2mm_PLA.gcode"].exists)
                     let remainingTime = app.staticTexts
-                        .matching(identifier: "printer.detail.job")
+                        .matching(identifier: "printer.detail.job.fact.remaining")
                         .matching(NSPredicate(format: "label CONTAINS %@", "38m"))
                         .firstMatch
                     XCTAssertTrue(remainingTime.waitForExistence(timeout: 5))
                     let finishTime = app.staticTexts
-                        .matching(identifier: "printer.detail.job")
+                        .matching(identifier: "printer.detail.job.fact.eta")
                         .matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT label CONTAINS %@", "Done at", "Unknown"))
                         .firstMatch
                     XCTAssertTrue(finishTime.exists)
@@ -801,6 +801,11 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                     statusContent.frame.maxY, page.frame.maxY + 1,
                     "The end of the Status content must fit or be reachable by scrolling"
                 )
+                for identifier in ["printer.detail.control.pause", "printer.detail.control.cancel"] {
+                    let action = app.buttons[identifier]
+                    XCTAssertTrue(action.isHittable, "\(identifier) must remain reachable at the largest text size")
+                    XCTAssertGreaterThan(action.frame.height, 52, "\(identifier) must scale beyond the capped size")
+                }
             }
             let emergency = app.buttons["printer.detail.control.emergencyStop"]
             if title == "Control" {

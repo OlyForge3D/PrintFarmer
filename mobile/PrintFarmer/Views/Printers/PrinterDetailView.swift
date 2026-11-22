@@ -1000,26 +1000,27 @@ struct PrinterDetailView: View {
                 if viewModel.isActivelyPrinting, let progress = printer.progress, progress.isFinite {
                     PrintProgressBar(progress: min(max(progress, 0), 1), showLabel: false, height: 6)
                         .accessibilityIdentifier("printer.detail.job.progress")
+                        .accessibilityHidden(true)
                 }
 
                 Group {
                     if dynamicTypeSize.isAccessibilitySize {
                         VStack(alignment: .leading, spacing: 8) {
                             if let remaining = viewModel.formattedTimeRemaining {
-                                statusFact("Left", value: remaining)
+                                statusFact("Left", value: remaining, id: "remaining")
                             }
                             if let eta = viewModel.formattedEtaClock {
-                                statusFact("Done at", value: eta)
+                                statusFact("Done at", value: eta, id: "eta")
                             }
                             layerFact(printer)
                         }
                     } else {
                         HStack(alignment: .top, spacing: 8) {
                             if let remaining = viewModel.formattedTimeRemaining {
-                                statusFact("Left", value: remaining)
+                                statusFact("Left", value: remaining, id: "remaining")
                             }
                             if let eta = viewModel.formattedEtaClock {
-                                statusFact("Done at", value: eta)
+                                statusFact("Done at", value: eta, id: "eta")
                             }
                             layerFact(printer)
                         }
@@ -1040,9 +1041,8 @@ struct PrinterDetailView: View {
                 presentation: statusActions(for: printer),
                 onSelect: { kind in handleRunAction(kind) }
             )
-            // Labels never outgrow the job headline, which caps at xxxLarge.
-            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.detail.job")
     }
 
@@ -1066,7 +1066,6 @@ struct PrinterDetailView: View {
                 Text(jobName ?? "Printing")
                     .font(.headline)
                     .fixedSize(horizontal: false, vertical: true)
-                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
             }
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -1099,11 +1098,11 @@ struct PrinterDetailView: View {
     private func layerFact(_ printer: Printer) -> some View {
         let layer = viewModel.layerLabel(for: printer)
         if layer != PrinterDetailViewModel.missingValuePlaceholder {
-            statusFact("Layer", value: layer)
+            statusFact("Layer", value: layer, id: "layer")
         }
     }
 
-    private func statusFact(_ title: String, value: String, spokenValue: String? = nil) -> some View {
+    private func statusFact(_ title: String, value: String, id: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption)
@@ -1111,13 +1110,12 @@ struct PrinterDetailView: View {
             Text(value)
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .accessibilityLabel(spokenValue ?? value)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(value)
         }
-        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("printer.detail.job.fact.\(id)")
     }
 
     // MARK: - Queue (server-ordered assigned jobs + reviewed-head start)
