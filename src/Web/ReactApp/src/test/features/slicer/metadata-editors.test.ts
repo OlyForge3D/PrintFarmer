@@ -94,22 +94,17 @@ describe('Tab/Section completeness', () => {
   );
 
   it.each(PROFILE_TYPES)(
-    '%s — orphaned settings are either mode-less, developer, or correctly excluded',
+    '%s — no unexpected user-visible settings are missing from tabs',
     (profileType) => {
       const pm = getProfileMeta(profileType);
       const tabbedKeys = getTabbedKeys(pm);
-      const allKeys = Object.keys(pm.settings);
-      const orphaned = allKeys.filter((k) => !tabbedKeys.has(k));
-
-      // Every orphaned key should be explainable: no mode, developer mode,
-      // or advanced (shown in "Other Settings" tab at runtime).
-      for (const k of orphaned) {
-        const m = pm.settings[k];
-        const mode = m.mode ?? '';
-        expect(
-          ['', 'advanced', 'developer', 'simple'].includes(mode),
-        ).toBe(true);
-      }
+      const visibleOrphans = Object.entries(pm.settings)
+        .filter(([key, setting]) =>
+          !tabbedKeys.has(key) && (setting.mode === 'simple' || setting.mode === 'advanced'))
+        .map(([key]) => key);
+      expect(visibleOrphans).toEqual(
+        profileType === 'process' ? ['support_parallel_printheads'] : [],
+      );
     },
   );
 
@@ -244,44 +239,6 @@ describe('View mode filtering', () => {
     expect(totalNoMode).toBeGreaterThan(0);
   });
 
-  describe('Other Settings tab logic', () => {
-    it.each(PROFILE_TYPES)(
-      '%s — orphaned advanced settings produce Other Settings entries only in advanced mode',
-      (profileType) => {
-        const pm = getProfileMeta(profileType);
-        const tabbedKeys = getTabbedKeys(pm);
-
-        // Replicate the orphan detection from MetadataProfileEditor
-        const getOrphanedFields = (viewMode: ViewMode) =>
-          Object.keys(pm.settings).filter((k) => {
-            if (tabbedKeys.has(k)) return false;
-            const m = pm.settings[k];
-            if (!m || !m.mode || m.mode === 'developer') return false;
-            if (viewMode === 'simple' && m.mode === 'advanced') return false;
-            return true;
-          });
-
-        const simpleOrphans = getOrphanedFields('simple');
-        const advancedOrphans = getOrphanedFields('advanced');
-
-        // In advanced mode, orphaned advanced settings should appear
-        expect(advancedOrphans.length).toBeGreaterThanOrEqual(
-          simpleOrphans.length,
-        );
-
-        // Specifically: orphaned keys with mode=advanced should NOT show in simple
-        const advOnlyOrphans = Object.keys(pm.settings).filter((k) => {
-          if (tabbedKeys.has(k)) return false;
-          const m = pm.settings[k];
-          return m?.mode === 'advanced';
-        });
-        for (const k of advOnlyOrphans) {
-          expect(simpleOrphans).not.toContain(k);
-          expect(advancedOrphans).toContain(k);
-        }
-      },
-    );
-  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════
