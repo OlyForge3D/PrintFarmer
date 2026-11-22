@@ -730,6 +730,22 @@ final class CatalogRootVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         try capture("36-snapshot-activation")
     }
 
+    func testSnapshotActivationAtLargestText() {
+        captureContentSize = "UICTContentSizeCategoryAccessibilityXXXL"
+        relaunchCatalogRoot("snapshot")
+        let retry = app.buttons["snapshotActivationRetryButton"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        if !retry.isHittable {
+            app.scrollViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(retry.isHittable)
+        let signOut = app.buttons["snapshotActivationSignOutButton"]
+        if !signOut.isHittable {
+            app.scrollViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(signOut.isHittable)
+    }
+
     func testCaptureSyntheticCertificate() throws {
         relaunchCatalogRoot("certificate")
         XCTAssertTrue(app.descendants(matching: .any)["certificateTrustSheet"].waitForExistence(timeout: 10))
