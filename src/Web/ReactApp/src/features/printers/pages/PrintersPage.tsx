@@ -722,7 +722,6 @@ export function PrintersPage() {
                 printer={expandedPrinterId ? printersById[expandedPrinterId] : undefined}
                 backendCapabilities={expandedPrinterId ? backendCapabilitiesByPrinterId[expandedPrinterId] : undefined}
                 onClose={handleClosePrinterDetails}
-                onToggleEnabled={onToggleEnabled}
                 layout="content"
               />
             </div>
@@ -831,7 +830,6 @@ export function PrintersPage() {
               printer={expandedPrinterId ? printersById[expandedPrinterId] : undefined}
               backendCapabilities={expandedPrinterId ? backendCapabilitiesByPrinterId[expandedPrinterId] : undefined}
               onClose={handleClosePrinterDetails}
-              onToggleEnabled={onToggleEnabled}
               layout="content"
             />
           </div>
