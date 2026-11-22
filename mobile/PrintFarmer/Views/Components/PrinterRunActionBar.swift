@@ -131,8 +131,11 @@ public struct PrinterRunActionBar: View {
             fire(.emergencyStop)
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: PrinterRunActionLabels.systemImage(for: .emergencyStop))
+                if !shouldStack {
+                    Image(systemName: PrinterRunActionLabels.systemImage(for: .emergencyStop))
+                }
                 Text(PrinterRunActionLabels.title(for: .emergencyStop))
+                    .multilineTextAlignment(.center)
             }
             .fixedSize(horizontal: false, vertical: true)
             .foregroundStyle(Color.white)

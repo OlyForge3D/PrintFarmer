@@ -206,18 +206,19 @@ struct PrinterInstrumentPanelControls: View {
         return text == PrinterDetailViewModel.missingValuePlaceholder ? readoutPlaceholder : text
     }
 
-    /// One compact row at every text size, capped like the jog pad so it
-    /// never pushes the pad below the fold (#3496 N02/N03).
     private var positionReadout: some View {
-        HStack(alignment: .center, spacing: 8) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
+        return layout {
             readoutColumn("X", value: viewModel.printer.x)
-            readoutDivider()
+            if !dynamicTypeSize.isAccessibilitySize { readoutDivider() }
             readoutColumn("Y", value: viewModel.printer.y)
-            readoutDivider()
+            if !dynamicTypeSize.isAccessibilitySize { readoutDivider() }
             readoutColumn("Z", value: viewModel.printer.z)
         }
+        .padding(.horizontal, dynamicTypeSize.isAccessibilitySize ? 12 : 0)
         .padding(.vertical, 6)
-        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: Self.cornerRadius))
         .overlay { RoundedRectangle(cornerRadius: Self.cornerRadius).strokeBorder(Color.pfBorder) }
         .frame(maxWidth: Self.maximumJogPadWidth)
@@ -227,16 +228,20 @@ struct PrinterInstrumentPanelControls: View {
     }
 
     private func readoutColumn(_ axis: String, value: Double?) -> some View {
-        VStack(alignment: .center, spacing: 2) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+            : AnyLayout(VStackLayout(alignment: .center, spacing: 2))
+        return layout {
             Text(axis)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Color.pfTextSecondary)
             Text(Self.readoutText(axis: axis, value: value, homedAxes: viewModel.printer.homedAxes))
                 .font(.title3.monospacedDigit())
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 1 : 0.7)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, alignment: .center)
+        .frame(maxWidth: .infinity, alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .center)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Self.readoutAccessibilityLabel(
             axis: axis, value: value, homedAxes: viewModel.printer.homedAxes

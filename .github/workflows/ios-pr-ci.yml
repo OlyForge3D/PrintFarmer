@@ -356,6 +356,7 @@ jobs:
               -only-testing:PrintFarmerUITests/ColdOfflineShellUITests
               -only-testing:PrintFarmerUITests/UIWaitBudgetTests
               -only-testing:PrintFarmerUITests/PrinterDetailHeaderUITests
+              -only-testing:PrintFarmerUITests/Issue3259ControlIdleAccessibilityUITests/testPositionReadoutsAndMotionControlsAtLargestTextSize
           - key: ipad-1
             family: iPad
             shard: 1
@@ -393,6 +394,7 @@ jobs:
               -only-testing:PrintFarmerUITests/ColdOfflineShellUITests
               -only-testing:PrintFarmerUITests/UIWaitBudgetTests
               -only-testing:PrintFarmerUITests/PrinterDetailHeaderUITests
+              -only-testing:PrintFarmerUITests/Issue3259ControlIdleAccessibilityUITests/testPositionReadoutsAndMotionControlsAtLargestTextSize
               -only-testing:PrintFarmerUITests/JobDetailIPadNavigationUITests
     defaults:
       run:

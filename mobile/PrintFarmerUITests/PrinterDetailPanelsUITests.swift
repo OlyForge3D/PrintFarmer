@@ -1669,6 +1669,34 @@ final class Issue3259ControlIdleAccessibilityUITests: Issue3259ControlIdleUITest
     override var contentSizeCategory: String {
         "UICTContentSizeCategoryAccessibilityXXXL"
     }
+
+    func testPositionReadoutsAndMotionControlsAtLargestTextSize() {
+        openFarmCard("10000000-0001-0000-0000-000000000001")
+        let control = app.buttons["printer.detail.panel.select.control"]
+        if control.waitForExistence(timeout: 3) {
+            control.tap()
+        } else {
+            let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
+            XCTAssertTrue(selector.waitForExistence(timeout: 8))
+            selector.buttons["Control"].tap()
+        }
+        let scroll = app.scrollViews.containing(.other, identifier: "printer.controls.instrument-panel").firstMatch
+        XCTAssertTrue(scroll.waitForExistence(timeout: 8))
+        func scrollDown() {
+            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+            let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+        for axis in ["x", "y", "z"] {
+            let readout = app.staticTexts["printer.controls.position.\(axis)"]
+            for _ in 0..<20 where !readout.isHittable { scrollDown() }
+            XCTAssertTrue(readout.isHittable)
+            XCTAssertGreaterThan(readout.frame.height, 40)
+        }
+        let motion = app.buttons["printer.controls.home.all"]
+        for _ in 0..<20 where !motion.isHittable { scrollDown() }
+        XCTAssertTrue(motion.isHittable)
+    }
 }
 
 /// Camera header layout with real camera media (#3496 D2): the title sits
