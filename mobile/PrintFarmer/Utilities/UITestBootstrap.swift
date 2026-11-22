@@ -90,8 +90,8 @@ enum UITestBootstrap {
         guard catalogRootState(in: arguments) == .certificate else { return nil }
         return CertificateTrustRequest(
             id: UUID(uuidString: "37290000-0000-0000-0000-000000000001")!,
-            endpoint: "https://synthetic.printfarmer.invalid:5245",
-            fingerprint: String(repeating: "AB:", count: 31) + "AB",
+            endpoint: "synthetic.printfarmer.invalid:5245",
+            fingerprint: String(repeating: "AB", count: 32),
             subjectCommonName: "synthetic.printfarmer.invalid",
             issuerCommonName: "Synthetic UI Test CA",
             notBefore: Date(timeIntervalSince1970: 1_767_225_600),

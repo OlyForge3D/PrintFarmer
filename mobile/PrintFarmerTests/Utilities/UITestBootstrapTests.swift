@@ -156,9 +156,10 @@ final class UITestBootstrapTests: XCTestCase {
         let request = try XCTUnwrap(UITestBootstrap.catalogCertificateRequest(in: [
             "--uitesting", "--uitesting-catalog-root", "--uitesting-catalog-root-certificate"
         ]))
-        XCTAssertEqual(request.endpoint, "https://synthetic.printfarmer.invalid:5245")
+        XCTAssertEqual(request.endpoint, "synthetic.printfarmer.invalid:5245")
         XCTAssertEqual(request.subjectAlternativeNames, ["synthetic.printfarmer.invalid"])
-        XCTAssertEqual(request.fingerprint, String(repeating: "AB:", count: 31) + "AB")
+        XCTAssertEqual(request.fingerprint, String(repeating: "AB", count: 32))
+        XCTAssertEqual(CertificateFingerprint.display(request.fingerprint), Array(repeating: "ABAB", count: 16).joined(separator: " "))
     }
 
     func test_catalogReadOnlyFixtures_requireEveryGateAndExactlyOneFixture() {
