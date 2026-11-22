@@ -43,9 +43,9 @@ struct JobDetailView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .navigationTitle(viewModel.job?.name ?? "Job")
+        .navigationTitle(dynamicTypeSize.isAccessibilitySize ? "" : (viewModel.job?.name ?? "Job"))
         #if os(iOS)
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(dynamicTypeSize.isAccessibilitySize ? .inline : .large)
         #endif
         .refreshable {
             await viewModel.loadJob()
@@ -108,6 +108,13 @@ struct JobDetailView: View {
     private func jobContent(_ job: PrintJob) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                if dynamicTypeSize.isAccessibilitySize {
+                    Text(job.name)
+                        .font(.largeTitle.bold())
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("job.detail.title")
+                }
                 // Thumbnail
                 thumbnailSection(job)
 

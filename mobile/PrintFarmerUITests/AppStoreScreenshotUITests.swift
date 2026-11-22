@@ -572,6 +572,10 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         XCUIDevice.shared.orientation = .portrait
         openJobHistoryMenuAndSelect()
         try tapRequired(app.buttons["job.row.30000000-0003-0000-0000-000000000007"])
+        let title = app.staticTexts["job.detail.title"]
+        try require(title)
+        XCTAssertEqual(title.label, "benchy_calibration.gcode")
+        XCTAssertGreaterThan(title.frame.height, 40)
         let detail = app.scrollViews.containing(.button, identifier: "jobDetail.harvestToInventory").firstMatch
         try require(detail)
         let filename = detail.staticTexts["benchy_calibration.gcode"].firstMatch
@@ -579,6 +583,10 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         try require(filename)
         XCTAssertTrue(filename.isHittable)
         XCTAssertGreaterThan(filename.frame.height, 40)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "job-detail-largest-text"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
         let harvest = app.buttons["jobDetail.harvestToInventory"]
         for _ in 0..<12 where !harvest.isHittable { detail.swipeUp() }
         XCTAssertTrue(harvest.isHittable)

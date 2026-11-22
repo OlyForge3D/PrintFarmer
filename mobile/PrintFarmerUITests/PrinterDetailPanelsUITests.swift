@@ -1693,9 +1693,11 @@ final class Issue3259ControlIdleAccessibilityUITests: Issue3259ControlIdleUITest
             XCTAssertTrue(readout.isHittable)
             XCTAssertGreaterThan(readout.frame.height, 40)
         }
+        attachScreen("control-largest-position")
         let motion = app.buttons["printer.controls.home.all"]
         for _ in 0..<20 where !motion.isHittable { scrollDown() }
         XCTAssertTrue(motion.isHittable)
+        attachScreen("control-largest-motion")
     }
 }
 
