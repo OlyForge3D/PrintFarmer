@@ -16,6 +16,7 @@ struct PartScanResultView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: PartAdjustmentViewModel
     @State private var activeTasks: [Task<Void, Never>] = []
+    private let warningText = Color.adaptive(light: "#92400e", dark: "#fbbf24")
 
     init(part: PartInventoryResponse, navigationTitle: String = "Part Scanned", onAdjusted: ((PartAdjustmentResponse) -> Void)? = nil) {
         self.part = part
@@ -35,12 +36,12 @@ struct PartScanResultView: View {
                         Spacer()
                         Text("\(viewModel.latestOnHand)")
                             .font(.body.monospacedDigit())
-                            .foregroundStyle(part.needsReorder ? Color.pfWarning : Color.pfTextPrimary)
+                            .foregroundStyle(part.needsReorder ? warningText : Color.pfTextPrimary)
                     }
                     if part.needsReorder {
                         Label("Below reorder point (\(part.reorderPoint))", systemImage: "exclamationmark.triangle.fill")
                             .font(.caption)
-                            .foregroundStyle(Color.pfWarning)
+                            .foregroundStyle(warningText)
                             .accessibilityIdentifier("partScan.reorderWarning")
                     }
                     if let binName = part.defaultBinName {
@@ -102,7 +103,7 @@ struct PartScanResultView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.pfAccent)
+                    .tint(Color.pfButtonPrimary)
                     .disabled(!viewModel.canSubmit)
                     .frame(minHeight: 44)
                     .accessibilityIdentifier("partScan.applyAdjustment")
