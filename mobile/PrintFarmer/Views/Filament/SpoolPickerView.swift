@@ -239,8 +239,9 @@ struct SpoolPickerView: View {
                         .foregroundStyle(viewModel.selectedStatus == nil ? .white : Color.pfTextSecondary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
+                        .frame(minWidth: 44, minHeight: 44)
                         .background(
-                            viewModel.selectedStatus == nil ? Color.pfAccent : Color.pfBackgroundTertiary,
+                            viewModel.selectedStatus == nil ? Color.pfButtonPrimary : Color.pfBackgroundTertiary,
                             in: Capsule()
                         )
                 }
@@ -261,8 +262,9 @@ struct SpoolPickerView: View {
                             .foregroundStyle(viewModel.selectedStatus == status ? .white : Color.pfTextSecondary)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
+                            .frame(minWidth: 44, minHeight: 44)
                             .background(
-                                viewModel.selectedStatus == status ? Color.pfAccent : Color.pfBackgroundTertiary,
+                                viewModel.selectedStatus == status ? Color.pfButtonPrimary : Color.pfBackgroundTertiary,
                                 in: Capsule()
                             )
                     }
@@ -338,7 +340,7 @@ struct SpoolRowView: View {
                     if let vendor = spool.vendor {
                         Text("•")
                             .font(.caption)
-                            .foregroundStyle(Color.pfTextTertiary)
+                            .foregroundStyle(Color.pfTextSecondary)
                         Text(vendor)
                             .font(.caption)
                             .foregroundStyle(Color.pfTextSecondary)

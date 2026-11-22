@@ -658,6 +658,9 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         try tapRequired(app.buttons["spoolPicker.material.PLA"])
         try require(app.navigationBars["Select Spool"])
         try require(app.buttons["spoolPicker.spool.2"])
+        let allFilter = app.buttons["All"]
+        XCTAssertGreaterThanOrEqual(allFilter.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(allFilter.frame.height, 44)
         try capture("21-spool-picker")
         try tapRequired(app.buttons["Scan QR code"])
         try require(app.navigationBars["Scan QR Code"])
