@@ -599,6 +599,25 @@ final class CatalogRootVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         try capture("25-onboarding-alerts")
     }
 
+    func testOnboardingNavigationAtLargestText() {
+        captureContentSize = "UICTContentSizeCategoryAccessibilityXXXL"
+        app.launchArguments = ["--uitesting", "--uitesting-unauthenticated", "-isDemoModeActive", "NO"]
+            + renderProfileArguments
+        relaunchAppForTest(additionalArguments: [])
+        XCUIDevice.shared.orientation = .portrait
+        let alerts = app.buttons["pageIndicator.page.alerts"]
+        XCTAssertTrue(alerts.waitForExistence(timeout: 10) && alerts.isHittable)
+        alerts.tap()
+        let start = app.buttons["Get Started"]
+        XCTAssertTrue(start.waitForExistence(timeout: 10))
+        if !start.isHittable {
+            app.scrollViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(start.isHittable)
+        start.tap()
+        XCTAssertTrue(app.staticTexts["Local Network Access"].waitForExistence(timeout: 10))
+    }
+
     func testCaptureLocalNetworkExplanation() throws {
         relaunchRoot(onboardingSeen: true, permissionCompleted: false)
         XCTAssertTrue(app.staticTexts["Local Network Access"].waitForExistence(timeout: 10))
