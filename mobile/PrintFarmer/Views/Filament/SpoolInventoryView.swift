@@ -256,6 +256,7 @@ struct SpoolInventoryView: View {
                 .foregroundStyle(activeCount > 0 ? .white : Color.pfTextSecondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
+                .frame(minWidth: 44, minHeight: 44)
                 .background(
                     activeCount > 0 ? Color.pfButtonPrimary : Color.pfBackgroundTertiary,
                     in: Capsule()
