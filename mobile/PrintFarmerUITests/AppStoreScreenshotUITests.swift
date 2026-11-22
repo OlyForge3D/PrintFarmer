@@ -561,7 +561,14 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
     func testNFCWritePreviewAtLargestText() throws {
         try relaunchProfile(theme: "dark", contentSize: "UICTContentSizeCategoryAccessibilityXXXL")
         try openFilament()
-        try tapRequired(app.buttons["inventory.filter.material.PETG"])
+        let filters = app.descendants(matching: .any)["inventory.filters"]
+        let petg = app.buttons["inventory.filter.material.PETG"]
+        try require(filters)
+        try require(petg)
+        for _ in 0..<4 where !filters.frame.contains(petg.frame) {
+            filters.swipeLeft()
+        }
+        try tapRequired(petg)
         let spool = app.descendants(matching: .any)["inventory.spool.3"]
         let inventory = app.collectionViews["inventory.spoolList"]
         try require(inventory)
