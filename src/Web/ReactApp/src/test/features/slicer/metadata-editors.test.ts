@@ -94,21 +94,17 @@ describe('Tab/Section completeness', () => {
   );
 
   it.each(PROFILE_TYPES)(
-    '%s — orphaned settings are either mode-less, developer, or correctly excluded',
+    '%s — no unexpected user-visible settings are missing from tabs',
     (profileType) => {
       const pm = getProfileMeta(profileType);
       const tabbedKeys = getTabbedKeys(pm);
-      const allKeys = Object.keys(pm.settings);
-      const orphaned = allKeys.filter((k) => !tabbedKeys.has(k));
-
-      // Orphaned keys are retained in metadata but are not rendered in tabs.
-      for (const k of orphaned) {
-        const m = pm.settings[k];
-        const mode = m.mode ?? '';
-        expect(
-          ['', 'advanced', 'developer', 'simple'].includes(mode),
-        ).toBe(true);
-      }
+      const visibleOrphans = Object.entries(pm.settings)
+        .filter(([key, setting]) =>
+          !tabbedKeys.has(key) && (setting.mode === 'simple' || setting.mode === 'advanced'))
+        .map(([key]) => key);
+      expect(visibleOrphans).toEqual(
+        profileType === 'process' ? ['support_parallel_printheads'] : [],
+      );
     },
   );
 

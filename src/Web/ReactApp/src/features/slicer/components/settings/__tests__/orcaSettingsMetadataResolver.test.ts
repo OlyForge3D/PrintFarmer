@@ -140,6 +140,10 @@ describe('scrubSettingsForVersion — added/removed/renamed with injected delta'
     expect(scoped.profileTypes.process.settings.enable_arc_fit_legacy).toBeDefined();
     expect(scoped.profileTypes.process.settings.enable_arc_fitting).toBeUndefined();
     expect(scoped.renameFromNewToThis.enable_arc_fitting).toBe('enable_arc_fit_legacy');
+    const fields = scoped.profileTypes.process.tabs.flatMap(tab =>
+      tab.sections.flatMap(section => section.fields.map(field => field.key)));
+    expect(fields).toContain('enable_arc_fit_legacy');
+    expect(fields).not.toContain('enable_arc_fitting');
   });
 
   it('2.4.1 metadata surfaces new rename key, NOT old one', () => {
