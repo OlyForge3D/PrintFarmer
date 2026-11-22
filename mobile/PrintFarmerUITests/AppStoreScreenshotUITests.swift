@@ -668,6 +668,31 @@ final class CatalogRootVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         try capture("34-first-server")
     }
 
+    func testFirstServerAtLargestText() {
+        captureContentSize = "UICTContentSizeCategoryAccessibilityXXXL"
+        relaunchCatalogRoot("first-server")
+        XCTAssertTrue(app.staticTexts["Add Your First Server"].waitForExistence(timeout: 10))
+        let form = app.collectionViews.firstMatch
+        XCTAssertTrue(form.waitForExistence(timeout: 10))
+        let save = app.buttons["saveServerButton"]
+        for _ in 0..<5 where !save.isHittable {
+            form.swipeUp()
+        }
+        XCTAssertTrue(save.isHittable)
+        XCTAssertFalse(save.isEnabled)
+        let serverURL = app.textFields["serverURLField"]
+        for _ in 0..<5 where !serverURL.isHittable {
+            form.swipeUp()
+        }
+        XCTAssertTrue(serverURL.isHittable)
+        serverURL.tap()
+        serverURL.typeText("https://print.example.com\n")
+        for _ in 0..<5 where !save.isHittable {
+            form.swipeUp()
+        }
+        XCTAssertTrue(save.isEnabled)
+    }
+
     func testCaptureBackendLoading() throws {
         relaunchCatalogRoot("loading")
         XCTAssertTrue(app.descendants(matching: .any)["backendConnectionGate"].waitForExistence(timeout: 10))

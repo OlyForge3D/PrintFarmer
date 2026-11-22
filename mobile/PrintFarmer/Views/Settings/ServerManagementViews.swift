@@ -231,6 +231,7 @@ struct ServerEditorView: View {
     let mode: PresentationMode
     let showsCancel: Bool
     let showsNavigationTitle: Bool
+    let showsIntroduction: Bool
     @State private var saveTask: Task<Void, Never>?
     @State private var healthTask: Task<Void, Never>?
     @State private var pinRecord: CertificatePinRecord?
@@ -241,12 +242,14 @@ struct ServerEditorView: View {
         viewModel: ServerManagementViewModel,
         mode: PresentationMode,
         showsCancel: Bool = true,
-        showsNavigationTitle: Bool = true
+        showsNavigationTitle: Bool = true,
+        showsIntroduction: Bool = false
     ) {
         self.viewModel = viewModel
         self.mode = mode
         self.showsCancel = showsCancel
         self.showsNavigationTitle = showsNavigationTitle
+        self.showsIntroduction = showsIntroduction
     }
 
     private enum Field: Hashable {
@@ -255,6 +258,27 @@ struct ServerEditorView: View {
 
     var body: some View {
         Form {
+            if showsIntroduction {
+                Section {
+                    VStack(spacing: 8) {
+                        Image(systemName: "server.rack")
+                            .font(.system(size: 48))
+                            .foregroundStyle(Color.pfAccent)
+                            .accessibilityHidden(true)
+                        Text("Add Your First Server")
+                            .font(.title.bold())
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Register a PrintFarmer server before signing in. You can add more servers later from Settings.")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .listRowBackground(Color.clear)
+                }
+            }
             Section {
                 TextField("Display Name", text: $viewModel.displayName)
                     .textContentType(.organizationName)
@@ -263,7 +287,7 @@ struct ServerEditorView: View {
                     .onSubmit { focusedField = .url }
                     .accessibilityIdentifier("serverNameField")
 
-                TextField("https://print.example.com", text: $viewModel.serverURL)
+                TextField("Server URL", text: $viewModel.serverURL)
                     .textContentType(.URL)
                     .autocorrectionDisabled()
                     #if os(iOS)
@@ -277,6 +301,8 @@ struct ServerEditorView: View {
             } header: {
                 Text("Server")
             } footer: {
+                Text("Example: https://print.example.com")
+                    .fixedSize(horizontal: false, vertical: true)
                 if let error = viewModel.formValidationError {
                     Text(error)
                         .foregroundStyle(Color.pfError)
@@ -289,10 +315,18 @@ struct ServerEditorView: View {
                 HStack {
                     healthStatusLabel
                     Spacer()
-                    Button("Check") {
+                    Button {
                         healthTask?.cancel()
                         healthTask = Task { await viewModel.checkHealth() }
+                    } label: {
+                        Text("Check")
+                            .foregroundStyle(
+                                viewModel.formValidationError == nil && viewModel.healthState != .checking
+                                    ? Color.pfTextPrimary : Color.pfTextSecondary
+                            )
+                            .frame(minWidth: 44, minHeight: 44)
                     }
+                    .buttonStyle(ServerSaveButtonStyle())
                     .disabled(viewModel.formValidationError != nil || viewModel.healthState == .checking)
                     .accessibilityIdentifier("checkServerHealthButton")
                 }
@@ -331,6 +365,31 @@ struct ServerEditorView: View {
                 }
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Button {
+                focusedField = nil
+                saveTask?.cancel()
+                saveTask = Task {
+                    if await viewModel.save() {
+                        dismiss()
+                    }
+                }
+            } label: {
+                Text("Save")
+                    .fontWeight(.semibold)
+                    .fullWidthActionButton(prominence: .prominent)
+                    .foregroundStyle(viewModel.canSave ? Color.white : Color.pfTextSecondary)
+                    .background(
+                        viewModel.canSave ? Color.pfButtonPrimary : Color.pfBackgroundTertiary,
+                        in: RoundedRectangle(cornerRadius: 10)
+                    )
+            }
+            .buttonStyle(ServerSaveButtonStyle())
+            .disabled(!viewModel.canSave)
+            .accessibilityIdentifier("saveServerButton")
+            .padding()
+            .background(Color.pfBackground)
+        }
         .navigationTitle(showsNavigationTitle ? title : "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -338,19 +397,6 @@ struct ServerEditorView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
-            }
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Save") {
-                    focusedField = nil
-                    saveTask?.cancel()
-                    saveTask = Task {
-                        if await viewModel.save() {
-                            dismiss()
-                        }
-                    }
-                }
-                .disabled(!viewModel.canSave)
-                .accessibilityIdentifier("saveServerButton")
             }
         }
         .onAppear(perform: prepare)
@@ -417,42 +463,32 @@ struct ServerEditorView: View {
     }
 }
 
+private struct ServerSaveButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
 struct AddFirstServerView: View {
     @Environment(ServerRegistry.self) private var registry
     @State private var viewModel: ServerManagementViewModel?
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 24) {
-                Image(systemName: "server.rack")
-                    .font(.system(size: 48))
-                    .foregroundStyle(Color.pfAccent)
-                    .accessibilityHidden(true)
-
-                VStack(spacing: 8) {
-                    Text("Add Your First Server")
-                        .font(.title.bold())
-                        .multilineTextAlignment(.center)
-                    Text("Register a PrintFarmer server before signing in. You can add more servers later from Settings.")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                .padding(.horizontal)
-
+            Group {
                 if let viewModel {
                     ServerEditorView(
                         viewModel: viewModel,
                         mode: .add,
                         showsCancel: false,
-                        showsNavigationTitle: false
+                        showsNavigationTitle: false,
+                        showsIntroduction: true
                     )
-                        .clipShape(RoundedRectangle(cornerRadius: 18))
                 } else {
                     ProgressView()
                 }
             }
-            .padding(.vertical, 24)
             .navigationTitle("Server Setup")
             .navigationBarTitleDisplayMode(.inline)
             .task {
