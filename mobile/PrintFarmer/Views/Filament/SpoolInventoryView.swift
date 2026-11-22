@@ -407,6 +407,7 @@ struct SpoolInventoryView: View {
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
+                .accessibilityIdentifier("inventory.spoolList")
             }
             .onChange(of: viewModel.highlightedSpoolId) { _, newId in
                 // Scroll animation only. Highlight expiry is owned synchronously

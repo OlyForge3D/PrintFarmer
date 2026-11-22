@@ -487,6 +487,33 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         try capture("40-nfc-write-preview")
     }
 
+    func testNFCWritePreviewAtLargestText() throws {
+        try relaunchProfile(theme: "dark", contentSize: "UICTContentSizeCategoryAccessibilityXXXL")
+        try openFilament()
+        try tapRequired(app.buttons["inventory.filter.material.PETG"])
+        let spool = app.descendants(matching: .any)["inventory.spool.3"]
+        let inventory = app.collectionViews["inventory.spoolList"]
+        try require(inventory)
+        for _ in 0..<12 where !spool.isHittable {
+            inventory.swipeUp()
+        }
+        guard spool.exists && spool.isHittable else {
+            XCTFail("The spool must be reachable at the largest text size.\n\(app.debugDescription)")
+            return
+        }
+        spool.press(forDuration: 1)
+        try tapRequired(app.buttons["Write NFC Tag"])
+        try require(app.buttons["Write Tag"])
+        let preview = app.scrollViews.firstMatch
+        try require(preview)
+        let finalField = app.staticTexts["spool_id"]
+        for _ in 0..<8 where !finalField.isHittable {
+            preview.swipeUp()
+        }
+        XCTAssertTrue(finalField.isHittable)
+        XCTAssertTrue(app.buttons["Write Tag"].isHittable)
+    }
+
     func testCaptureHistoryJobAndHarvest() throws {
         relaunchAppForTest(additionalArguments: ["--uitesting-catalog-read-only", "--uitesting-catalog-history"])
         XCUIDevice.shared.orientation = .portrait
