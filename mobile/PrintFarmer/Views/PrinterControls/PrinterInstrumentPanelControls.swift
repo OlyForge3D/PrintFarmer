@@ -318,13 +318,25 @@ struct PrinterInstrumentPanelControls: View {
                     .accessibilityIdentifier("printer.controls.motion-empty")
                 }
             } else {
-                HStack(alignment: .top, spacing: 12) {
-                    xyPad
-                    zColumn.frame(width: 72)
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(spacing: 12) {
+                        xyPad
+                        HStack(spacing: 6) {
+                            jog("Z", sign: 1, symbol: "chevron.up", title: "Z")
+                            home("Z", axes: ["Z"], accessibilityTitle: "Home Z") { await viewModel.homeZ() }
+                            jog("Z", sign: -1, symbol: "chevron.down", title: "Z")
+                        }
+                    }
+                    .frame(maxWidth: Self.maximumJogPadWidth)
+                    .frame(maxWidth: .infinity)
+                } else {
+                    HStack(alignment: .top, spacing: 12) {
+                        xyPad
+                        zColumn.frame(width: 72)
+                    }
+                    .frame(maxWidth: Self.maximumJogPadWidth)
+                    .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: Self.maximumJogPadWidth)
-                .frame(maxWidth: .infinity)
-                .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                 stepSelector(
                     title: "Jog distance (mm)",
                     options: Self.jogSteps,
@@ -412,12 +424,13 @@ struct PrinterInstrumentPanelControls: View {
         let available = viewModel.capabilities?.supportsHome(axes: axes) == true
         let pending = viewModel.pendingCommand?.kind == .home(axes: axes)
         return ControlActionButton(
-            title: label,
+            title: dynamicTypeSize.isAccessibilitySize ? "Home \(label)" : label,
             identifier: "printer.controls.home.\(label.lowercased())",
             accessibilityTitle: accessibilityTitle,
             hint: available ? "Homes \(axes.joined(separator: ", "))." : "This homing operation is unavailable.",
-            compact: true, systemImage: "house", value: pending ? "Pending" : nil,
-            textSize: 12, tinted: true, minimumHeight: 44, isPending: pending
+            compact: true, systemImage: dynamicTypeSize.isAccessibilitySize ? nil : "house",
+            value: pending ? "Pending" : nil,
+            textSize: 12, tinted: !dynamicTypeSize.isAccessibilitySize, minimumHeight: 44, isPending: pending
         ) { Task { await action() } }
         .frame(maxWidth: .infinity, minHeight: 44)
         .disabled(!available || !viewModel.canControl || viewModel.isExecuting)

@@ -1697,6 +1697,7 @@ final class Issue3259ControlIdleAccessibilityUITests: Issue3259ControlIdleUITest
         let motion = app.buttons["printer.controls.home.all"]
         for _ in 0..<20 where !motion.isHittable { scrollDown() }
         XCTAssertTrue(motion.isHittable)
+        XCTAssertGreaterThan(motion.frame.height, 44, "Homing controls grow with Dynamic Type")
         attachScreen("control-largest-motion")
         for value in ["1", "10", "50"] {
             let step = app.buttons["printer.controls.jog.step.\(value)"]
