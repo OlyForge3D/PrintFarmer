@@ -1586,6 +1586,7 @@ struct PrinterDetailView: View {
                             Image(uiImage: uiImage)
                                 .resizable()
                                 .scaledToFit()
+                                .accessibilityLabel("Printer camera snapshot")
                                 .frame(
                                     width: quarterTurn ? geometry.size.height : geometry.size.width,
                                     height: quarterTurn ? geometry.size.width : geometry.size.height

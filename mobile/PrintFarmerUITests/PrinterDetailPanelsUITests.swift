@@ -1799,6 +1799,7 @@ final class Issue3496SnapshotCameraLayoutUITests: Issue3496CameraLayoutUITests {
             buttons: ["printer.detail.camera.rotate", "printer.detail.camera.refresh"],
             name: "camera-snapshot"
         )
+        XCTAssertTrue(app.images["Printer camera snapshot"].waitForExistence(timeout: 5))
         // Same header in every mode: the badge is gone (#3496 N08).
         XCTAssertFalse(app.staticTexts["SNAPSHOT"].exists)
         XCTAssertFalse(app.staticTexts["LIVE"].exists)
@@ -1813,6 +1814,7 @@ final class Issue3496SnapshotCameraLayoutUITests: Issue3496CameraLayoutUITests {
             buttons: ["printer.detail.camera.rotate", "printer.detail.camera.refresh"],
             name: "camera-snapshot-rotated-90"
         )
+        XCTAssertTrue(app.images["Printer camera snapshot"].exists)
     }
 }
 
