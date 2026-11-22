@@ -625,7 +625,7 @@ struct SpoolInventoryRowView: View {
         if let vendor = spool.vendor, !vendor.isEmpty {
             Text("· \(vendor)")
                 .font(.caption2)
-                .foregroundStyle(Color.pfTextTertiary)
+                .foregroundStyle(Color.pfTextSecondary)
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -649,7 +649,7 @@ struct SpoolInventoryRowView: View {
                let remaining = spool.remainingWeightG, remaining.isFinite, remaining >= 0 {
                 Text("of \(Int(initial.rounded())) g")
                     .font(.caption2)
-                    .foregroundStyle(Color.pfTextTertiary)
+                    .foregroundStyle(Color.pfTextSecondary)
                 if let weightPercent {
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {

@@ -273,7 +273,7 @@ struct JobListView: View {
                             Text(viewModel.queueSectionCountText(for: viewModel.queuedJobs.count))
                                 .font(.caption.monospacedDigit())
                                 .monospacedDigit()
-                                .foregroundStyle(Color.pfTextTertiary)
+                                .foregroundStyle(Color.pfTextSecondary)
                         }
                     }
                 }
