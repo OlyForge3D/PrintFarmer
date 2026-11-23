@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -50,6 +51,9 @@ public sealed class MoonrakerSubscriptionService(
     private readonly ConcurrentDictionary<Guid, Func<string, CancellationToken, Task>> _jsonRpcSenders = new();
     private const int SubscriptionRequestId = 101;
     private const int ObjectRediscoveryRequestId = 103;
+    private long _nextStatusRefreshRequestId = 1000;
+    private readonly ConcurrentDictionary<Guid, (long Id, long Started, long StatusVersion)> _pendingStatusRefreshes = new();
+    private readonly ConcurrentDictionary<Guid, long> _statusUpdateVersions = new();
     private readonly ConcurrentDictionary<Guid, int> _parseErrorCounts = new();
     private readonly ConcurrentDictionary<Guid, DateTime> _lastHttpPollTimes = new();
     private readonly ConcurrentDictionary<Guid, DateTime> _lastStatusUpdateTimes = new();
@@ -213,6 +217,7 @@ public sealed class MoonrakerSubscriptionService(
                 .ConfigureAwait(false);
             PrinterState observedState = _printerStates.GetOrAdd(printerId, _ => new PrinterState());
             long factorObservation = observedState.BeginRuntimeFactorObservation();
+            long homingObservation = observedState.BeginHomingObservation();
             PrinterCompositeStatus compositeStatus = await moonrakerClient.GetCompositeStatusAsync(
                 printer.BackendUrl,
                 printer.Credential,
@@ -247,7 +252,7 @@ public sealed class MoonrakerSubscriptionService(
                 FileName: PrinterStatusDto.ExtractFileName(compositeStatus.JobName),
                 ThumbnailCacheIdentity: compositeStatus.ThumbnailCacheIdentity,
                 ActiveExtruderId: compositeStatus.ActiveExtruderId);
-            statusUpdate = WithHttpSensors(printerId, compositeStatus, statusUpdate, observedState, factorObservation);
+            statusUpdate = WithHttpSensors(printerId, compositeStatus, statusUpdate, observedState, factorObservation, homingObservation);
             _statusCacheWriter.UpdateStatus(
                 statusUpdate.ToStatusDto(compositeStatus.CameraSnapshotUrl, compositeStatus.PrintTimeLeftSeconds)
                     with
@@ -462,6 +467,8 @@ public sealed class MoonrakerSubscriptionService(
         _parseErrorCounts.TryRemove(printerId, out _);
         _lastHttpPollTimes.TryRemove(printerId, out _);
         _lastStatusUpdateTimes.TryRemove(printerId, out _);
+        _statusUpdateVersions.TryRemove(printerId, out _);
+        _pendingStatusRefreshes.TryRemove(printerId, out _);
         _pollingModes.TryRemove(printerId, out _);
         _klippyReadyState.TryRemove(printerId, out _);
         _connectionHealth.TryRemove(printerId, out _);
@@ -688,6 +695,7 @@ public sealed class MoonrakerSubscriptionService(
                 }
 
                 heartbeatCts?.Dispose();
+                _ = _pendingStatusRefreshes.TryRemove(id, out _);
 
                 if (jsonRpcSender is not null)
                 {
@@ -1088,7 +1096,7 @@ public sealed class MoonrakerSubscriptionService(
     /// </summary>
     private PrinterStatusUpdate WithHttpSensors(
         Guid printerId, PrinterCompositeStatus composite, PrinterStatusUpdate update,
-        PrinterState observedState, long factorObservation)
+        PrinterState observedState, long factorObservation, long homingObservation)
     {
         PrinterState state = _printerStates.GetOrAdd(printerId, _ => new PrinterState());
         (double? speed, double? flow) = ReferenceEquals(state, observedState)
@@ -1096,10 +1104,28 @@ public sealed class MoonrakerSubscriptionService(
                 factorObservation, true, composite.IsOnline ? composite.SpeedFactorPercent : null,
                 true, composite.IsOnline ? composite.FlowFactorPercent : null)
             : state.ReadRuntimeFactors();
+        (string? axes, DateTime? observedAt) = ReferenceEquals(state, observedState)
+            ? state.UpdateHoming(
+                homingObservation,
+                composite.HomedAxesObservedAtUtc is null ? null : composite.HomedAxes,
+                composite.HomedAxes is null ? null : composite.HomedAxesObservedAtUtc)
+            : state.ReadHoming();
         update = update with
         {
             SpeedFactorPercent = speed,
             FlowFactorPercent = flow,
+            HomedAxes = axes,
+            SafetyTelemetry = PrinterSafetyTelemetryDto.Empty with
+            {
+                HomedAxes = new SafetyAxesTelemetryFactDto(
+                    axes?.Where(char.IsAsciiLetter)
+                        .Select(axis => char.ToLowerInvariant(axis).ToString())
+                        .Distinct(StringComparer.Ordinal)
+                        .ToArray(),
+                    observedAt,
+                    PrinterSafetyTelemetryDto.DefaultStaleAfterSeconds,
+                    "moonraker:toolhead.homed_axes"),
+            },
         };
         if (composite.Sensors is not null)
         {
@@ -1125,6 +1151,7 @@ public sealed class MoonrakerSubscriptionService(
 
         _ = state.Sensors.MarkAllUnavailable();
         state.ClearRuntimeFactors();
+        state.ClearHoming();
         state.RawActivityState = null;
         return state.Sensors.Snapshot();
     }
@@ -1142,6 +1169,7 @@ public sealed class MoonrakerSubscriptionService(
             if (state is not null)
             {
                 state.ClearRuntimeFactors();
+                state.ClearHoming();
                 state.RawActivityState = null;
             }
 
@@ -1201,14 +1229,12 @@ public sealed class MoonrakerSubscriptionService(
                         break;
                     }
 
-                    // ClientWebSocket does not expose control-frame pings. Use a valid,
-                    // side-effect-free Moonraker JSON-RPC request instead of arbitrary text:
-                    // real Moonraker rejects non-JSON text with -32700, which previously
-                    // accumulated parse errors and forced healthy connections into polling.
+                    // Idle printers may emit no deltas, so query the actual status rather than
+                    // treating a transport heartbeat as fresh printer evidence.
                     try
                     {
-                        await send("""{"jsonrpc":"2.0","method":"server.info","id":-1}""", ct);
-                        _logger.LogDebug("Sent heartbeat ping to printer {PrinterName}", printer.Name);
+                        await RequestStatusRefreshAsync(printer.Id, send, ct);
+                        _logger.LogDebug("Sent status refresh to printer {PrinterName}", printer.Name);
                     }
                     catch (Exception ex)
                     {
@@ -1226,6 +1252,39 @@ public sealed class MoonrakerSubscriptionService(
                 _logger.LogError(ex, "Heartbeat error for printer {PrinterName}", printer.Name);
             }
         }, ct);
+    }
+
+    internal async Task RequestStatusRefreshAsync(
+        Guid printerId, Func<string, CancellationToken, Task> send, CancellationToken ct)
+    {
+        long id = Interlocked.Increment(ref _nextStatusRefreshRequestId);
+        var pending = (Id: id, Started: Stopwatch.GetTimestamp(), StatusVersion: _statusUpdateVersions.GetValueOrDefault(printerId));
+        _pendingStatusRefreshes[printerId] = pending;
+        try
+        {
+            await send(
+                JsonSerializer.Serialize(new
+                {
+                    jsonrpc = "2.0",
+                    method = "printer.objects.query",
+                    @params = new
+                    {
+                        objects = new
+                        {
+                            webhooks = new[] { "state" },
+                            print_stats = new[] { "state" },
+                            toolhead = new[] { "homed_axes" },
+                        },
+                    },
+                    id,
+                }),
+                ct);
+        }
+        catch
+        {
+            _ = _pendingStatusRefreshes.TryRemove(new KeyValuePair<Guid, (long Id, long Started, long StatusVersion)>(printerId, pending));
+            throw;
+        }
     }
 
     /// <summary>
@@ -1391,12 +1450,32 @@ public sealed class MoonrakerSubscriptionService(
                 await HandleObjectRediscoveryResponseAsync(rediscoveryResult, printer, ct);
             }
 
-            // Handle subscription acknowledgement which carries current state
-            if (root.TryGetProperty("result", out JsonElement res) && res.ValueKind == JsonValueKind.Object &&
-                root.TryGetProperty("id", out JsonElement idProp) && idProp.GetInt32() == SubscriptionRequestId &&
-                res.TryGetProperty("status", out JsonElement statusObj))
+            (long Id, long Started, long StatusVersion) pending = default;
+            bool isStatusRefresh = root.TryGetProperty("id", out JsonElement refreshId) &&
+                refreshId.TryGetInt64(out long parsedRefreshId) &&
+                _pendingStatusRefreshes.TryGetValue(printer.Id, out pending) &&
+                pending.Id == parsedRefreshId &&
+                _pendingStatusRefreshes.TryRemove(new KeyValuePair<Guid, (long Id, long Started, long StatusVersion)>(printer.Id, pending));
+            if (isStatusRefresh &&
+                (Stopwatch.GetElapsedTime(pending.Started) > HttpPollInterval ||
+                 _statusUpdateVersions.GetValueOrDefault(printer.Id) != pending.StatusVersion ||
+                 !root.TryGetProperty("result", out JsonElement refreshResult) ||
+                 refreshResult.ValueKind != JsonValueKind.Object ||
+                 !refreshResult.TryGetProperty("status", out JsonElement refreshStatus) ||
+                 !IsCompleteStatusRefresh(refreshStatus)))
             {
-                _logger.LogDebug("Processing initial status from subscription acknowledgement for printer {PrinterName}", printer.Name);
+                _logger.LogWarning("Rejected stale, superseded, or incomplete status refresh from printer {PrinterName}", printer.Name);
+                return;
+            }
+
+            // Handle subscription acknowledgement and complete periodic status observations.
+            if (root.TryGetProperty("result", out JsonElement res) && res.ValueKind == JsonValueKind.Object &&
+                root.TryGetProperty("id", out JsonElement idProp) && idProp.TryGetInt64(out long id) &&
+                res.TryGetProperty("status", out JsonElement statusObj) &&
+                (id == SubscriptionRequestId ||
+                 isStatusRefresh))
+            {
+                _logger.LogDebug("Processing status response for printer {PrinterName}", printer.Name);
                 await ProcessStatusUpdateAsync(
                     statusObj,
                     printer.Id,
@@ -1427,6 +1506,19 @@ public sealed class MoonrakerSubscriptionService(
         }
     }
 
+    private static bool IsCompleteStatusRefresh(JsonElement status) =>
+        status.ValueKind == JsonValueKind.Object &&
+        HasStringField(status, "webhooks", "state", allowEmpty: false) &&
+        HasStringField(status, "print_stats", "state", allowEmpty: false) &&
+        HasStringField(status, "toolhead", "homed_axes", allowEmpty: true);
+
+    private static bool HasStringField(JsonElement status, string objectName, string fieldName, bool allowEmpty) =>
+        status.TryGetProperty(objectName, out JsonElement obj) &&
+        obj.ValueKind == JsonValueKind.Object &&
+        obj.TryGetProperty(fieldName, out JsonElement field) &&
+        field.ValueKind == JsonValueKind.String &&
+        (allowEmpty || !string.IsNullOrWhiteSpace(field.GetString()));
+
     /// <summary>
     /// Handles JSON-RPC notification messages from Moonraker.
     /// Processes status updates, Klippy state changes (ready, disconnected, shutdown).
@@ -1445,6 +1537,10 @@ public sealed class MoonrakerSubscriptionService(
     {
         string? method = methodProp.GetString();
         _logger.LogDebug("Received notification {Method} from printer {PrinterName}", method, printer.Name);
+        if (method is "notify_klippy_disconnected" or "notify_klippy_ready" or "notify_klippy_shutdown")
+        {
+            _ = _statusUpdateVersions.AddOrUpdate(printer.Id, 1, (_, version) => version + 1);
+        }
 
         switch (method)
         {
@@ -1526,6 +1622,7 @@ public sealed class MoonrakerSubscriptionService(
         CancellationToken ct)
     {
         // Get or create persistent state for this printer
+        _ = _statusUpdateVersions.AddOrUpdate(printerId, 1, (_, version) => version + 1);
         PrinterState state = _printerStates.GetOrAdd(printerId, _ => new PrinterState());
         state.IncludeOrigin(originWatermark);
 
@@ -1828,8 +1925,7 @@ public sealed class MoonrakerSubscriptionService(
         // This allows downstream consumers to distinguish "known but not homed" ("") from "unknown" (null).
         if (homedAxes is not null)
         {
-            state.HomedAxes = homedAxes;
-            state.HomedAxesObservedAtUtc = DateTime.UtcNow;
+            _ = state.UpdateHoming(state.BeginHomingObservation(), homedAxes, DateTime.UtcNow);
         }
     }
 
@@ -3226,6 +3322,7 @@ public sealed class MoonrakerSubscriptionService(
             // Complete sensor snapshot (issue #3407): sensor-only notifications reach clients too.
             IReadOnlyList<PrinterSensorDto> sensors = state.Sensors.Snapshot();
             (double? speedFactor, double? flowFactor) = state.ReadRuntimeFactors();
+            (string? homedAxes, DateTime? homedAxesObservedAtUtc) = state.ReadHoming();
 
             // Build MMU status if detected
             MmuStatusDto? mmuStatus = state.BuildMmuStatus();
@@ -3241,12 +3338,12 @@ public sealed class MoonrakerSubscriptionService(
                     PrinterSafetyTelemetryDto.DefaultStaleAfterSeconds,
                     $"moonraker:{state.ActiveExtruderId ?? "unknown"}.target"),
                 new SafetyAxesTelemetryFactDto(
-                    state.HomedAxes?
+                    homedAxes?
                         .Where(char.IsAsciiLetter)
                         .Select(axis => char.ToLowerInvariant(axis).ToString())
                         .Distinct(StringComparer.Ordinal)
                         .ToArray(),
-                    state.HomedAxesObservedAtUtc,
+                    homedAxesObservedAtUtc,
                     PrinterSafetyTelemetryDto.DefaultStaleAfterSeconds,
                     "moonraker:toolhead.homed_axes"),
                 new SafetyVectorTelemetryFactDto(
@@ -3271,7 +3368,7 @@ public sealed class MoonrakerSubscriptionService(
                 BedTemp: state.BedTemp,
                 HotendTarget: state.HotendTarget,
                 BedTarget: state.BedTarget,
-                HomedAxes: state.HomedAxes,
+                HomedAxes: homedAxes,
                 SpoolInfo: spoolInfo,
                 MmuStatus: mmuStatus,
                 FileName: PrinterStatusDto.ExtractFileName(state.JobName),
@@ -3288,7 +3385,7 @@ public sealed class MoonrakerSubscriptionService(
                 Sensors = sensors,
             };
 
-            _logger.LogDebug("Emitting consolidated status for printer {PrinterId}: IsOnline={IsOnline}, X={StateX}, Y={StateY}, Z={StateZ}, HotendTemp={StateHotendTemp}, HotendTarget={StateHotendTarget}, BedTemp={StateBedTemp}, BedTarget={StateBedTarget}, HomedAxes={StateHomedAxes}", printerId, isOnline, state.X, state.Y, state.Z, state.HotendTemp, state.HotendTarget, state.BedTemp, state.BedTarget, state.HomedAxes);
+            _logger.LogDebug("Emitting consolidated status for printer {PrinterId}: IsOnline={IsOnline}, X={StateX}, Y={StateY}, Z={StateZ}, HotendTemp={StateHotendTemp}, HotendTarget={StateHotendTarget}, BedTemp={StateBedTemp}, BedTarget={StateBedTarget}, HomedAxes={StateHomedAxes}", printerId, isOnline, state.X, state.Y, state.Z, state.HotendTemp, state.HotendTarget, state.BedTemp, state.BedTarget, homedAxes);
 
             // Update cache before broadcasting to clients
             // Calculate estimated time remaining from progress and elapsed print duration
@@ -3318,7 +3415,7 @@ public sealed class MoonrakerSubscriptionService(
                 SpoolInfo: spoolInfo,
                 MmuStatus: mmuStatus,
                 PrintTimeLeftSeconds: printTimeLeftSeconds,
-                HomedAxes: state.HomedAxes,
+                HomedAxes: homedAxes,
                 SafetyTelemetry: safetyTelemetry,
                 ThumbnailCacheIdentity: state.ThumbnailCacheIdentity,
                 CurrentLayer: state.CurrentLayer,
@@ -3633,11 +3730,12 @@ public sealed class MoonrakerSubscriptionService(
     {
         try
         {
+            PrinterState state = _printerStates.GetOrAdd(printerId, _ => new PrinterState());
+            long observation = state.BeginHomingObservation();
             string? toolheadData = await QueryHomedAxesAsync(serverUrl, ct);
-            if (!string.IsNullOrEmpty(toolheadData))
+            if (toolheadData is not null)
             {
-                PrinterState state = _printerStates.GetOrAdd(printerId, _ => new PrinterState());
-                state.HomedAxes = toolheadData;
+                _ = state.UpdateHoming(observation, toolheadData, DateTime.UtcNow);
                 _logger.LogInformation("Cached initial homed_axes for printer {PrinterId}: '{HomedAxes}'", printerId.ToString(), toolheadData);
             }
         }
@@ -3857,6 +3955,7 @@ public sealed class MoonrakerSubscriptionService(
                 .ConfigureAwait(false);
             PrinterState observedState = _printerStates.GetOrAdd(printer.Id, _ => new PrinterState());
             long factorObservation = observedState.BeginRuntimeFactorObservation();
+            long homingObservation = observedState.BeginHomingObservation();
             PrinterCompositeStatus compositeStatus = await moonrakerClient.GetCompositeStatusAsync(
                 printer.BackendUrl,
                 printer.Credential,
@@ -3890,7 +3989,7 @@ public sealed class MoonrakerSubscriptionService(
                     FileName: PrinterStatusDto.ExtractFileName(compositeStatus.JobName),
                     ThumbnailCacheIdentity: compositeStatus.ThumbnailCacheIdentity,
                     ActiveExtruderId: compositeStatus.ActiveExtruderId);
-                statusUpdate = WithHttpSensors(printer.Id, compositeStatus, statusUpdate, observedState, factorObservation);
+                statusUpdate = WithHttpSensors(printer.Id, compositeStatus, statusUpdate, observedState, factorObservation, homingObservation);
 
                 try
                 {

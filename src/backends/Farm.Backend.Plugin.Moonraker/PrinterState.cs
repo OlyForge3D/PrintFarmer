@@ -54,9 +54,39 @@ internal sealed class PrinterState
 
     public string? JobName { get; set; }
 
-    public string? HomedAxes { get; set; }
+    private readonly object _homingLock = new();
+    private long _homingSequence;
+    private long _lastHomingObservation;
+    private string? _homedAxes;
+    private DateTime? _homedAxesObservedAtUtc;
 
-    public DateTime? HomedAxesObservedAtUtc { get; set; }
+    public long BeginHomingObservation() => Interlocked.Increment(ref _homingSequence);
+
+    public (string? Axes, DateTime? ObservedAtUtc) ReadHoming()
+    {
+        lock (_homingLock)
+        {
+            return (_homedAxes, _homedAxesObservedAtUtc);
+        }
+    }
+
+    public (string? Axes, DateTime? ObservedAtUtc) UpdateHoming(
+        long observation, string? axes, DateTime? observedAtUtc)
+    {
+        lock (_homingLock)
+        {
+            if (observation >= _lastHomingObservation)
+            {
+                _lastHomingObservation = observation;
+                _homedAxes = axes;
+                _homedAxesObservedAtUtc = observedAtUtc;
+            }
+
+            return (_homedAxes, _homedAxesObservedAtUtc);
+        }
+    }
+
+    public void ClearHoming() => UpdateHoming(BeginHomingObservation(), null, null);
 
     public SafetyVector3Dto? CoordinateOriginOffsetMm { get; set; }
 

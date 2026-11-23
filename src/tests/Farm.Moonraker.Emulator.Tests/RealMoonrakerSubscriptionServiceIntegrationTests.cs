@@ -5,6 +5,7 @@ using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Services.Diagnostics;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Settings;
@@ -116,11 +117,13 @@ public sealed class RealMoonrakerSubscriptionServiceIntegrationTests : IClassFix
 
         var observedUpdates = new ConcurrentQueue<PrinterStatusDto>();
         var firstUpdate = new TaskCompletionSource<PrinterStatusDto>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var liveCache = new PrinterStatusCache(NullLogger<PrinterStatusCache>.Instance, Mock.Of<IDiagnosticChannelService>());
         var statusCacheWriter = new Mock<IPrinterStatusCacheWriter>();
         statusCacheWriter
             .Setup(w => w.UpdateStatus(It.IsAny<PrinterStatusDto>(), It.IsAny<long?>()))
             .Callback<PrinterStatusDto, long?>((dto, _) =>
             {
+                liveCache.UpdateStatus(dto);
                 observedUpdates.Enqueue(dto);
                 firstUpdate.TrySetResult(dto);
             });
@@ -156,6 +159,34 @@ public sealed class RealMoonrakerSubscriptionServiceIntegrationTests : IClassFix
         clientProxy.Verify(
             p => p.SendCoreAsync("printerupdated", It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
             Times.AtLeastOnce());
+
+        DateTime? initialHomingTime = initial.SafetyTelemetry?.HomedAxes.ObservedAtUtc;
+        Assert.NotNull(initialHomingTime);
+        var idleRefresh = new TaskCompletionSource<PrinterStatusDto>(TaskCreationOptions.RunContinuationsAsynchronously);
+        statusCacheWriter
+            .Setup(w => w.UpdateStatus(It.IsAny<PrinterStatusDto>(), It.IsAny<long?>()))
+            .Callback<PrinterStatusDto, long?>((dto, _) =>
+            {
+                liveCache.UpdateStatus(dto);
+                if (dto.SafetyTelemetry?.HomedAxes.ObservedAtUtc > initialHomingTime)
+                {
+                    idleRefresh.TrySetResult(dto);
+                }
+            });
+
+        PrinterStatusDto refreshed = await idleRefresh.Task.WaitAsync(TimeSpan.FromSeconds(45));
+        Assert.Equal("xyz", refreshed.HomedAxes);
+        Assert.Equal("standby", refreshed.RawActivityState);
+        Assert.True(refreshed.IsOnline);
+
+        // Cross the real 60-second dispatch SLA while the emulator remains unchanged.
+        await Task.Delay(TimeSpan.FromSeconds(35));
+        PrinterStatusSnapshot live = Assert.IsType<PrinterStatusSnapshot>(liveCache.GetStatusSnapshot(printer.Id));
+        Assert.True(live.Status.IsOnline);
+        Assert.Equal("Idle", live.Status.State);
+        Assert.Equal("xyz", live.Status.HomedAxes);
+        Assert.True(DateTime.UtcNow - live.ObservedAtUtc < TimeSpan.FromSeconds(60));
+        Assert.True(DateTime.UtcNow - live.Status.SafetyTelemetry!.HomedAxes.ObservedAtUtc < TimeSpan.FromSeconds(60));
 
         // Now prove an *ongoing* notify_status_update (not just the initial subscribe ack)
         // is also received: mutate the printer through the emulator's own REST surface and
@@ -331,6 +362,10 @@ public sealed class RealMoonrakerSubscriptionServiceIntegrationTests : IClassFix
 
         Assert.NotNull(cachedStatus);
         Assert.NotNull(broadcast);
+        Assert.Equal("xyz", cachedStatus.HomedAxes);
+        Assert.Equal("xyz", broadcast.HomedAxes);
+        Assert.NotNull(cachedStatus.SafetyTelemetry?.HomedAxes.ObservedAtUtc);
+        Assert.Equal(cachedStatus.SafetyTelemetry!.HomedAxes, broadcast.SafetyTelemetry!.HomedAxes);
         Assert.Equal(broadcast.CurrentJobThumbnailUrl, cachedStatus.CurrentJobThumbnailUrl);
         Assert.NotNull(cachedStatus.CurrentJobThumbnailUrl);
 

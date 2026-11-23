@@ -113,8 +113,105 @@ public sealed class MoonrakerSensorSubscriptionTests : IAsyncDisposable
     private Task ProcessMessageAsync(string message) =>
         _service.ProcessJsonRpcMessageAsync(message, Printer, null, _cts.Token);
 
+    private async Task<long> RequestStatusRefreshAsync()
+    {
+        string? request = null;
+        await _service.RequestStatusRefreshAsync(_printerId, (json, _) =>
+        {
+            request = json;
+            return Task.CompletedTask;
+        }, _cts.Token);
+        using JsonDocument document = JsonDocument.Parse(Assert.IsType<string>(request));
+        Assert.Equal("printer.objects.query", document.RootElement.GetProperty("method").GetString());
+        return document.RootElement.GetProperty("id").GetInt64();
+    }
+
     private static Dictionary<string, PrinterSensorDto> ById(IReadOnlyList<PrinterSensorDto> sensors) =>
         sensors.ToDictionary(s => s.Id, StringComparer.Ordinal);
+
+    [Theory]
+    [InlineData("xyz")]
+    [InlineData("")]
+    public async Task ProcessJsonRpcMessageAsync_CompleteStatusRefresh_UpdatesHomingAndActivity(string axes)
+    {
+        long id = await RequestStatusRefreshAsync();
+        await ProcessMessageAsync(JsonSerializer.Serialize(new
+        {
+            id,
+            result = new
+            {
+                status = new
+                {
+                    webhooks = new { state = "ready" },
+                    print_stats = new { state = "standby" },
+                    toolhead = new { homed_axes = axes },
+                },
+            },
+        }));
+
+        PrinterStatusDto status = _cached[^1];
+        Assert.Equal("standby", status.RawActivityState);
+        Assert.Equal(axes, status.HomedAxes);
+        Assert.NotNull(status.SafetyTelemetry?.HomedAxes.ObservedAtUtc);
+        Assert.Equal(axes.Select(c => c.ToString()), status.SafetyTelemetry!.HomedAxes.Value);
+        Assert.Equal(axes, _broadcasts.OfType<PrinterStatusUpdate>().Last().HomedAxes);
+    }
+
+    [Theory]
+    [InlineData("""{"webhooks":{"state":"ready"},"toolhead":{"homed_axes":"xyz"}}""")]
+    [InlineData("""{"print_stats":{"state":"standby"},"toolhead":{"homed_axes":"xyz"}}""")]
+    [InlineData("""{"webhooks":{"state":"ready"},"print_stats":{"state":"standby"}}""")]
+    [InlineData("""{"webhooks":{"state":"ready"},"print_stats":{"state":null},"toolhead":{"homed_axes":"xyz"}}""")]
+    [InlineData("""{"webhooks":{"state":"ready"},"print_stats":{"state":""},"toolhead":{"homed_axes":"xyz"}}""")]
+    public async Task ProcessJsonRpcMessageAsync_IncompleteStatusRefresh_DoesNotRefreshCache(string status)
+    {
+        await ProcessStatusAsync("""{"webhooks":{"state":"ready"},"print_stats":{"state":"standby"},"toolhead":{"homed_axes":"xyz"}}""");
+        int cachedCount = _cached.Count;
+        int broadcastCount = _broadcasts.Count;
+        long id = await RequestStatusRefreshAsync();
+
+        await ProcessMessageAsync("""{"id":""" + id + ""","result":{"status":""" + status + "}}");
+
+        Assert.Equal(cachedCount, _cached.Count);
+        Assert.Equal(broadcastCount, _broadcasts.Count);
+    }
+
+    [Fact]
+    public async Task ProcessJsonRpcMessageAsync_SupersededStatusRefresh_DoesNotOverwriteNewObservation()
+    {
+        long superseded = await RequestStatusRefreshAsync();
+        long current = await RequestStatusRefreshAsync();
+        const string status = """{"webhooks":{"state":"ready"},"print_stats":{"state":"standby"},"toolhead":{"homed_axes":"xyz"}}""";
+
+        await ProcessMessageAsync("""{"id":""" + superseded + ""","result":{"status":""" + status + "}}");
+        Assert.Empty(_cached);
+        await ProcessMessageAsync("""{"id":""" + current + ""","result":{"status":""" + status + "}}");
+        Assert.Equal("xyz", Assert.Single(_cached).HomedAxes);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProcessJsonRpcMessageAsync_StatusChangedDuringRefresh_DoesNotReplayOlderSnapshot(bool disconnect)
+    {
+        await ProcessStatusAsync("""{"webhooks":{"state":"ready"},"print_stats":{"state":"standby"},"toolhead":{"homed_axes":"xyz"}}""");
+        long id = await RequestStatusRefreshAsync();
+        if (disconnect)
+        {
+            await ProcessMessageAsync("""{"method":"notify_klippy_disconnected"}""");
+        }
+        else
+        {
+            await ProcessStatusAsync("""{"print_stats":{"state":"printing"},"toolhead":{"homed_axes":""}}""");
+        }
+
+        int cachedCount = _cached.Count;
+        int broadcastCount = _broadcasts.Count;
+        const string oldStatus = """{"webhooks":{"state":"ready"},"print_stats":{"state":"standby"},"toolhead":{"homed_axes":"xyz"}}""";
+        await ProcessMessageAsync("""{"id":""" + id + ""","result":{"status":""" + oldStatus + "}}");
+        Assert.Equal(cachedCount, _cached.Count);
+        Assert.Equal(broadcastCount, _broadcasts.Count);
+    }
 
     [Theory]
     [InlineData("standby", true)]
@@ -463,6 +560,75 @@ public sealed class MoonrakerSensorSubscriptionTests : IAsyncDisposable
     private Task ReadHttpFactorsAsync(bool refresh) => refresh
         ? _service.RefreshPrinterStatusAsync(_printerId, delayMs: 0, _cts.Token)
         : _service.TriggerHttpPollingFallbackAsync(Printer, _cts.Token);
+
+    [Theory]
+    [InlineData(false, "xyz")]
+    [InlineData(true, "xyz")]
+    [InlineData(false, "")]
+    [InlineData(true, "")]
+    [InlineData(false, null)]
+    [InlineData(true, null)]
+    public async Task HttpStatus_HomingObservation_ReachesCacheAndBroadcast(bool refresh, string? axes)
+    {
+        DateTime observed = DateTime.UtcNow;
+        _client.Setup(client => client.GetCompositeStatusAsync(
+                It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterCompositeStatus(
+                true, "standby", null, null, null, null, null,
+                HomedAxes: axes, HomedAxesObservedAtUtc: axes is null ? null : observed));
+
+        await ReadHttpFactorsAsync(refresh);
+
+        Assert.Equal(axes, _cached[^1].HomedAxes);
+        Assert.Equal(axes is null ? null : observed, _cached[^1].SafetyTelemetry!.HomedAxes.ObservedAtUtc);
+        Assert.Equal(axes, _broadcasts.OfType<PrinterStatusUpdate>().Last().HomedAxes);
+        await ProcessStatusAsync("""{"fan":{"speed":0.4}}""");
+        Assert.Equal(axes, _cached[^1].HomedAxes);
+        Assert.Equal(axes is null ? null : observed, _cached[^1].SafetyTelemetry!.HomedAxes.ObservedAtUtc);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HttpStatus_DelayedHomingObservation_DoesNotOverwriteNewerWebSocketHoming(bool refresh)
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var response = new TaskCompletionSource<PrinterCompositeStatus>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _client.Setup(client => client.GetCompositeStatusAsync(
+                It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()))
+            .Callback(() => started.SetResult())
+            .Returns(response.Task);
+
+        Task olderRead = ReadHttpFactorsAsync(refresh);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await ProcessStatusAsync("""{"webhooks":{"state":"ready"},"toolhead":{"homed_axes":""}}""");
+        DateTime? latest = _cached[^1].SafetyTelemetry!.HomedAxes.ObservedAtUtc;
+        response.SetResult(new PrinterCompositeStatus(
+            true, "standby", null, null, null, null, null,
+            HomedAxes: "xyz", HomedAxesObservedAtUtc: DateTime.UtcNow));
+        await olderRead;
+
+        Assert.Equal("", _cached[^1].HomedAxes);
+        Assert.Equal(latest, _cached[^1].SafetyTelemetry!.HomedAxes.ObservedAtUtc);
+        Assert.Equal("", _broadcasts.OfType<PrinterStatusUpdate>().Last().HomedAxes);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HttpStatus_HomingWithoutObservationTime_RemainsUnknown(bool refresh)
+    {
+        _client.Setup(client => client.GetCompositeStatusAsync(
+                It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterCompositeStatus(
+                true, "standby", null, null, null, null, null, HomedAxes: "xyz"));
+
+        await ReadHttpFactorsAsync(refresh);
+
+        Assert.Null(_cached[^1].HomedAxes);
+        Assert.Null(_cached[^1].SafetyTelemetry!.HomedAxes.ObservedAtUtc);
+        Assert.Null(_broadcasts.OfType<PrinterStatusUpdate>().Last().HomedAxes);
+    }
 
     private void AssertRuntimeFactors(double? speed, double? flow)
     {

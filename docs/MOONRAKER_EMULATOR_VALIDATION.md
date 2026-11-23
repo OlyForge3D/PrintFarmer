@@ -190,7 +190,7 @@ they do not return success-shaped placeholders.
 `/websocket` supports:
 
 - `server.connection.identify`;
-- `server.info` (including the production subscription service's heartbeat);
+- `server.info`;
 - `printer.objects.list`;
 - `printer.objects.subscribe`, including per-object field filtering and an initial
   snapshot;
@@ -203,6 +203,9 @@ they do not return success-shaped placeholders.
 The endpoint accepts fragmented client messages, preserves JSON-RPC request IDs,
 returns standard parse/invalid-request/method-not-found errors, serializes concurrent
 subscriber writes, and broadcasts mutations to every applicable subscription.
+The backend periodically queries readiness, print activity, and homing so an idle
+printer's unchanged subscription does not leave its status stale. Incomplete or
+late query replies do not refresh that evidence.
 
 ### Standard Klipper sensor fixtures
 
