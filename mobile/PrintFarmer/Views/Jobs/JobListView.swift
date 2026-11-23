@@ -166,8 +166,13 @@ struct JobListView: View {
                 }
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") {
+                        Button {
                             showsJobHistory = false
+                        } label: {
+                            Text("Done")
+                                .font(.body)
+                                .foregroundStyle(Color.pfTextPrimary)
+                                .frame(minWidth: 44, minHeight: 44)
                         }
                     }
                 }

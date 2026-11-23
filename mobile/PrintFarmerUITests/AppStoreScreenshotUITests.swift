@@ -599,6 +599,9 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         XCUIDevice.shared.orientation = .portrait
         openJobHistoryMenuAndSelect()
         try require(app.descendants(matching: .any)["jobList.history"])
+        let done = app.buttons["Done"]
+        try require(done)
+        XCTAssertGreaterThanOrEqual(done.frame.height, 44)
         let job = app.buttons["job.row.30000000-0003-0000-0000-000000000007"]
         try require(job)
         try capture("17-job-history")
@@ -659,9 +662,11 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         ).firstMatch
         try tapRequired(change)
         try require(app.navigationBars["Select Material"])
+        XCTAssertGreaterThanOrEqual(app.buttons["Cancel"].frame.height, 44)
         try capture("20-material-picker")
         try tapRequired(app.buttons["spoolPicker.material.PLA"])
         try require(app.navigationBars["Select Spool"])
+        XCTAssertGreaterThanOrEqual(app.buttons["Back"].frame.height, 44)
         try require(app.buttons["spoolPicker.spool.2"])
         let allFilter = app.buttons["All"]
         XCTAssertGreaterThanOrEqual(allFilter.frame.width, 44)

@@ -24,9 +24,9 @@ struct SpoolPickerView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     if viewModel.phase == .selectMaterial {
-                        Button("Cancel") { dismiss() }
+                        toolbarTextButton("Cancel") { dismiss() }
                     } else {
-                        Button("Back") {
+                        toolbarTextButton("Back") {
                             withAnimation {
                                 viewModel.backToMaterialSelection()
                             }
@@ -118,6 +118,18 @@ struct SpoolPickerView: View {
                 viewModel.isViewActive = false
                 activeTasks.forEach { $0.cancel() }
             }
+        }
+    }
+
+    private func toolbarTextButton(
+        _ title: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.body)
+                .foregroundStyle(Color.pfTextPrimary)
+                .frame(minWidth: 44, minHeight: 44)
         }
     }
 
