@@ -621,7 +621,12 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         relaunchAppForTest(additionalArguments: ["--uitesting-catalog-read-only", "--uitesting-catalog-history"])
         XCUIDevice.shared.orientation = .portrait
         openJobHistoryMenuAndSelect()
-        try tapRequired(app.buttons["job.row.30000000-0003-0000-0000-000000000007"])
+        let historyJob = app.buttons["job.row.30000000-0003-0000-0000-000000000007"]
+        try require(historyJob)
+        let historyTitle = historyJob.staticTexts["benchy_calibration.gcode"]
+        try require(historyTitle)
+        XCTAssertGreaterThan(historyTitle.frame.height, 35)
+        try tapRequired(historyJob)
         let title = app.staticTexts["job.detail.title"]
         try require(title)
         XCTAssertEqual(title.label, "benchy_calibration.gcode")

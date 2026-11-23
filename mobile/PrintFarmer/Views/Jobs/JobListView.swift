@@ -818,25 +818,22 @@ struct JobListView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(item.job.name)
                                     .font(.subheadline)
-                                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
-                                    .lineLimit(2)
+                                    .fixedSize(horizontal: false, vertical: true)
                                 StatusBadge(jobStatus: item.job.jobStatus)
-                                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                             }
                         }
                         VStack(alignment: .leading, spacing: 4) {
                             if let printerName = item.job.printerName {
                                 Text(printerName)
                                     .font(.caption)
-                                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                                     .foregroundStyle(.secondary)
-                                    .lineLimit(1)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             if let endTime = item.job.actualEndTimeUtc {
                                 Text(endTime.relativeFormatted)
                                     .font(.caption2)
-                                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
-                                    .foregroundStyle(.tertiary)
+                                    .foregroundStyle(Color.pfTextSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                     }
@@ -861,7 +858,7 @@ struct JobListView: View {
                                 if let endTime = item.job.actualEndTimeUtc {
                                     Text(endTime.relativeFormatted)
                                         .font(.caption2)
-                                        .foregroundStyle(.tertiary)
+                                        .foregroundStyle(Color.pfTextSecondary)
                                 }
                             }
                             if let reason = item.job.failureReason, item.job.jobStatus == .failed {
