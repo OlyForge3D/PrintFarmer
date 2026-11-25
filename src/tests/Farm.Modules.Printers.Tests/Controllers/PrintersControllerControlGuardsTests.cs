@@ -925,13 +925,9 @@ public class PrintersControllerControlGuardsTests
         Guid allowedId = Guid.NewGuid();
         Guid deniedId = Guid.NewGuid();
         var printersService = new Mock<IPrintersService>();
-        printersService.Setup(service => service.GetAllAsync(
+        printersService.Setup(service => service.GetAllIdsAsync(
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(
-            [
-                SamplePrinter(allowedId),
-                SamplePrinter(deniedId),
-            ]);
+            .ReturnsAsync([allowedId, deniedId]);
         var authorization = new Mock<IQueueResourceAuthorizationService>();
         authorization.Setup(service => service.FilterAccessiblePrinterIdsAsync(
                 It.IsAny<ClaimsPrincipal>(),
@@ -971,6 +967,48 @@ public class PrintersControllerControlGuardsTests
         Assert.Equal(allowedId, body[0].PrinterId);
         capabilities.Verify(service => service.GetAllAsync(
             It.IsAny<CancellationToken>()), Times.Never);
+        printersService.Verify(service => service.GetAllAsync(
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetBackendCapabilitiesAsync_NoAccessiblePrinters_ReturnsEmptyWithoutLoadingRows()
+    {
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(service => service.GetAllIdsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Guid.NewGuid()]);
+        var authorization = new Mock<IQueueResourceAuthorizationService>();
+        authorization.Setup(service => service.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<Guid>());
+        var capabilities = new Mock<IPrinterBackendCapabilitiesService>();
+        capabilities.Setup(service => service.GetByIdsAsync(
+                It.Is<Guid[]>(ids => ids.Length == 0),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        PrintersController controller = CreateController(
+            printersService,
+            new Mock<IPrinterStatusCacheReader>(),
+            out _,
+            resourceAuthorization: authorization,
+            capabilitiesService: capabilities);
+
+        ActionResult<IEnumerable<PrinterBackendCapabilitiesDto>> result =
+            await controller.GetBackendCapabilitiesAsync(CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Empty(Assert.IsAssignableFrom<IEnumerable<PrinterBackendCapabilitiesDto>>(ok.Value));
+        capabilities.Verify(service => service.GetByIdsAsync(
+            It.Is<Guid[]>(ids => ids.Length == 0),
+            It.IsAny<CancellationToken>()), Times.Once);
+        capabilities.Verify(service => service.GetByIdsAsync(
+            It.Is<Guid[]>(ids => ids.Length > 0),
+            It.IsAny<CancellationToken>()), Times.Never);
+        capabilities.Verify(service => service.GetAllAsync(It.IsAny<CancellationToken>()), Times.Never);
+        printersService.Verify(service => service.GetAllAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

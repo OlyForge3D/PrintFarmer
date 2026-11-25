@@ -218,15 +218,13 @@ public partial class PrintersController(
     {
         try
         {
-            Printer[] printers = (await _printersService.GetAllAsync(ct)).ToArray();
-            Printer[] accessible = await FilterAccessiblePrintersAsync(
-                printers,
-                printer => printer.Id,
+            Guid[] printerIds = (await _printersService.GetAllIdsAsync(ct)).ToArray();
+            Guid[] accessibleIds = await FilterAccessiblePrintersAsync(
+                printerIds,
+                id => id,
                 ct);
             PrinterBackendCapabilitiesDto[] capabilities =
-                (await _printerBackendCapabilitiesService.GetByIdsAsync(
-                    accessible.Select(printer => printer.Id).ToArray(),
-                    ct))
+                (await _printerBackendCapabilitiesService.GetByIdsAsync(accessibleIds, ct))
                 .ToArray();
             return Ok(capabilities);
         }

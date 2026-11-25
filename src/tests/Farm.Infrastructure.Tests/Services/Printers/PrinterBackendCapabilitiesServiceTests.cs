@@ -503,6 +503,34 @@ public class PrinterBackendCapabilitiesServiceTests
     }
 
     [Fact]
+    public async Task GetByIdsAsync_LoadsOnlyRequestedPrintersWithoutFullFleetRead()
+    {
+        var printer = new Printer { Id = Guid.NewGuid(), Name = "allowed", Backend = (int)PrinterBackend.Moonraker };
+        var repo = new Mock<IPrintersRepository>();
+        repo.Setup(repository => repository.GetByIdsAsync(
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.SequenceEqual(new[] { printer.Id })),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([printer]);
+        var service = new PrinterBackendCapabilitiesService(repo.Object, Mock.Of<IBackendCapabilityFactory>());
+
+        PrinterBackendCapabilitiesDto[] result =
+            (await service.GetByIdsAsync([printer.Id], CancellationToken.None)).ToArray();
+
+        Assert.Equal(printer.Id, Assert.Single(result).PrinterId);
+        repo.Verify(repository => repository.GetAllAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetByIdsAsync_Empty_DoesNotQueryRepository()
+    {
+        var repo = new Mock<IPrintersRepository>(MockBehavior.Strict);
+        var service = new PrinterBackendCapabilitiesService(repo.Object, Mock.Of<IBackendCapabilityFactory>());
+
+        Assert.Empty(await service.GetByIdsAsync([], CancellationToken.None));
+        repo.VerifyNoOtherCalls();
+    }
+
+    [Fact]
     public async Task GetByPrinterIdAsync_MissingPrinter_ReturnsNullWithoutResolvingBackend()
     {
         var factory = new Mock<IBackendCapabilityFactory>(MockBehavior.Strict);

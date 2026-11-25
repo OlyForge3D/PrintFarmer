@@ -48,6 +48,13 @@ public interface IPrintersService
     Task<List<Printer>> GetAllAsync(CancellationToken ct);
 
     /// <summary>
+    /// Retrieves the IDs of all printers without loading printer rows or credentials.
+    /// </summary>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>All printer IDs</returns>
+    Task<List<Guid>> GetAllIdsAsync(CancellationToken ct);
+
+    /// <summary>
     /// Retrieves all printers with related entities loaded (includes manufacturer, model, etc.).
     /// </summary>
     /// <param name="ct">Cancellation token</param>
