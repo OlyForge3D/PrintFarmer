@@ -275,12 +275,13 @@ public class EfPrintJobManagementRepositoryTests
         now = now.AddDays(32);
         Assert.Equal(0, await repository.GetAverageWaitTimeMinutesAsync());
         Assert.Empty(db.ChangeTracker.Entries());
-        Assert.Equal(5, interceptor.PrintJobCommands.Count);
-        foreach (string sql in interceptor.PrintJobCommands)
+        string[] commands = interceptor.PrintJobCommands.ToArray();
+        Assert.Equal(5, commands.Length);
+        Assert.All(commands, sql =>
         {
             Assert.StartsWith("SELECT \"p\".\"QueuedAt\", \"p\".\"ActualStartTime\"", sql, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Name\"", sql, StringComparison.Ordinal);
-        }
+        });
     }
 
     [Theory]
@@ -991,7 +992,7 @@ public class EfPrintJobManagementRepositoryTests
     {
         private readonly List<string> _printJobCommands = [];
 
-        public List<string> PrintJobCommands => _printJobCommands;
+        public IReadOnlyList<string> PrintJobCommands => _printJobCommands;
 
         public void Reset() => _printJobCommands.Clear();
 
