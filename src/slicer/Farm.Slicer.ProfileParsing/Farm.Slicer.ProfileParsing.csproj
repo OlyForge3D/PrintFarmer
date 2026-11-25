@@ -13,7 +13,7 @@ has no reference to Farm.Infrastructure or any other project so it stays a pure
 System.Text.Json parsing library that either side of the src/api boundary can share.</Description>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="11.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.15" />
   </ItemGroup>
 
 </Project>
