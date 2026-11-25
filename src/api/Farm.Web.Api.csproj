@@ -47,7 +47,7 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="11.0.0">
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.15">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Refit.HttpClientFactory" Version="15.2.0" />
