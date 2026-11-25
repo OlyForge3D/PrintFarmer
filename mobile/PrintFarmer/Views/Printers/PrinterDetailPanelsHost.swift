@@ -225,7 +225,6 @@ struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queu
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Color.pfTextPrimary)
                         .fixedSize(horizontal: false, vertical: true)
-                        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                         .accessibilityAddTraits(.isHeader)
                         .accessibilityLabel("\(printer.name), printer detail")
                         .accessibilityIdentifier("printer.detail.destination.\(printer.id.uuidString.lowercased())")
@@ -238,13 +237,13 @@ struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queu
                         Text(status)
                             .font(.caption)
                             .foregroundStyle(statusColor)
-                            .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     if printer.inMaintenance {
                         Text("Maintenance")
                             .font(.caption)
                             .foregroundStyle(Color.pfTextPrimary)
-                            .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }

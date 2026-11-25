@@ -171,7 +171,7 @@ struct PartsInventoryListView: View {
                                         .font(.subheadline.weight(.medium))
                                     Text("SKU \(part.sku) • On hand \(part.onHand)")
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(Color.pfTextPrimary)
                                 }
                             }
                             .frame(minHeight: 44)

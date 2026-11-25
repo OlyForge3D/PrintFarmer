@@ -42,7 +42,7 @@ struct OnboardingView: View {
     
     @ViewBuilder
     private func Page1() -> some View {
-        VStack(spacing: 24) {
+        scrollablePage(VStack(spacing: 24) {
             Spacer()
             
             Image("AppLogo")
@@ -60,22 +60,23 @@ struct OnboardingView: View {
                 .font(.body)
                 .foregroundStyle(Color.pfTextSecondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 32)
             
             Spacer()
             Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        })
     }
     
     @ViewBuilder
     private func Page2() -> some View {
-        VStack(spacing: 24) {
+        scrollablePage(VStack(spacing: 24) {
             Spacer()
             
             Image(systemName: "tray.full.fill")
                 .font(.system(size: 72))
                 .foregroundStyle(Color.pfAccent)
+                .accessibilityHidden(true)
             
             Text("Smart Job Queue")
                 .font(.title)
@@ -86,22 +87,23 @@ struct OnboardingView: View {
                 .font(.body)
                 .foregroundStyle(Color.pfTextSecondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 32)
             
             Spacer()
             Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        })
     }
     
     @ViewBuilder
     private func Page3() -> some View {
-        VStack(spacing: 24) {
+        scrollablePage(VStack(spacing: 24) {
             Spacer()
             
             Image(systemName: "bell.badge.fill")
                 .font(.system(size: 72))
                 .foregroundStyle(Color.pfAccent)
+                .accessibilityHidden(true)
             
             Text("Stay Informed")
                 .font(.title)
@@ -112,6 +114,7 @@ struct OnboardingView: View {
                 .font(.body)
                 .foregroundStyle(Color.pfTextSecondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 32)
             
             Spacer()
@@ -121,15 +124,24 @@ struct OnboardingView: View {
             } label: {
                 Text("Get Started")
                     .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity)
                     .padding()
             }
             .buttonStyle(.borderedProminent)
-            .tint(Color.pfAccent)
+            .tint(Color.pfButtonPrimary)
             .padding(.horizontal, 32)
             .padding(.bottom, 40)
+        })
+    }
+
+    private func scrollablePage<Content: View>(_ content: Content) -> some View {
+        GeometryReader { geometry in
+            ScrollView {
+                content
+                    .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     // MARK: - Actions

@@ -60,6 +60,16 @@ final class PrinterListUITests: PrintFarmerUITestCase {
                        "The entire farm card is one VoiceOver element")
     }
 
+    func testInventoryMoreFiltersHasMinimumTouchTarget() {
+        let filament = shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8)
+        XCTAssertTrue(filament.exists)
+        filament.tap()
+        let moreFilters = app.buttons["inventory.filter.more"]
+        XCTAssertTrue(moreFilters.waitForExistence(timeout: 8))
+        XCTAssertGreaterThanOrEqual(moreFilters.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(moreFilters.frame.height, 44)
+    }
+
     func testTapPrinterNavigatesToDetail() {
         openFarm()
         let printerCard = app.buttons["farm-card-\(printerID)"]

@@ -1,0 +1,35 @@
+{
+  "configurations": [
+    {
+      "id": "37290000-0000-0000-0000-000000000001",
+      "name": "Native candidates",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {
+    "defaultTestExecutionTimeAllowance": 600,
+    "maximumTestExecutionTimeAllowance": 600,
+    "testTimeoutsEnabled": true
+  },
+  "testTargets": [
+    {
+      "parallelizable": false,
+      "selectedTests": ["CatalogVisualAccessibilityUITests", "CatalogRootVisualAccessibilityUITests"],
+      "target": {
+        "containerPath": "container:PrintFarmer.xcodeproj",
+        "identifier": "F7060002000000000000D001",
+        "name": "PrintFarmerUITests"
+      }
+    },
+    {
+      "parallelizable": false,
+      "selectedTests": ["UITestBootstrapTests"],
+      "target": {
+        "containerPath": "container:PrintFarmer.xcodeproj",
+        "identifier": "AFC2BA1C050C049765D60160",
+        "name": "PrintFarmerTests"
+      }
+    }
+  ],
+  "version": 1
+}

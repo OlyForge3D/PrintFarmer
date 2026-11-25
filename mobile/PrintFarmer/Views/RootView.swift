@@ -58,6 +58,9 @@ struct RootView: View {
                 if !authViewModel.hasCheckedAuth || !minimumSplashElapsed {
                     launchScreen
                         .task {
+                            #if DEBUG
+                            guard UITestBootstrap.catalogRootState != .splash else { return }
+                            #endif
                             try? await Task.sleep(for: .seconds(1.5))
                             minimumSplashElapsed = true
                         }
@@ -118,6 +121,12 @@ struct RootView: View {
         .task {
             observedActiveServerID = serverRegistry.activeServerID
             routePendingExternalScan()
+            #if DEBUG
+            if let request = UITestBootstrap.catalogCertificateRequest(in: CommandLine.arguments) {
+                // Presentation only: no TLS challenge, coordinator, or persisted pin.
+                _ = await certificateTrustPresentation.confirm(request)
+            }
+            #endif
         }
         .onChange(of: isShowingMainContent) { _, _ in
             // A completed sign-in is the moment a retained request becomes

@@ -24,9 +24,9 @@ struct SpoolPickerView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     if viewModel.phase == .selectMaterial {
-                        Button("Cancel") { dismiss() }
+                        toolbarTextButton("Cancel") { dismiss() }
                     } else {
-                        Button("Back") {
+                        toolbarTextButton("Back") {
                             withAnimation {
                                 viewModel.backToMaterialSelection()
                             }
@@ -118,6 +118,18 @@ struct SpoolPickerView: View {
                 viewModel.isViewActive = false
                 activeTasks.forEach { $0.cancel() }
             }
+        }
+    }
+
+    private func toolbarTextButton(
+        _ title: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.body)
+                .foregroundStyle(Color.pfTextPrimary)
+                .frame(minWidth: 44, minHeight: 44)
         }
     }
 
@@ -239,8 +251,9 @@ struct SpoolPickerView: View {
                         .foregroundStyle(viewModel.selectedStatus == nil ? .white : Color.pfTextSecondary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
+                        .frame(minWidth: 44, minHeight: 44)
                         .background(
-                            viewModel.selectedStatus == nil ? Color.pfAccent : Color.pfBackgroundTertiary,
+                            viewModel.selectedStatus == nil ? Color.pfButtonPrimary : Color.pfBackgroundTertiary,
                             in: Capsule()
                         )
                 }
@@ -261,8 +274,9 @@ struct SpoolPickerView: View {
                             .foregroundStyle(viewModel.selectedStatus == status ? .white : Color.pfTextSecondary)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
+                            .frame(minWidth: 44, minHeight: 44)
                             .background(
-                                viewModel.selectedStatus == status ? Color.pfAccent : Color.pfBackgroundTertiary,
+                                viewModel.selectedStatus == status ? Color.pfButtonPrimary : Color.pfBackgroundTertiary,
                                 in: Capsule()
                             )
                     }
@@ -338,7 +352,7 @@ struct SpoolRowView: View {
                     if let vendor = spool.vendor {
                         Text("•")
                             .font(.caption)
-                            .foregroundStyle(Color.pfTextTertiary)
+                            .foregroundStyle(Color.pfTextSecondary)
                         Text(vendor)
                             .font(.caption)
                             .foregroundStyle(Color.pfTextSecondary)

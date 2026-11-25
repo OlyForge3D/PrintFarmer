@@ -93,16 +93,19 @@ struct LoginView: View {
                     if !viewModel.serverURL.isEmpty && !viewModel.isServerURLExpanded {
                         Text(viewModel.serverURL)
                             .font(.caption)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Image(systemName: "chevron.right")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.tertiary)
                         .rotationEffect(.degrees(viewModel.isServerURLExpanded ? 90 : 0))
                 }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("login.server.expand")
 
             loginServerPicker
 
@@ -196,12 +199,12 @@ struct LoginView: View {
                 Text(displayName)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Text(normalizedURLString)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer(minLength: 8)
@@ -224,17 +227,23 @@ struct LoginView: View {
 
     private var credentialFields: some View {
         VStack(spacing: 14) {
-            TextField("Username or Email", text: $viewModel.usernameOrEmail)
-                .textContentType(.username)
-                .autocorrectionDisabled()
-                #if os(iOS)
-                .textInputAutocapitalization(.never)
-                #endif
-                .textFieldStyle(.roundedBorder)
-                .focused($focusedField, equals: .username)
-                .submitLabel(.next)
-                .onSubmit { focusedField = .password }
-                .accessibilityIdentifier("usernameField")
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Username or Email")
+                    .font(.subheadline)
+                    .accessibilityHidden(true)
+                TextField("Username or Email", text: $viewModel.usernameOrEmail, prompt: Text(""))
+                    .textContentType(.username)
+                    .autocorrectionDisabled()
+                    #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    #endif
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focusedField, equals: .username)
+                    .submitLabel(.next)
+                    .onSubmit { focusedField = .password }
+                    .accessibilityIdentifier("usernameField")
+                    .accessibilityLabel("Username or Email")
+            }
 
             SecureField("Password", text: $viewModel.password)
                 .textContentType(.password)
@@ -279,10 +288,28 @@ struct LoginView: View {
                 }
             }
             .fullWidthActionButton(prominence: .prominent)
+            .foregroundStyle(viewModel.isFormValid && !authViewModel.isLoading ? Color.white : Color.pfTextSecondary)
+            .background(
+                viewModel.isFormValid && !authViewModel.isLoading ? Color.pfButtonPrimary : Color.pfBackgroundTertiary,
+                in: RoundedRectangle(cornerRadius: 10)
+            )
+            .overlay {
+                if !viewModel.isFormValid || authViewModel.isLoading {
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(Color.pfBorderLight)
+                }
+            }
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(LoginButtonStyle())
         .disabled(!viewModel.isFormValid || authViewModel.isLoading)
         .accessibilityIdentifier("loginButton")
+    }
+
+    private struct LoginButtonStyle: ButtonStyle {
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .opacity(configuration.isPressed ? 0.7 : 1)
+        }
     }
 
     // MARK: - Demo Mode
@@ -297,9 +324,12 @@ struct LoginView: View {
             }
             .font(.subheadline)
             .foregroundStyle(.secondary)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .padding(.top, 4)
+        .accessibilityIdentifier("login.demo")
     }
 
     // MARK: - Actions

@@ -327,26 +327,33 @@ struct PrinterDetailView: View {
     }
 
     private var detailHeader: some View {
-        HStack {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
             Button {
                 Self.returnToFarm(router: router)
             } label: {
                 Text("‹ Farm")
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Color.pfAccent)
+                    .foregroundStyle(Color.pfTextPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("printer.detail.farm")
 
-            Spacer(minLength: 12)
+            if !dynamicTypeSize.isAccessibilitySize {
+                Spacer(minLength: 0)
+            }
 
             if let nativeWebURL = viewModel.nativeWebURL {
                 Link(destination: nativeWebURL) {
                     Text("Open in web ↗")
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Color.pfTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
                 }
@@ -356,9 +363,8 @@ struct PrinterDetailView: View {
             }
         }
         .padding(.horizontal, 16)
-        .frame(height: 48)
+        .frame(minHeight: 48)
         .background(Color.pfBackground)
-        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
     }
 
     private var pageContent: some View {
@@ -1000,26 +1006,27 @@ struct PrinterDetailView: View {
                 if viewModel.isActivelyPrinting, let progress = printer.progress, progress.isFinite {
                     PrintProgressBar(progress: min(max(progress, 0), 1), showLabel: false, height: 6)
                         .accessibilityIdentifier("printer.detail.job.progress")
+                        .accessibilityHidden(true)
                 }
 
                 Group {
                     if dynamicTypeSize.isAccessibilitySize {
                         VStack(alignment: .leading, spacing: 8) {
                             if let remaining = viewModel.formattedTimeRemaining {
-                                statusFact("Left", value: remaining)
+                                statusFact("Left", value: remaining, id: "remaining")
                             }
                             if let eta = viewModel.formattedEtaClock {
-                                statusFact("Done at", value: eta)
+                                statusFact("Done at", value: eta, id: "eta")
                             }
                             layerFact(printer)
                         }
                     } else {
                         HStack(alignment: .top, spacing: 8) {
                             if let remaining = viewModel.formattedTimeRemaining {
-                                statusFact("Left", value: remaining)
+                                statusFact("Left", value: remaining, id: "remaining")
                             }
                             if let eta = viewModel.formattedEtaClock {
-                                statusFact("Done at", value: eta)
+                                statusFact("Done at", value: eta, id: "eta")
                             }
                             layerFact(printer)
                         }
@@ -1040,13 +1047,11 @@ struct PrinterDetailView: View {
                 presentation: statusActions(for: printer),
                 onSelect: { kind in handleRunAction(kind) }
             )
-            // Labels never outgrow the job headline, which caps at xxxLarge.
-            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.detail.job")
     }
 
-    @ViewBuilder
     private func currentJobHeading(_ printer: Printer, jobName: String?) -> some View {
         let progress = viewModel.isActivelyPrinting
             ? printer.progress.flatMap { $0.isFinite ? min(max($0, 0), 1) : nil }
@@ -1055,31 +1060,24 @@ struct PrinterDetailView: View {
             "Print progress \(Int(($0 * 100).rounded())) percent"
         }
 
-        if dynamicTypeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: 4) {
-                if let progress, let progressLabel {
-                    Text("\(Int((progress * 100).rounded()))%")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                        .accessibilityLabel(progressLabel)
-                }
-                Text(jobName ?? "Printing")
-                    .font(.headline)
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+
+        return layout {
+            if let progress, let progressLabel {
+                Text("\(Int((progress * 100).rounded()))%")
+                    .font(.system(.largeTitle, design: .rounded, weight: .bold))
+                    .monospacedDigit()
                     .fixedSize(horizontal: false, vertical: true)
-                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+                    .accessibilityLabel(progressLabel)
             }
-        } else {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                if let progress, let progressLabel {
-                    Text("\(Int((progress * 100).rounded()))%")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                        .accessibilityLabel(progressLabel)
-                }
-                Text(jobName ?? "Printing")
-                    .font(.headline)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+            Text(jobName ?? "Printing")
+                .font(.headline)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(jobName.map { "Current print, \($0)" } ?? "Printing")
+                .accessibilityIdentifier("printer.detail.job.name")
+            if !dynamicTypeSize.isAccessibilitySize {
                 Spacer(minLength: 0)
             }
         }
@@ -1099,11 +1097,11 @@ struct PrinterDetailView: View {
     private func layerFact(_ printer: Printer) -> some View {
         let layer = viewModel.layerLabel(for: printer)
         if layer != PrinterDetailViewModel.missingValuePlaceholder {
-            statusFact("Layer", value: layer)
+            statusFact("Layer", value: layer, id: "layer")
         }
     }
 
-    private func statusFact(_ title: String, value: String, spokenValue: String? = nil) -> some View {
+    private func statusFact(_ title: String, value: String, id: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption)
@@ -1111,13 +1109,12 @@ struct PrinterDetailView: View {
             Text(value)
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .accessibilityLabel(spokenValue ?? value)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(value)
         }
-        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("printer.detail.job.fact.\(id)")
     }
 
     // MARK: - Queue (server-ordered assigned jobs + reviewed-head start)
@@ -1322,6 +1319,7 @@ struct PrinterDetailView: View {
                 Text(previewImage != nil ? "Print preview" : "Camera")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Color.pfTextPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("printer.detail.camera.title")
 
@@ -1332,6 +1330,7 @@ struct PrinterDetailView: View {
                     Text("No camera available")
                         .font(.footnote)
                         .foregroundStyle(Color.pfTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.trailing, 8)
                         .accessibilityIdentifier("printer.detail.camera.unavailable")
                 }
@@ -1375,7 +1374,6 @@ struct PrinterDetailView: View {
             .frame(minHeight: 44)
             .padding(.leading, 12)
             .padding(.trailing, 4)
-            .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("printer.detail.camera.header")
 
@@ -1588,6 +1586,7 @@ struct PrinterDetailView: View {
                             Image(uiImage: uiImage)
                                 .resizable()
                                 .scaledToFit()
+                                .accessibilityLabel("Printer camera snapshot")
                                 .frame(
                                     width: quarterTurn ? geometry.size.height : geometry.size.width,
                                     height: quarterTurn ? geometry.size.width : geometry.size.height

@@ -8,21 +8,25 @@ class DemoJobService: JobServiceProtocol, @unchecked Sendable {
     private let queueJobOverrides: [QueuedPrintJobResponse]
     private let hiddenJobIDs: Set<UUID>
     private let dispatchEnabled: Bool
+    private let fixtureJobs: [PrintJob]
 
     init(
         jobNameOverrides: [UUID: String] = [:],
         queueJobOverrides: [QueuedPrintJobResponse] = [],
         hiddenJobIDs: Set<UUID> = [],
-        dispatchEnabled: Bool = true
+        dispatchEnabled: Bool = true,
+        fixtureDate: Date? = nil
     ) {
         self.jobNameOverrides = jobNameOverrides
         self.queueJobOverrides = queueJobOverrides
         self.hiddenJobIDs = hiddenJobIDs
         self.dispatchEnabled = dispatchEnabled
+        self.fixtureJobs = fixtureDate.map(Self.makeJobs) ?? Self.jobs
     }
 
-    private static let jobs: [PrintJob] = {
-        let now = Date()
+    private static let jobs = makeJobs(now: Date())
+
+    private static func makeJobs(now: Date) -> [PrintJob] {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
@@ -133,7 +137,7 @@ class DemoJobService: JobServiceProtocol, @unchecked Sendable {
              "requiredMaterialType":"PLA","copies":1,"completedCopies":0,"remainingCopies":1}
             """),
         ]
-    }()
+    }
 
     func list() async throws -> [QueueOverview] {
         DemoData.printers.map { p in
@@ -149,7 +153,7 @@ class DemoJobService: JobServiceProtocol, @unchecked Sendable {
     }
 
     func listAllJobs() async throws -> QueuedPrintJobPage {
-        let jobs = Self.jobs.filter { !hiddenJobIDs.contains($0.id) }.map { job in
+        let jobs = fixtureJobs.filter { !hiddenJobIDs.contains($0.id) }.map { job in
             let displayName = jobNameOverrides[job.id] ?? job.gcodeFileName
             return QueuedPrintJobResponse(
                 job: QueuedJobInfo(
@@ -189,7 +193,7 @@ class DemoJobService: JobServiceProtocol, @unchecked Sendable {
     }
 
     func get(id: UUID) async throws -> PrintJob {
-        guard let job = Self.jobs.first(where: { $0.id == id }) else {
+        guard let job = fixtureJobs.first(where: { $0.id == id }) else {
             throw ServiceError.notImplemented("Job not found in demo data")
         }
         return job

@@ -10,7 +10,6 @@ private struct NFCWriteTarget: Identifiable {
 struct SpoolInventoryView: View {
     @Environment(ServiceContainer.self) private var services
     @Environment(AppRouter.self) private var router
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var viewModel = SpoolInventoryViewModel()
     @State private var showAddSpool = false
     @State private var showBarcodeIntake = false
@@ -184,49 +183,33 @@ struct SpoolInventoryView: View {
     }
 
     private var inventoryFilters: some View {
-        Group {
-            if dynamicTypeSize.isAccessibilitySize {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 88, maximum: 150), alignment: .leading)],
-                    alignment: .leading,
-                    spacing: 8
-                ) {
-                    inventoryFilterButtons(allowsWrapping: true)
-                }
-                .padding(.horizontal)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        inventoryFilterButtons(allowsWrapping: false)
-                    }
-                    .padding(.horizontal)
-                }
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                inventoryFilterButtons
             }
+            .padding(.horizontal)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 8)
-        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("inventory.filters")
     }
 
     @ViewBuilder
-    private func inventoryFilterButtons(allowsWrapping: Bool) -> some View {
+    private var inventoryFilterButtons: some View {
         inventoryFilter(
             title: "All \(viewModel.count(for: nil))",
             identifier: "inventory.filter.all",
             selected: viewModel.selectedStatus == nil
                 && viewModel.selectedMaterial == nil
-                && !viewModel.showOnlyMissingNFC,
-            allowsWrapping: allowsWrapping
+                && !viewModel.showOnlyMissingNFC
         ) {
             withAnimation { viewModel.clearFilters() }
         }
         inventoryFilter(
             title: "Loaded \(viewModel.count(for: .inUse))",
             identifier: "inventory.filter.loaded",
-            selected: viewModel.selectedStatus == .inUse,
-            allowsWrapping: allowsWrapping
+            selected: viewModel.selectedStatus == .inUse
         ) {
             withAnimation {
                 viewModel.selectedStatus = viewModel.selectedStatus == .inUse ? nil : .inUse
@@ -235,8 +218,7 @@ struct SpoolInventoryView: View {
         inventoryFilter(
             title: "Low \(viewModel.count(for: .low))",
             identifier: "inventory.filter.low",
-            selected: viewModel.selectedStatus == .low,
-            allowsWrapping: allowsWrapping
+            selected: viewModel.selectedStatus == .low
         ) {
             withAnimation {
                 viewModel.selectedStatus = viewModel.selectedStatus == .low ? nil : .low
@@ -244,7 +226,7 @@ struct SpoolInventoryView: View {
         }
 
         ForEach(primaryInventoryMaterials, id: \.self) { material in
-            materialFilter(material, allowsWrapping: allowsWrapping)
+            materialFilter(material)
         }
 
         Menu {
@@ -270,12 +252,13 @@ struct SpoolInventoryView: View {
                 + (viewModel.showOnlyMissingNFC ? 1 : 0)
             Text(activeCount == 0 ? "More" : "More \(activeCount)")
                 .font(.caption.weight(.medium))
-                .fixedSize(horizontal: !allowsWrapping, vertical: false)
+                .fixedSize(horizontal: true, vertical: false)
                 .foregroundStyle(activeCount > 0 ? .white : Color.pfTextSecondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
+                .frame(minWidth: 44, minHeight: 44)
                 .background(
-                    activeCount > 0 ? Color.pfAccent : Color.pfBackgroundTertiary,
+                    activeCount > 0 ? Color.pfButtonPrimary : Color.pfBackgroundTertiary,
                     in: Capsule()
                 )
         }
@@ -311,12 +294,11 @@ struct SpoolInventoryView: View {
         }
     }
 
-    private func materialFilter(_ material: String, allowsWrapping: Bool) -> some View {
+    private func materialFilter(_ material: String) -> some View {
         inventoryFilter(
             title: material,
             identifier: "inventory.filter.material.\(material)",
-            selected: viewModel.selectedMaterial == material,
-            allowsWrapping: allowsWrapping
+            selected: viewModel.selectedMaterial == material
         ) {
             withAnimation {
                 viewModel.selectedMaterial = viewModel.selectedMaterial == material ? nil : material
@@ -343,19 +325,18 @@ struct SpoolInventoryView: View {
         title: String,
         identifier: String,
         selected: Bool,
-        allowsWrapping: Bool,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.caption.weight(.medium))
-                .fixedSize(horizontal: !allowsWrapping, vertical: allowsWrapping)
+                .fixedSize(horizontal: true, vertical: false)
                 .foregroundStyle(selected ? .white : Color.pfTextSecondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .frame(minHeight: 44)
                 .background(
-                    selected ? Color.pfAccent : Color.pfBackgroundTertiary,
+                    selected ? Color.pfButtonPrimary : Color.pfBackgroundTertiary,
                     in: Capsule()
                 )
         }
@@ -371,8 +352,10 @@ struct SpoolInventoryView: View {
                     } label: {
                         Label("Add spool", systemImage: "plus")
                             .font(.subheadline.weight(.semibold))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.vertical, 8)
                             .frame(maxWidth: .infinity, minHeight: 48)
-                            .foregroundStyle(Color.pfAccent)
+                            .foregroundStyle(Color.pfTextPrimary)
                             .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
                             .overlay {
                                 RoundedRectangle(cornerRadius: 12)
@@ -385,7 +368,6 @@ struct SpoolInventoryView: View {
                     .buttonStyle(.plain)
                     .accessibilityHint("Opens the form to register a filament spool.")
                     .accessibilityIdentifier("inventory.addSpool")
-                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
 
                     inventoryActions
                 }
@@ -407,6 +389,7 @@ struct SpoolInventoryView: View {
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
+                .accessibilityIdentifier("inventory.spoolList")
             }
             .onChange(of: viewModel.highlightedSpoolId) { _, newId in
                 // Scroll animation only. Highlight expiry is owned synchronously
@@ -625,7 +608,7 @@ struct SpoolInventoryRowView: View {
         if let vendor = spool.vendor, !vendor.isEmpty {
             Text("· \(vendor)")
                 .font(.caption2)
-                .foregroundStyle(Color.pfTextTertiary)
+                .foregroundStyle(Color.pfTextSecondary)
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -649,7 +632,7 @@ struct SpoolInventoryRowView: View {
                let remaining = spool.remainingWeightG, remaining.isFinite, remaining >= 0 {
                 Text("of \(Int(initial.rounded())) g")
                     .font(.caption2)
-                    .foregroundStyle(Color.pfTextTertiary)
+                    .foregroundStyle(Color.pfTextSecondary)
                 if let weightPercent {
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {

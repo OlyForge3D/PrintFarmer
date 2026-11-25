@@ -3,6 +3,11 @@ import Foundation
 // MARK: - Demo Job Analytics Service
 
 final class DemoJobAnalyticsService: JobAnalyticsServiceProtocol, @unchecked Sendable {
+    private let fixtureDate: Date?
+
+    init(fixtureDate: Date? = nil) {
+        self.fixtureDate = fixtureDate
+    }
 
     func getQueuedJobs(filterStatus: String?, filterModel: String?, filterMaterial: String?,
                        limit: Int?, offset: Int?) async throws -> [QueuedJobWithMeta] {
@@ -60,7 +65,7 @@ final class DemoJobAnalyticsService: JobAnalyticsServiceProtocol, @unchecked Sen
 
     func getHistory(limit: Int?, offset: Int?, sortBy: String?, statuses: String?,
                     dateStart: Date?, dateEnd: Date?) async throws -> QueueHistoryPage {
-        let now = Date()
+        let now = fixtureDate ?? Date()
         var entries = [
             QueueHistoryEntry(id: DemoData.job7ID.uuidString, jobName: "benchy_calibration.gcode",
                               printerName: "Prusa MK4 #2", status: "Completed",

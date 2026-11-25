@@ -14,6 +14,18 @@ struct SnapshotActivationPendingView: View {
     @State private var lastRetryFailed = false
 
     var body: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                content
+                    .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+            }
+        }
+        .background(Color(.systemBackground))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("snapshotActivationPendingView")
+    }
+
+    private var content: some View {
         VStack(spacing: 20) {
             Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
                 .resizable()
@@ -25,11 +37,13 @@ struct SnapshotActivationPendingView: View {
             Text("Farm data isn’t ready")
                 .font(.title2.bold())
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
 
             Text("You’re signed in, but your farm couldn’t finish loading. This usually clears up on retry.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 24)
 
             if lastRetryFailed {
@@ -37,6 +51,7 @@ struct SnapshotActivationPendingView: View {
                     .font(.footnote)
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 24)
                     .accessibilityLabel("Last retry did not succeed")
             }
@@ -76,10 +91,7 @@ struct SnapshotActivationPendingView: View {
             .padding(.horizontal, 24)
             .padding(.top, 8)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("snapshotActivationPendingView")
+        .padding(.vertical, 24)
     }
 
     @MainActor

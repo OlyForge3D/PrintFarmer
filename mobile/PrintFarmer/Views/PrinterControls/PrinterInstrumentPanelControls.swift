@@ -206,18 +206,19 @@ struct PrinterInstrumentPanelControls: View {
         return text == PrinterDetailViewModel.missingValuePlaceholder ? readoutPlaceholder : text
     }
 
-    /// One compact row at every text size, capped like the jog pad so it
-    /// never pushes the pad below the fold (#3496 N02/N03).
     private var positionReadout: some View {
-        HStack(alignment: .center, spacing: 8) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
+        return layout {
             readoutColumn("X", value: viewModel.printer.x)
-            readoutDivider()
+            if !dynamicTypeSize.isAccessibilitySize { readoutDivider() }
             readoutColumn("Y", value: viewModel.printer.y)
-            readoutDivider()
+            if !dynamicTypeSize.isAccessibilitySize { readoutDivider() }
             readoutColumn("Z", value: viewModel.printer.z)
         }
+        .padding(.horizontal, dynamicTypeSize.isAccessibilitySize ? 12 : 0)
         .padding(.vertical, 6)
-        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: Self.cornerRadius))
         .overlay { RoundedRectangle(cornerRadius: Self.cornerRadius).strokeBorder(Color.pfBorder) }
         .frame(maxWidth: Self.maximumJogPadWidth)
@@ -227,20 +228,25 @@ struct PrinterInstrumentPanelControls: View {
     }
 
     private func readoutColumn(_ axis: String, value: Double?) -> some View {
-        VStack(alignment: .center, spacing: 2) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+            : AnyLayout(VStackLayout(alignment: .center, spacing: 2))
+        return layout {
             Text(axis)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Color.pfTextSecondary)
             Text(Self.readoutText(axis: axis, value: value, homedAxes: viewModel.printer.homedAxes))
                 .font(.title3.monospacedDigit())
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 1 : 0.7)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, alignment: .center)
+        .frame(maxWidth: .infinity, alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .center)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Self.readoutAccessibilityLabel(
             axis: axis, value: value, homedAxes: viewModel.printer.homedAxes
         ))
+        .accessibilityAddTraits(.isStaticText)
         .accessibilityIdentifier("printer.controls.position.\(axis.lowercased())")
     }
 
@@ -312,13 +318,25 @@ struct PrinterInstrumentPanelControls: View {
                     .accessibilityIdentifier("printer.controls.motion-empty")
                 }
             } else {
-                HStack(alignment: .top, spacing: 12) {
-                    xyPad
-                    zColumn.frame(width: 72)
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(spacing: 12) {
+                        xyPad
+                        HStack(spacing: 6) {
+                            jog("Z", sign: 1, symbol: "chevron.up", title: "Z")
+                            home("Z", axes: ["Z"], accessibilityTitle: "Home Z") { await viewModel.homeZ() }
+                            jog("Z", sign: -1, symbol: "chevron.down", title: "Z")
+                        }
+                    }
+                    .frame(maxWidth: Self.maximumJogPadWidth)
+                    .frame(maxWidth: .infinity)
+                } else {
+                    HStack(alignment: .top, spacing: 12) {
+                        xyPad
+                        zColumn.frame(width: 72)
+                    }
+                    .frame(maxWidth: Self.maximumJogPadWidth)
+                    .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: Self.maximumJogPadWidth)
-                .frame(maxWidth: .infinity)
-                .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                 stepSelector(
                     title: "Jog distance (mm)",
                     options: Self.jogSteps,
@@ -406,12 +424,13 @@ struct PrinterInstrumentPanelControls: View {
         let available = viewModel.capabilities?.supportsHome(axes: axes) == true
         let pending = viewModel.pendingCommand?.kind == .home(axes: axes)
         return ControlActionButton(
-            title: label,
+            title: dynamicTypeSize.isAccessibilitySize ? "Home \(label)" : label,
             identifier: "printer.controls.home.\(label.lowercased())",
             accessibilityTitle: accessibilityTitle,
             hint: available ? "Homes \(axes.joined(separator: ", "))." : "This homing operation is unavailable.",
-            compact: true, systemImage: "house", value: pending ? "Pending" : nil,
-            textSize: 12, tinted: true, minimumHeight: 44, isPending: pending
+            compact: true, systemImage: dynamicTypeSize.isAccessibilitySize ? nil : "house",
+            value: pending ? "Pending" : nil,
+            textSize: 12, tinted: !dynamicTypeSize.isAccessibilitySize, minimumHeight: 44, isPending: pending
         ) { Task { await action() } }
         .frame(maxWidth: .infinity, minHeight: 44)
         .disabled(!available || !viewModel.canControl || viewModel.isExecuting)
@@ -613,12 +632,15 @@ struct PrinterInstrumentPanelControls: View {
         accessibilityLabel: @escaping (Double) -> String,
         capsWidth: Bool = true
     ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 2))
+            : AnyLayout(HStackLayout(spacing: 2))
+        return VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(Color.pfTextSecondary)
                 .accessibilityAddTraits(.isHeader)
-            HStack(spacing: 2) {
+            layout {
                 ForEach(options, id: \.self) { value in
                     ControlActionButton(
                         title: label(value),
@@ -627,13 +649,13 @@ struct PrinterInstrumentPanelControls: View {
                         selected: selection.wrappedValue == value,
                         compact: true, textSize: 14, segmented: true, minimumHeight: 44
                     ) { selection.wrappedValue = value }
+                    .frame(maxWidth: .infinity)
                     .accessibilityAddTraits(selection.wrappedValue == value ? .isSelected : [])
                 }
             }
             .padding(2)
             .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: Self.cornerRadius))
         }
-        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         // Move caps to the jog pad; Tune rows span the full panel width.
         .frame(maxWidth: capsWidth ? Self.maximumJogPadWidth : .infinity)
         .frame(maxWidth: .infinity)

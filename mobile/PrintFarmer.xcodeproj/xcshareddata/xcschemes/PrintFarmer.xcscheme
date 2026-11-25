@@ -42,6 +42,9 @@
          <TestPlanReference
             reference = "container:AppStoreScreenshots.xctestplan">
          </TestPlanReference>
+         <TestPlanReference
+            reference = "container:CatalogVisualAccessibility.xctestplan">
+         </TestPlanReference>
       </TestPlans>
    </TestAction>
    <LaunchAction

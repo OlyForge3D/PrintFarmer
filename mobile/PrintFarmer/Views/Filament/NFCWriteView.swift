@@ -20,31 +20,41 @@ struct NFCWriteView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 24) {
-                spoolSummary
+            ScrollView {
+                VStack(spacing: 16) {
+                    spoolSummary
 
-                Divider()
+                    Divider()
 
-                statusArea
+                    statusArea
 
-                if case .ready = writeState {
-                    fieldPreview
+                    if case .ready = writeState {
+                        fieldPreview
+                    }
                 }
-
-                Spacer()
-
-                actionButtons
+                .padding()
             }
-            .padding()
+            .accessibilityIdentifier("nfcWrite.preview")
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 8) {
+                    actionButtons
+                    Button {
+                        dismiss()
+                    } label: {
+                        Text("Cancel")
+                            .fullWidthActionButton()
+                            .foregroundStyle(Color.pfTextPrimary)
+                            .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: 10))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding()
+                .background(.bar)
+            }
             .navigationTitle("Write NFC Tag")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
             .onDisappear { writeTask?.cancel() }
         }
     }
@@ -83,7 +93,7 @@ struct NFCWriteView: View {
                 if let remaining = spool.remainingWeightG {
                     Text("\(Int(remaining))g remaining")
                         .font(.caption)
-                        .foregroundStyle(Color.pfTextTertiary)
+                        .foregroundStyle(Color.pfTextSecondary)
                 }
             }
 
@@ -130,14 +140,16 @@ struct NFCWriteView: View {
     }
 
     private func fieldRow(_ label: String, _ value: String?) -> some View {
-        HStack {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(label)
                 .font(.caption)
-                .foregroundStyle(Color.pfTextTertiary)
-                .frame(width: 130, alignment: .leading)
+                .foregroundStyle(Color.pfTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
             Text(value ?? "—")
                 .font(.caption.monospaced())
-                .foregroundStyle(Color.pfTextSecondary)
+                .foregroundStyle(Color.pfTextPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
         }
     }
 
@@ -151,6 +163,7 @@ struct NFCWriteView: View {
                 Image(systemName: "wave.3.right")
                     .font(.system(size: 48))
                     .foregroundStyle(Color.pfAccent)
+                    .accessibilityHidden(true)
 
                 Text("Format: \(nfcTagFormat.rawValue)")
                     .font(.caption.weight(.medium))
@@ -159,7 +172,7 @@ struct NFCWriteView: View {
                     .background(Color.pfBackgroundTertiary, in: Capsule())
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
+            .padding(.vertical, 8)
 
         case .writing:
             VStack(spacing: 16) {
@@ -180,6 +193,7 @@ struct NFCWriteView: View {
                     .font(.system(size: 48))
                     .foregroundStyle(Color.pfSuccess)
                     .symbolEffect(.bounce, value: true)
+                    .accessibilityHidden(true)
 
                 Text("NFC tag written successfully!")
                     .font(.subheadline.weight(.medium))
@@ -193,6 +207,7 @@ struct NFCWriteView: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 48))
                     .foregroundStyle(Color.pfError)
+                    .accessibilityHidden(true)
 
                 Text(message)
                     .font(.subheadline)
@@ -217,7 +232,7 @@ struct NFCWriteView: View {
                     .fullWidthActionButton(prominence: .prominent)
             }
             .buttonStyle(.borderedProminent)
-            .tint(Color.pfAccent)
+            .tint(Color.pfButtonPrimary)
 
         case .writing:
             EmptyView()
@@ -225,24 +240,18 @@ struct NFCWriteView: View {
         case .success:
             Button("Done") { dismiss() }
                 .buttonStyle(.borderedProminent)
-                .tint(Color.pfAccent)
+                .tint(Color.pfButtonPrimary)
                 .fullWidthActionButton()
 
         case .error:
-            HStack(spacing: 10) {
-                Button {
-                    writeTask = Task { await performWrite() }
-                } label: {
-                    Label("Retry", systemImage: "arrow.clockwise")
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.pfAccent)
-
-                Button("Cancel") { dismiss() }
-                    .buttonStyle(.bordered)
-                    .frame(maxWidth: .infinity, minHeight: 44)
+            Button {
+                writeTask = Task { await performWrite() }
+            } label: {
+                Label("Retry", systemImage: "arrow.clockwise")
+                    .fullWidthActionButton(prominence: .prominent)
             }
+            .buttonStyle(.borderedProminent)
+            .tint(Color.pfButtonPrimary)
         }
     }
 

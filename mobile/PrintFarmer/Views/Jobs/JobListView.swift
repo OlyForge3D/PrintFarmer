@@ -166,8 +166,13 @@ struct JobListView: View {
                 }
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") {
+                        Button {
                             showsJobHistory = false
+                        } label: {
+                            Text("Done")
+                                .font(.body)
+                                .foregroundStyle(Color.pfTextPrimary)
+                                .frame(minWidth: 44, minHeight: 44)
                         }
                     }
                 }
@@ -248,10 +253,11 @@ struct JobListView: View {
                             HStack {
                                 Label("Queued", systemImage: "tray.full")
                                     .font(.subheadline.weight(.semibold))
+                                    .fixedSize(horizontal: false, vertical: true)
                                 Spacer()
                                 Text(viewModel.queueSectionCountText(for: viewModel.queuedJobs.count))
                                     .font(.caption.monospacedDigit())
-                                    .foregroundStyle(Color.pfTextTertiary)
+                                    .foregroundStyle(Color.pfTextSecondary)
                             }
                             if viewModel.canReorderQueue && !viewModel.reorderableQueuedJobs.isEmpty {
                                 Text("Drag to reorder")
@@ -272,11 +278,10 @@ struct JobListView: View {
                             Text(viewModel.queueSectionCountText(for: viewModel.queuedJobs.count))
                                 .font(.caption.monospacedDigit())
                                 .monospacedDigit()
-                                .foregroundStyle(Color.pfTextTertiary)
+                                .foregroundStyle(Color.pfTextSecondary)
                         }
                     }
                 }
-                .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("jobList.section.queued")
             }
@@ -294,7 +299,6 @@ struct JobListView: View {
                             retryTask = Task { await viewModel.loadJobs() }
                         }
                     }
-                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                 } header: {
                     recentFailuresHeader(count: 0)
                         .accessibilityIdentifier("jobList.section.recent-failures")
@@ -335,8 +339,7 @@ struct JobListView: View {
         HStack {
             Label("Recent failures", systemImage: "exclamationmark.triangle")
                 .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
+                .fixedSize(horizontal: false, vertical: true)
             Spacer()
             Menu {
                 Button {
@@ -348,7 +351,7 @@ struct JobListView: View {
                 .accessibilityIdentifier("jobList.history.select")
             } label: {
                 Image(systemName: "ellipsis")
-                    .frame(width: 32, height: 32)
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("Job history")
@@ -356,9 +359,8 @@ struct JobListView: View {
             .accessibilityIdentifier("jobList.history.open")
             Text("\(count)")
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(Color.pfTextTertiary)
+                .foregroundStyle(Color.pfTextSecondary)
         }
-        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
         .accessibilityElement(children: .contain)
     }
 
@@ -366,13 +368,13 @@ struct JobListView: View {
         HStack {
             Label(title, systemImage: systemImage)
                 .font(.subheadline.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
             Spacer()
             Text(countText)
                 .font(.caption.monospacedDigit())
                 .monospacedDigit()
-                .foregroundStyle(Color.pfTextTertiary)
+                .foregroundStyle(Color.pfTextSecondary)
         }
-        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
     }
@@ -654,23 +656,12 @@ struct JobListView: View {
 
     private func recentFailureRow(_ item: QueueHistoryEntry) -> some View {
         let jobID = UUID(uuidString: item.id)
-        return Group {
-            if dynamicTypeSize.isAccessibilitySize {
-                HStack(alignment: .top, spacing: 8) {
-                    recentFailureNavigationLink(item, id: jobID)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    if let jobID {
-                        rerunFailedJobButton(id: jobID)
-                    }
-                }
-            } else {
-                HStack(alignment: .top, spacing: 12) {
-                    recentFailureNavigationLink(item, id: jobID)
-                        .layoutPriority(1)
-                    if let jobID {
-                        rerunFailedJobButton(id: jobID)
-                    }
-                }
+        return HStack(alignment: .top, spacing: dynamicTypeSize.isAccessibilitySize ? 8 : 12) {
+            recentFailureNavigationLink(item, id: jobID)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+            if let jobID {
+                rerunFailedJobButton(id: jobID)
             }
         }
     }
@@ -702,10 +693,10 @@ struct JobListView: View {
         } label: {
             Text("Retry")
                 .font(.subheadline.weight(.semibold))
-                .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
-                .foregroundStyle(Color.pfAccent)
+                .foregroundStyle(Color.pfTextPrimary)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
+                .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -724,28 +715,26 @@ struct JobListView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(item.jobName)
                                 .font(.subheadline)
-                                .dynamicTypeSize(.xxxLarge)
-                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
                             StatusBadge(jobStatus: .failed)
-                                .dynamicTypeSize(.xxxLarge)
                         }
                     }
                     VStack(alignment: .leading, spacing: 4) {
                         Text(recentFailureSummary(item))
                             .font(.caption)
-                            .dynamicTypeSize(.xxxLarge)
                             .foregroundStyle(Color.pfError)
+                            .fixedSize(horizontal: false, vertical: true)
                         if let printerName = item.printerName {
                             Text(printerName)
                                 .font(.caption)
-                                .dynamicTypeSize(.xxxLarge)
                                 .foregroundStyle(Color.pfTextSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         if let completedAt = item.completedAt {
                             Text(completedAt.formatted(date: .omitted, time: .shortened))
                                 .font(.caption2)
-                                .dynamicTypeSize(.xxxLarge)
-                                .foregroundStyle(Color.pfTextTertiary)
+                                .foregroundStyle(Color.pfTextSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
@@ -775,7 +764,7 @@ struct JobListView: View {
                             if let completedAt = item.completedAt {
                                 Text(completedAt.formatted(date: .omitted, time: .shortened))
                                     .font(.caption2)
-                                    .foregroundStyle(Color.pfTextTertiary)
+                                    .foregroundStyle(Color.pfTextSecondary)
                                     .lineLimit(1)
                             }
                         }
@@ -834,25 +823,22 @@ struct JobListView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(item.job.name)
                                     .font(.subheadline)
-                                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
-                                    .lineLimit(2)
+                                    .fixedSize(horizontal: false, vertical: true)
                                 StatusBadge(jobStatus: item.job.jobStatus)
-                                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                             }
                         }
                         VStack(alignment: .leading, spacing: 4) {
                             if let printerName = item.job.printerName {
                                 Text(printerName)
                                     .font(.caption)
-                                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                                     .foregroundStyle(.secondary)
-                                    .lineLimit(1)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             if let endTime = item.job.actualEndTimeUtc {
                                 Text(endTime.relativeFormatted)
                                     .font(.caption2)
-                                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
-                                    .foregroundStyle(.tertiary)
+                                    .foregroundStyle(Color.pfTextSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                     }
@@ -877,7 +863,7 @@ struct JobListView: View {
                                 if let endTime = item.job.actualEndTimeUtc {
                                     Text(endTime.relativeFormatted)
                                         .font(.caption2)
-                                        .foregroundStyle(.tertiary)
+                                        .foregroundStyle(Color.pfTextSecondary)
                                 }
                             }
                             if let reason = item.job.failureReason, item.job.jobStatus == .failed {

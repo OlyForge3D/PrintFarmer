@@ -231,6 +231,16 @@ final class AuthViewModel {
         errorMessage = nil
     }
 
+    #if DEBUG
+    func holdCatalogRootState(arguments: [String], user: UserDTO) {
+        guard let state = UITestBootstrap.catalogRootState(in: arguments),
+              state == .loading || state == .snapshot else { return }
+        markAuthenticatedForUITesting(user: user)
+        isLoading = state == .loading
+        snapshotActivationPending = state == .snapshot
+    }
+    #endif
+
     // MARK: - Login / Logout
 
     func login(serverURL: String, username: String, password: String) async {

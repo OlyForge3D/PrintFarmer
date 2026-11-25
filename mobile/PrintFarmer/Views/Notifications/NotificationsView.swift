@@ -47,10 +47,15 @@ struct NotificationsView: View {
                 } description: {
                     Text(error)
                 } actions: {
-                    Button("Retry") {
+                    Button {
                         let task = Task { await viewModel.loadNotifications() }
                         activeTasks.append(task)
+                    } label: {
+                        Text("Retry")
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
+                    .accessibilityIdentifier("notifications.retry")
                 }
             } else if viewModel.notifications.isEmpty {
                 EmptyStateView(

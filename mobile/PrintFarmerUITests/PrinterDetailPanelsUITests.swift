@@ -108,7 +108,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
 
     #if DEBUG
     @MainActor
-    class Issue3259MockupCaptureUITests: PrintFarmerUITestCase {
+    class Issue3259MockupTestBase: PrintFarmerUITestCase {
         /// #3509 sorts the Farm by state group, then name, so at large text sizes
         /// the card can sit below the fold or under the Scan dock. tap() targets its
         /// centre, so filter the Farm by name and tap the card's top edge clear of the dock.
@@ -194,6 +194,21 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             ]
         }
 
+        func attachScreen(_ name: String) {
+            let screenshot = XCUIScreen.main.screenshot()
+            let image = screenshot.image
+            let normalizedImage = UIGraphicsImageRenderer(size: image.size).image { _ in
+                image.draw(in: CGRect(origin: .zero, size: image.size))
+            }
+            let attachment = XCTAttachment(image: normalizedImage)
+            attachment.name = "Issue 3259 \(name)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
+    @MainActor
+    class Issue3259MockupCaptureUITests: Issue3259MockupTestBase {
         @discardableResult
         private func assertAccountToolbar() -> XCUIElement {
             let account = app.descendants(matching: .any)["navigation.account"]
@@ -514,14 +529,17 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 }
                 if panel == "Status" {
                     XCTAssertTrue(app.staticTexts["Print progress 64 percent"].waitForExistence(timeout: 5))
-                    XCTAssertTrue(app.staticTexts["benchy_0.2mm_PLA.gcode"].exists)
+                    XCTAssertEqual(
+                        app.staticTexts["printer.detail.job.name"].label,
+                        "Current print, benchy_0.2mm_PLA.gcode"
+                    )
                     let remainingTime = app.staticTexts
-                        .matching(identifier: "printer.detail.job")
+                        .matching(identifier: "printer.detail.job.fact.remaining")
                         .matching(NSPredicate(format: "label CONTAINS %@", "38m"))
                         .firstMatch
                     XCTAssertTrue(remainingTime.waitForExistence(timeout: 5))
                     let finishTime = app.staticTexts
-                        .matching(identifier: "printer.detail.job")
+                        .matching(identifier: "printer.detail.job.fact.eta")
                         .matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT label CONTAINS %@", "Done at", "Unknown"))
                         .firstMatch
                     XCTAssertTrue(finishTime.exists)
@@ -634,18 +652,6 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 let printStateSuffix = ["Control", "Queue"].contains(panel) ? "-active-print" : ""
                 attachScreen("\(device)-\(size)-printer-\(panel.lowercased())\(printStateSuffix)")
             }
-        }
-
-        func attachScreen(_ name: String) {
-            let screenshot = XCUIScreen.main.screenshot()
-            let image = screenshot.image
-            let normalizedImage = UIGraphicsImageRenderer(size: image.size).image { _ in
-                image.draw(in: CGRect(origin: .zero, size: image.size))
-            }
-            let attachment = XCTAttachment(image: normalizedImage)
-            attachment.name = "Issue 3259 \(name)"
-            attachment.lifetime = .keepAlways
-            add(attachment)
         }
 
         private func swipeUp(on page: XCUIElement) {
@@ -762,9 +768,13 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             NSPredicate(format: "identifier BEGINSWITH %@", "printer.detail.destination.")
         ).firstMatch
         XCTAssertTrue(printerName.exists)
-        XCTAssertGreaterThanOrEqual(identity.frame.height, printerName.frame.height)
-        XCTAssertGreaterThanOrEqual(printerName.frame.minY, identity.frame.minY)
-        XCTAssertLessThanOrEqual(printerName.frame.maxY, identity.frame.maxY)
+        XCTAssertGreaterThan(printerName.frame.height, 32, "Printer name must scale at the largest text size")
+        XCTAssertGreaterThanOrEqual(identity.frame.height + 1, printerName.frame.height)
+        XCTAssertGreaterThanOrEqual(printerName.frame.minY + 1, identity.frame.minY)
+        XCTAssertLessThanOrEqual(printerName.frame.maxY, identity.frame.maxY + 1)
+        let farm = app.buttons["printer.detail.farm"]
+        XCTAssertTrue(farm.isHittable)
+        XCTAssertGreaterThan(farm.frame.height, 44, "Farm navigation must scale at the largest text size")
         let selector = app.descendants(matching: .any)
             .matching(identifier: "printer.detail.panel.selector").firstMatch
         XCTAssertTrue(selector.exists)
@@ -801,6 +811,15 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                     statusContent.frame.maxY, page.frame.maxY + 1,
                     "The end of the Status content must fit or be reachable by scrolling"
                 )
+                let progress = app.staticTexts.matching(
+                    NSPredicate(format: "label BEGINSWITH %@", "Print progress ")
+                ).firstMatch
+                XCTAssertGreaterThan(progress.frame.height, 50, "Progress must scale at the largest text size")
+                for identifier in ["printer.detail.control.pause", "printer.detail.control.cancel"] {
+                    let action = app.buttons[identifier]
+                    XCTAssertTrue(action.isHittable, "\(identifier) must remain reachable at the largest text size")
+                    XCTAssertGreaterThan(action.frame.height, 52, "\(identifier) must scale beyond the capped size")
+                }
             }
             let emergency = app.buttons["printer.detail.control.emergencyStop"]
             if title == "Control" {
@@ -1649,9 +1668,51 @@ final class Issue3484MissingRuntimeFactorsUITests: PrinterDetailPanelsUITests.Is
 }
 
 @MainActor
-final class Issue3259ControlIdleAccessibilityUITests: Issue3259ControlIdleUITests {
+final class Issue3259ControlIdleAccessibilityUITests: PrinterDetailPanelsUITests.Issue3259MockupTestBase {
     override var contentSizeCategory: String {
         "UICTContentSizeCategoryAccessibilityXXXL"
+    }
+
+    override var additionalLaunchArguments: [String] {
+        super.additionalLaunchArguments + ["--uitesting-issue3259-control-idle"]
+    }
+
+    func testPositionReadoutsAndMotionControlsAtLargestTextSize() {
+        openFarmCard("10000000-0001-0000-0000-000000000001")
+        let control = app.buttons["printer.detail.panel.select.control"]
+        if control.waitForExistence(timeout: 3) {
+            control.tap()
+        } else {
+            let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
+            XCTAssertTrue(selector.waitForExistence(timeout: 8))
+            selector.buttons["Control"].tap()
+        }
+        let scroll = app.scrollViews.containing(.other, identifier: "printer.controls.instrument-panel").firstMatch
+        XCTAssertTrue(scroll.waitForExistence(timeout: 8))
+        func scrollDown() {
+            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+            let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+        for axis in ["x", "y", "z"] {
+            let readout = app.staticTexts["printer.controls.position.\(axis)"]
+            for _ in 0..<20 where !readout.isHittable { scrollDown() }
+            XCTAssertTrue(readout.isHittable)
+            XCTAssertGreaterThan(readout.frame.height, 40)
+        }
+        attachScreen("control-largest-position")
+        let motion = app.buttons["printer.controls.home.all"]
+        for _ in 0..<20 where !motion.isHittable { scrollDown() }
+        XCTAssertTrue(motion.isHittable)
+        XCTAssertGreaterThan(motion.frame.height, 44, "Homing controls grow with Dynamic Type")
+        attachScreen("control-largest-motion")
+        for value in ["1", "10", "50"] {
+            let step = app.buttons["printer.controls.jog.step.\(value)"]
+            for _ in 0..<20 where !step.isHittable { scrollDown() }
+            XCTAssertTrue(step.isHittable, "Jog distance \(value) remains reachable")
+            XCTAssertGreaterThan(step.frame.height, 44, "Jog distance \(value) grows with Dynamic Type")
+        }
+        attachScreen("control-largest-jog-distance")
     }
 }
 
@@ -1738,6 +1799,7 @@ final class Issue3496SnapshotCameraLayoutUITests: Issue3496CameraLayoutUITests {
             buttons: ["printer.detail.camera.rotate", "printer.detail.camera.refresh"],
             name: "camera-snapshot"
         )
+        XCTAssertTrue(app.images["Printer camera snapshot"].waitForExistence(timeout: 5))
         // Same header in every mode: the badge is gone (#3496 N08).
         XCTAssertFalse(app.staticTexts["SNAPSHOT"].exists)
         XCTAssertFalse(app.staticTexts["LIVE"].exists)
@@ -1752,6 +1814,7 @@ final class Issue3496SnapshotCameraLayoutUITests: Issue3496CameraLayoutUITests {
             buttons: ["printer.detail.camera.rotate", "printer.detail.camera.refresh"],
             name: "camera-snapshot-rotated-90"
         )
+        XCTAssertTrue(app.images["Printer camera snapshot"].exists)
     }
 }
 
