@@ -1001,6 +1001,12 @@ public class PrintersControllerControlGuardsTests
 
         OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Empty(Assert.IsAssignableFrom<IEnumerable<PrinterBackendCapabilitiesDto>>(ok.Value));
+        capabilities.Verify(service => service.GetByIdsAsync(
+            It.Is<Guid[]>(ids => ids.Length == 0),
+            It.IsAny<CancellationToken>()), Times.Once);
+        capabilities.Verify(service => service.GetByIdsAsync(
+            It.Is<Guid[]>(ids => ids.Length > 0),
+            It.IsAny<CancellationToken>()), Times.Never);
         capabilities.Verify(service => service.GetAllAsync(It.IsAny<CancellationToken>()), Times.Never);
         printersService.Verify(service => service.GetAllAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
