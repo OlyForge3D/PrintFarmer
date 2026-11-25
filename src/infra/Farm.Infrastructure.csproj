@@ -31,7 +31,7 @@
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.15" />
-    <PackageReference Include="Npgsql" Version="11.0.0" />
+    <PackageReference Include="Npgsql" Version="10.0.4" />
     <PackageReference Include="QuestPDF" Version="2026.2.3" />
     <PackageReference Include="Refit.HttpClientFactory" Version="15.2.0" />
     <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="3.53.3" />
