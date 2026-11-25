@@ -2,7 +2,6 @@ import { MovementControlSection } from '@/features/printers/components/MovementC
 import { PrinterActionBar } from '@/features/printers/components/PrinterActionBar';
 import { CancelPrintConfirmation } from '@/features/printers/components/CancelPrintConfirmation';
 import { usePrinterControls } from '@/features/printers/hooks/use-printer-controls';
-import { PrinterServiceStatus } from '@/features/printers/components/PrinterServiceStatus';
 import { BedClearEvidencePanel } from '@/features/printers/components/BedClearEvidencePanel';
 import { RuntimeFactorControls } from '@/features/printers/components/RuntimeFactorControls';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
@@ -134,12 +133,11 @@ interface PrinterDetailsSidebarProps {
   printer?: Printer;
   backendCapabilities?: PrinterBackendCapabilitiesDto;
   onClose: () => void;
-  onToggleEnabled?: (printer: Printer) => void | Promise<void>;
   /** Layout mode: drawer panel or bounded content panel. */
   layout?: 'panel' | 'content';
 }
 
-export function PrinterDetailsSidebar({ printerId, printer: printerProp, backendCapabilities, onClose, onToggleEnabled, layout = 'panel' }: PrinterDetailsSidebarProps) {
+export function PrinterDetailsSidebar({ printerId, printer: printerProp, backendCapabilities, onClose, layout = 'panel' }: PrinterDetailsSidebarProps) {
   // Call hooks first before any early returns (React Rules of Hooks)
   // Only fetch if printer prop is not provided
   const shouldFetch = !printerProp && !!printerId;
@@ -442,9 +440,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             </div>
             <p className="text-xs text-pf-text-secondary">{formatPrinterModelSubtitle(printer.manufacturerName, printer.modelName)}</p>
             <p className="text-xs text-pf-text-secondary mt-1">Live printer controls and status</p>
-            <div className="mt-2">
-              <PrinterServiceStatus printer={printer} onToggleEnabled={onToggleEnabled} />
-            </div>
           </div>
           <Button
             type="button"

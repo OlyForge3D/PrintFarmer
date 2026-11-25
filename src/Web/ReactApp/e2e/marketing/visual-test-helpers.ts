@@ -237,6 +237,8 @@ export async function prepareVisualScene(context: BrowserContext, page: Page, sc
             url.searchParams.get('tab') === 'profile' &&
             url.searchParams.get('sub') === 'appearance',
           );
+          await expect(page.getByRole('heading', { name: 'Appearance', exact: true })).toBeVisible();
+          await expect(page.getByRole('heading', { name: 'Appearance', exact: true })).toBeVisible();
         }
       }
       if (scene.keyboardTraversal) {

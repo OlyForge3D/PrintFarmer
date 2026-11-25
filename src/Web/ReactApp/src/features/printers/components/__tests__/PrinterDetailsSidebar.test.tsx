@@ -292,6 +292,13 @@ describe("PrinterDetailsSidebar", () => {
     }
   });
 
+  it.each([true, false])("does not show service status in the sidebar when isEnabled is %s", (isEnabled) => {
+    render(<PrinterDetailsSidebar printerId={printer.id} printer={{ ...printer, isEnabled }} onClose={vi.fn()} />);
+    const sidebar = screen.getByRole("complementary", { name: `${printer.name} details` });
+    expect(within(sidebar).getByText("Live printer controls and status")).toBeInTheDocument();
+    expect(within(sidebar).queryByText(/^(In|Out of) Service$/i)).not.toBeInTheDocument();
+  });
+
   it("only cancels after explicit confirmation and leaves pause unchanged", async () => {
     render(<PrinterDetailsSidebar printerId={printer.id} printer={{ ...printer, state: "Printing", jobName: "benchy.gcode" }}
       backendCapabilities={capabilities()} onClose={vi.fn()} />);
