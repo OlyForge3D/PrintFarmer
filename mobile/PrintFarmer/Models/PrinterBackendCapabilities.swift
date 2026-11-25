@@ -8,6 +8,7 @@ struct PrinterBackendCapabilities: Codable, Equatable, Sendable {
     let supportsTemperatureControl: Bool
     let supportsBedTemperature: Bool
     let supportsFanControl: Bool
+    var movementSupportStatus: PrinterMovementSupportStatus? = nil
     var supportsFanSpeedReadback: Bool = false
     var supportsSensorTelemetry: Bool = false
     var supportsSensorControl: Bool = false
@@ -47,6 +48,7 @@ struct PrinterBackendCapabilities: Codable, Equatable, Sendable {
         PrinterBackendCapabilities(
             supportsMovement: false, supportsTemperatureControl: false,
             supportsBedTemperature: false, supportsFanControl: false,
+            movementSupportStatus: .unknown,
             supportsHoming: false, supportedAxes: []
         )
     }
@@ -62,6 +64,18 @@ extension PrinterBackendCapabilities {
             supportsHoming: wire.supportsHoming == true,
             supportedAxes: (wire.supportedAxes ?? []).map { $0.uppercased() }.filter { ["X", "Y", "Z"].contains($0) }
         )
+        if let movementSupportStatus = wire.movementSupportStatus {
+            self.movementSupportStatus = movementSupportStatus
+        } else if wire.supportsMovement == true {
+            self.movementSupportStatus = .supported
+        } else {
+            switch wire.backend {
+            case .prusaLink?, .unknown?, nil:
+                self.movementSupportStatus = .unknown
+            default:
+                self.movementSupportStatus = .unsupported
+            }
+        }
         supportsAbsoluteMovement = wire.supportsAbsoluteMovement == true
         supportsDisableMotors = wire.supportsDisableMotors == true
         supportsExtrusion = wire.supportsExtrusion == true
@@ -157,6 +171,7 @@ struct PrinterBackendCapabilitiesWireDto: Codable, Sendable {
     let printerName: String?
     let backend: PrinterBackend?
     let supportsMovement: Bool?
+    let movementSupportStatus: PrinterMovementSupportStatus?
     let supportsTemperatureControl: Bool?
     let supportsFanControl: Bool?
     let supportsFanSpeedReadback: Bool?
@@ -194,6 +209,16 @@ struct PrinterBackendCapabilitiesWireDto: Codable, Sendable {
     var supportsFlowFactorControl: Bool?
     let supportedAxes: [String]?
     var verifiedSafety: PrinterVerifiedSafetyDto?
+}
+
+enum PrinterMovementSupportStatus: String, Codable, Sendable {
+    case supported = "Supported"
+    case unsupported = "Unsupported"
+    case unknown = "Unknown"
+
+    init(from decoder: Decoder) throws {
+        self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+    }
 }
 
 // Mirrors src/infra/Models/PrinterSafetyContracts.cs, including string enums.

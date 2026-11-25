@@ -161,7 +161,7 @@
     <PackageReference Include="SonarAnalyzer.CSharp" Version="10.28.0.143324" PrivateAssets="all" />
     <PackageReference Include="StyleCop.Analyzers" Version="1.2.0-beta.556" PrivateAssets="all" />
     <!-- Global overrides for vulnerable transitive dependencies -->
-    <!-- These fix high-severity vulnerabilities in packages pulled in by Refit, SignalR, etc. -->
+    <!-- These fix high-severity vulnerabilities in dependencies used across the solution. -->
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="Microsoft.AspNetCore.WebSockets" Version="2.3.14" />
     <PackageReference Include="System.Net.WebSockets.WebSocketProtocol" Version="5.1.3" />

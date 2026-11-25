@@ -303,7 +303,7 @@ struct PrinterInstrumentPanelControls: View {
                             .font(.subheadline)
                             .foregroundStyle(Color.pfTextTertiary)
                             .accessibilityHidden(true)
-                        Text(viewModel.capabilities == nil ? "Checking motion support…" : "Motion controls are unavailable on this printer.")
+                        Text(motionUnavailableMessage)
                             .font(.footnote)
                             .foregroundStyle(Color.pfTextSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -332,6 +332,21 @@ struct PrinterInstrumentPanelControls: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.controls.motion-group")
+    }
+
+    private var motionUnavailableMessage: String {
+        guard viewModel.capabilities != nil else {
+            return "Checking motion support…"
+        }
+
+        switch viewModel.capabilities?.movementSupportStatus ?? .unknown {
+        case .unknown:
+            return "PrintFarmer could not confirm remote Home and jog support. Check the printer connection and credentials. Use the printer's physical controls while remote motion is unavailable."
+        case .unsupported:
+            return "Remote Home and jog controls are not supported by this printer's API. Use the printer's physical controls."
+        case .supported:
+            return "Motion controls are unavailable on this printer."
+        }
     }
 
     private var xyPad: some View {

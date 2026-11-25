@@ -51,7 +51,7 @@ export function MovementInput({
         onChange={onChange}
         disabled={disabled}
         aria-label={`${axis} ${coordinateMode === 'absolute' ? 'absolute target' : 'movement amount'}`}
-        className={`w-full min-w-0 h-8 pl-6 pr-2 text-xs text-right [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:m-0 ${className ?? ''}`}
+        className={`w-full min-w-0 h-11 sm:h-8 pl-6 pr-2 text-xs text-right [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:m-0 ${className ?? ''}`}
         {...props}
       />
     </div>

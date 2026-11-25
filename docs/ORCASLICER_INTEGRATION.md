@@ -1489,7 +1489,7 @@ Both functions are driven by `orca-settings-version-delta.ts`, a hand-maintained
 
 `MetadataProfileEditor` (used by `SlicerSettingsPanel` and therefore by `NewSliceJobPage`) accepts an optional `engineVersion?: string` prop and calls `getMetadataForVersion(engineVersion)` inside a `useMemo`. All tabs/sections/settings the user sees come from the returned scoped bundle — so:
 
-- 2.4-added fields disappear from tabs and from the "Other Settings" fallback when the job is pinned to 2.3.1.
+- 2.4-added fields disappear from tabs when the job is pinned to 2.3.1.
 - Renamed fields render under the version-correct key (older key on 2.3.1, newer key on 2.4.1) when a rename is declared in the delta.
 
 `NewSliceJobPage` computes `effectiveEngineVersion = selectedEngineVersion ?? latestAvailableForEngine` and passes it to `<SlicerSettingsPanel>`. A dedicated `useEffect` on `effectiveEngineVersion` runs `scrubSettingsForVersion` against **all three** in-flight settings state objects atomically — `advancedProcessSettings` (dynamic dict), `slicerSettings` (typed OrcaProcessSettings the inline editor writes to), and `originalProcessSettings` (baseline snapshot used by `diffProcessOverrides` at submit time). This is what makes the added/removed/renamed guarantee real:

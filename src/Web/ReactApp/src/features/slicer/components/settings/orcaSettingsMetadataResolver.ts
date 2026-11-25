@@ -48,13 +48,15 @@ type MetadataBundle = {
 
 const RAW_METADATA = metadata as unknown as MetadataBundle & { _meta?: unknown; icons?: unknown };
 
-function cloneTab(tab: TabLayout, keptKeys: Set<string>): TabLayout {
+function cloneTab(tab: TabLayout, keptKeys: Set<string>, renamedKeys: Record<string, string>): TabLayout {
   return {
     ...tab,
     sections: tab.sections
       .map((s) => ({
         ...s,
-        fields: s.fields.filter((f) => keptKeys.has(f.key)),
+        fields: s.fields
+          .map((f) => renamedKeys[f.key] ? { ...f, key: renamedKeys[f.key] } : f)
+          .filter((f) => keptKeys.has(f.key)),
       }))
       .filter((s) => s.fields.length > 0),
   };
@@ -77,8 +79,14 @@ function cloneProfileTypeMetadata(
     settings[thisKey] = { ...m, key: thisKey };
     delete settings[newKey];
   }
+  const renamedKeys = Object.fromEntries(
+    Object.entries(renameFromThisToNew)
+      .filter(([thisKey, newKey]) => src.settings[newKey] && settings[thisKey])
+      .map(([thisKey, newKey]) => [newKey, thisKey]),
+  );
+  const keptSettings = new Set(Object.keys(settings));
   const tabs = src.tabs
-    .map((t) => cloneTab(t, new Set(Object.keys(settings))))
+    .map((t) => cloneTab(t, keptSettings, renamedKeys))
     .filter((t) => t.sections.length > 0);
   return { tabs, settings };
 }

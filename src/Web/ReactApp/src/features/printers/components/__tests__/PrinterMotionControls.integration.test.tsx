@@ -18,6 +18,7 @@ import {
   MmuGateStatus,
   type Printer,
   type PrinterBackendCapabilitiesDto,
+  type PrinterMovementSupportStatus,
   type MmuStatus,
   type ToolheadDto,
 } from "@/types/api";
@@ -175,6 +176,7 @@ const printer: Printer = {
 const capabilities = {
   printerId: printer.id,
   supportsMovement: true,
+  movementSupportStatus: 'Supported',
   supportsRelativeMovement: true,
   supportsAbsoluteMovement: true,
   supportsHoming: true,
@@ -187,9 +189,16 @@ const capabilities = {
   supportsObjectExclusion: false,
 } as PrinterBackendCapabilitiesDto;
 type Surface = "detail" | "sidebar";
-function Controls({ surface, overrides = {}, movement = true, factors = false }: { surface: Surface; overrides?: Partial<Printer & { mmuStatus: MmuStatus }>; movement?: boolean; factors?: boolean }) {
+function Controls({ surface, overrides = {}, movement = true, movementSupportStatus, factors = false }: { surface: Surface; overrides?: Partial<Printer & { mmuStatus: MmuStatus }>; movement?: boolean; movementSupportStatus?: PrinterMovementSupportStatus; factors?: boolean }) {
   const current = { ...printer, ...overrides };
-  const support = { ...capabilities, supportsMovement: movement, supportsRelativeMovement: movement, supportsSpeedFactorControl: factors, supportsFlowFactorControl: factors };
+  const support = {
+    ...capabilities,
+    supportsMovement: movement,
+    supportsRelativeMovement: movement,
+    movementSupportStatus: movementSupportStatus ?? (movement ? 'Supported' : 'Unsupported'),
+    supportsSpeedFactorControl: factors,
+    supportsFlowFactorControl: factors,
+  };
   return surface === "detail" ? (
     <DetailedPrinterCard printer={current} backendCapabilities={support} />
   ) : (
@@ -430,7 +439,22 @@ describe.each<Surface>(["detail", "sidebar"])(
 
     it('disables Home and motion when the printer does not expose a movement endpoint', () => {
       render(<Controls surface={surface} movement={false} overrides={{ backend: PrinterBackend.PrusaLink }} />);
-      expect(screen.getByText(/Remote Home and jog controls are unavailable/)).toBeVisible();
+      expect(screen.getByText("Remote Home and jog controls are not supported by this printer's API. Use the printer's physical controls.")).toBeVisible();
+      for (const button of screen.getAllByRole('button', { name: /Home all axes|Home X\/Y|Home Z|Jog [XYZ]/ })) {
+        expect(button).toBeDisabled();
+        fireEvent.click(button);
+      }
+      expect(mockExecute).not.toHaveBeenCalled();
+    });
+
+    it('keeps Home and motion disabled when discovery is inconclusive', () => {
+      render(<Controls
+        surface={surface}
+        movement={false}
+        movementSupportStatus="Unknown"
+        overrides={{ backend: PrinterBackend.PrusaLink }}
+      />);
+      expect(screen.getByText("PrintFarmer could not confirm remote Home and jog support. Check the printer connection and credentials. Use the printer's physical controls while remote motion is unavailable.")).toBeVisible();
       for (const button of screen.getAllByRole('button', { name: /Home all axes|Home X\/Y|Home Z|Jog [XYZ]/ })) {
         expect(button).toBeDisabled();
         fireEvent.click(button);
