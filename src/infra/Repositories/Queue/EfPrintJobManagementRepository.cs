@@ -338,7 +338,22 @@ public class EfPrintJobManagementRepository(AppDbContext context, TimeProvider? 
     {
         DateTime cutoff = _timeProvider.GetUtcNow().UtcDateTime.AddDays(-lookbackDays);
 
-        IQueryable<PrintJob> query = _context.PrintJobs
+        double totalWaitMinutes = 0;
+        int count = 0;
+        await foreach (WaitTimeInput job in BuildAverageWaitTimeQuery(_context.PrintJobs, cutoff, printerModelId)
+            .AsAsyncEnumerable().WithCancellation(ct))
+        {
+            totalWaitMinutes += Math.Max(0.0, (job.ActualStartTime!.Value - job.QueuedAt).TotalMinutes);
+            count++;
+        }
+
+        return count == 0 ? 0 : totalWaitMinutes / count;
+    }
+
+    internal static IQueryable<WaitTimeInput> BuildAverageWaitTimeQuery(
+        IQueryable<PrintJob> jobs, DateTime cutoff, Guid? printerModelId)
+    {
+        IQueryable<PrintJob> query = jobs.AsNoTracking()
             .Where(j => j.Status == PrintJobStatus.Completed
                      && j.ActualStartTime != null
                      && j.QueuedAt >= cutoff);
@@ -346,22 +361,13 @@ public class EfPrintJobManagementRepository(AppDbContext context, TimeProvider? 
         if (printerModelId.HasValue)
         {
             query = query
-                .Include(j => j.AssignedPrinter)
                 .Where(j => j.AssignedPrinter != null && j.AssignedPrinter.ModelId == printerModelId.Value);
         }
 
-        List<PrintJob> completedJobs = await query.ToListAsync(ct);
-
-        if (completedJobs.Count == 0)
-        {
-            return 0;
-        }
-
-        double totalWaitMinutes = completedJobs
-            .Sum(j => Math.Max(0.0, (j.ActualStartTime!.Value - j.QueuedAt).TotalMinutes));
-
-        return totalWaitMinutes / completedJobs.Count;
+        return query.Select(j => new WaitTimeInput(j.QueuedAt, j.ActualStartTime));
     }
+
+    internal sealed record WaitTimeInput(DateTime QueuedAt, DateTime? ActualStartTime);
 
     internal sealed record QueueStatsAggregate(
         int Queued,

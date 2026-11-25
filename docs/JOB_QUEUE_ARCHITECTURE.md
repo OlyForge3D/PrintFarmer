@@ -76,6 +76,15 @@ The job queue system manages the lifecycle of print jobs in PrintFarmer:
 - **Analytics:** Historical data, duration trends, queue statistics
 - **Scheduling:** Deferred execution with recurrence patterns
 
+### Average wait-time inputs
+
+Queue statistics average the nonnegative elapsed minutes between `QueuedAt` and
+`ActualStartTime` for completed jobs queued within the inclusive 30-day lookback.
+The repository streams only these two timestamp columns without tracking jobs or
+loading assigned printers; an optional model filter remains a database predicate.
+The calculation stays in .NET for provider consistency and returns zero for no
+matches. Provider retry strategies may still buffer results internally.
+
 ### Priority contract
 
 `PrintJobPriority` is the canonical queue-priority scale at every API and UI

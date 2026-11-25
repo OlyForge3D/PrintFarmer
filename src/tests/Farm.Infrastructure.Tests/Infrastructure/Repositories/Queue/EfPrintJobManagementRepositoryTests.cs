@@ -226,6 +226,154 @@ public class EfPrintJobManagementRepositoryTests
     }
 
     [Fact]
+    public async Task GetAverageWaitTimeMinutesAsync_SqliteHistory_PreservesFiltersAndLeavesTrackerEmpty()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:;Foreign Keys=False");
+        await connection.OpenAsync();
+        var interceptor = new PrintJobQueryInterceptor();
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection).AddInterceptors(interceptor).Options;
+        DateTimeOffset now = new(2031, 4, 5, 6, 7, 8, TimeSpan.Zero);
+        var clock = new Mock<TimeProvider>();
+        clock.Setup(value => value.GetUtcNow()).Returns(() => now);
+        Guid modelId = Guid.NewGuid();
+        Guid otherModelId = Guid.NewGuid();
+        DateTime cutoff = now.UtcDateTime.AddDays(-30);
+        var printer = new Printer { Id = Guid.NewGuid(), Name = "matching", ServerUrl = "http://matching.invalid", ModelId = modelId };
+        var otherPrinter = new Printer { Id = Guid.NewGuid(), Name = "other", ServerUrl = "http://other.invalid", ModelId = otherModelId };
+        PrintJob Job(DateTime queuedAt, double? seconds, Printer? assigned, PrintJobStatus status = PrintJobStatus.Completed)
+        {
+            PrintJob job = CreateJob(status);
+            job.QueuedAt = queuedAt;
+            job.ActualStartTime = seconds.HasValue ? queuedAt.AddSeconds(seconds.Value) : null;
+            job.AssignedPrinter = assigned;
+            job.AssignedPrinterId = assigned?.Id;
+            return job;
+        }
+
+        await using (AppDbContext seed = new(options))
+        {
+            await seed.Database.EnsureCreatedAsync();
+            seed.PrintJobs.AddRange(
+                Job(cutoff, 30, printer),
+                Job(cutoff.AddDays(1), -60, printer),
+                Job(cutoff.AddDays(1), 60, null),
+                Job(cutoff.AddDays(1), 150, otherPrinter),
+                Job(cutoff.AddTicks(-1), 6000, printer),
+                Job(cutoff.AddDays(1), null, printer),
+                Job(cutoff.AddDays(1), 6000, printer, PrintJobStatus.Printing));
+            await seed.SaveChangesAsync();
+        }
+
+        interceptor.Reset();
+        await using AppDbContext db = new(options);
+        var repository = new EfPrintJobManagementRepository(db, clock.Object);
+        Assert.Equal(1, await repository.GetAverageWaitTimeMinutesAsync());
+        Assert.Equal(0.25, await repository.GetAverageWaitTimeMinutesAsync(modelId));
+        Assert.Equal(2.5, await repository.GetAverageWaitTimeMinutesAsync(otherModelId));
+        Assert.Equal(0, await repository.GetAverageWaitTimeMinutesAsync(Guid.NewGuid()));
+        now = now.AddDays(32);
+        Assert.Equal(0, await repository.GetAverageWaitTimeMinutesAsync());
+        Assert.Empty(db.ChangeTracker.Entries());
+        string[] commands = interceptor.PrintJobCommands.ToArray();
+        Assert.Equal(5, commands.Length);
+        Assert.All(commands, sql =>
+        {
+            Assert.StartsWith("SELECT \"p\".\"QueuedAt\", \"p\".\"ActualStartTime\"", sql, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"Name\"", sql, StringComparison.Ordinal);
+        });
+    }
+
+    [Theory]
+    [InlineData(299999999L, 0)]
+    [InlineData(300000000L, 0)]
+    [InlineData(300000001L, 1)]
+    public async Task GetAverageWaitTimeMinutesAsync_FractionalWait_PreservesRoundingBoundary(long waitTicks, int rounded)
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        await using AppDbContext db = new(options);
+        await db.Database.EnsureCreatedAsync();
+        PrintJob job = CreateJob(PrintJobStatus.Completed);
+        job.QueuedAt = DateTime.UtcNow.AddMinutes(-1);
+        job.ActualStartTime = job.QueuedAt.AddTicks(waitTicks);
+        db.PrintJobs.Add(job);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        double average = await new EfPrintJobManagementRepository(db).GetAverageWaitTimeMinutesAsync();
+
+        Assert.Equal(TimeSpan.FromTicks(waitTicks).TotalMinutes, average);
+        Assert.Equal(rounded, (int)Math.Round(average));
+        Assert.Empty(db.ChangeTracker.Entries());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetAverageWaitTimeMinutesAsync_CancelledBeforeReading_PropagatesCancellation(bool afterCommand)
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        using var cancellation = new CancellationTokenSource();
+        var interceptor = new CancelWaitTimeQueryInterceptor(cancellation);
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection).AddInterceptors(interceptor).Options;
+        await using AppDbContext db = new(options);
+        await db.Database.EnsureCreatedAsync();
+        PrintJob job = CreateJob(PrintJobStatus.Completed);
+        job.QueuedAt = DateTime.UtcNow.AddMinutes(-1);
+        job.ActualStartTime = job.QueuedAt.AddSeconds(30);
+        db.PrintJobs.Add(job);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        if (afterCommand)
+        {
+            interceptor.Enabled = true;
+        }
+        else
+        {
+            cancellation.Cancel();
+        }
+
+        var repository = new EfPrintJobManagementRepository(db);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            repository.GetAverageWaitTimeMinutesAsync(ct: cancellation.Token));
+        Assert.Equal(afterCommand, interceptor.CancelledAfterCommand);
+        Assert.Empty(db.ChangeTracker.Entries());
+    }
+
+    [Theory]
+    [InlineData("sqlite", false)]
+    [InlineData("sqlite", true)]
+    [InlineData("postgres", false)]
+    [InlineData("postgres", true)]
+    [InlineData("sqlserver", false)]
+    [InlineData("sqlserver", true)]
+    public void BuildAverageWaitTimeQuery_SupportedProvider_SelectsOnlyTimestampInputs(string provider, bool filterModel)
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>();
+        _ = provider switch
+        {
+            "sqlite" => options.UseSqlite("Data Source=:memory:"),
+            "postgres" => options.UseNpgsql("Host=localhost;Database=printfarmer"),
+            "sqlserver" => options.UseSqlServer("Server=(localdb)\\MSSQLLocalDB;Database=printfarmer"),
+            _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, "Unsupported provider test case."),
+        };
+        using var db = new AppDbContext(options.Options);
+        string sql = EfPrintJobManagementRepository.BuildAverageWaitTimeQuery(
+            db.PrintJobs, new DateTime(2031, 1, 1, 0, 0, 0, DateTimeKind.Utc), filterModel ? Guid.NewGuid() : null).ToQueryString();
+        string select = Assert.Single(sql.Split('\n'), line => line.StartsWith("SELECT ", StringComparison.Ordinal));
+        Assert.Equal(provider == "sqlserver"
+            ? "SELECT [p].[QueuedAt], [p].[ActualStartTime]"
+            : "SELECT p.\"QueuedAt\", p.\"ActualStartTime\"", select.Replace("\"p\".", "p.", StringComparison.Ordinal).TrimEnd('\r'));
+        Assert.Equal(filterModel, sql.Contains("JOIN", StringComparison.Ordinal));
+        Assert.Contains("IS NOT NULL", sql, StringComparison.Ordinal);
+        Assert.Contains(">=", sql, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GetEnabledPrintersAsync_WhenServiceStateExists_LoadsServiceStateForWatermarkReads()
     {
         string dbName = $"GetEnabledPrintersAsync_{Guid.NewGuid():N}";
@@ -819,6 +967,25 @@ public class EfPrintJobManagementRepositoryTests
         job.GcodeFileId = null;
         job.GcodeFile = null;
         return job;
+    }
+
+    private sealed class CancelWaitTimeQueryInterceptor(CancellationTokenSource cancellation) : DbCommandInterceptor
+    {
+        public bool Enabled { get; set; }
+        public bool CancelledAfterCommand { get; private set; }
+
+        public override ValueTask<DbDataReader> ReaderExecutedAsync(
+            DbCommand command, CommandExecutedEventData eventData, DbDataReader result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Enabled && command.CommandText.Contains("FROM \"PrintJobs\"", StringComparison.Ordinal))
+            {
+                CancelledAfterCommand = true;
+                cancellation.Cancel();
+            }
+
+            return base.ReaderExecutedAsync(command, eventData, result, cancellationToken);
+        }
     }
 
     private sealed class PrintJobQueryInterceptor : DbCommandInterceptor
