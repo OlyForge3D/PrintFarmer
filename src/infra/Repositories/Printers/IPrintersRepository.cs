@@ -17,6 +17,22 @@ public interface IPrintersRepository
     Task<List<Printer>> GetAllAsync(CancellationToken ct);
 
     /// <summary>
+    /// Gets the IDs of all printers without materializing printer rows or credentials.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>All printer IDs.</returns>
+    Task<List<Guid>> GetAllIdsAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Gets the printers whose IDs are in <paramref name="ids"/>, without related entities,
+    /// with credentials populated. Unknown IDs are ignored; an empty input performs no query.
+    /// </summary>
+    /// <param name="ids">The printer IDs to load.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The matching printer entities.</returns>
+    Task<List<Printer>> GetByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct);
+
+    /// <summary>
     /// Gets all printers with related entities (Manufacturer, Model) included.
     /// </summary>
     /// <param name="ct">Cancellation token.</param>

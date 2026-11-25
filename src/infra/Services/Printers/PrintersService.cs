@@ -796,6 +796,9 @@ public class PrintersService(
         return await _unitOfWork.Printers.GetAllAsync(ct);
     }
 
+    public Task<List<Guid>> GetAllIdsAsync(CancellationToken ct) =>
+        _unitOfWork.Printers.GetAllIdsAsync(ct);
+
     /// <summary>
     /// Retrieves all printers with related entities (Manufacturer, Model, Location).
     /// </summary>

@@ -56,11 +56,7 @@ public class PrinterBackendCapabilitiesService(
             return Enumerable.Empty<PrinterBackendCapabilitiesDto>();
         }
 
-        List<Printer> printers = await _repo.GetAllAsync(ct);
-        Printer[] selected = printers
-            .Where(p => printerIds.Contains(p.Id))
-            .ToArray();
-
+        List<Printer> selected = await _repo.GetByIdsAsync(printerIds, ct);
         return await Task.WhenAll(selected.Select(printer => CreateCapabilitiesDtoAsync(printer, ct)));
     }
 

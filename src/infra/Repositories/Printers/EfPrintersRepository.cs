@@ -14,12 +14,36 @@ namespace Farm.Infrastructure.Repositories.Printers;
 
 public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensitiveDataProtector) : IPrintersRepository
 {
+    private const int PrinterIdChunkSize = 500;
+
     private readonly AppDbContext _db = db;
     private readonly ISensitiveDataProtector _sensitiveDataProtector = sensitiveDataProtector;
 
     public async Task<List<Printer>> GetAllAsync(CancellationToken ct)
     {
         List<Printer> printers = await _db.Printers.AsNoTracking().ToListAsync(ct);
+        printers.ForEach(PopulateCredential);
+        return printers;
+    }
+
+    public async Task<List<Guid>> GetAllIdsAsync(CancellationToken ct)
+    {
+        return await _db.Printers.AsNoTracking().Select(p => p.Id).ToListAsync(ct);
+    }
+
+    public async Task<List<Printer>> GetByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct)
+    {
+        var printers = new List<Printer>();
+
+        // Chunk to stay well below provider parameter limits (SQL Server: 2100).
+        foreach (Guid[] chunk in ids.Distinct().Chunk(PrinterIdChunkSize))
+        {
+            printers.AddRange(await _db.Printers
+                .AsNoTracking()
+                .Where(p => chunk.Contains(p.Id))
+                .ToListAsync(ct));
+        }
+
         printers.ForEach(PopulateCredential);
         return printers;
     }
