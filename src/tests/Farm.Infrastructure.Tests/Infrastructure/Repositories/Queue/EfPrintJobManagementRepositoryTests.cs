@@ -958,6 +958,159 @@ public class EfPrintJobManagementRepositoryTests
         Assert.Contains("COUNT", sql, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task GetTimelineJobsAsync_Sqlite_MatchesLegacyEntityGraphWithNarrowUntrackedQuery()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:;Foreign Keys=False");
+        await connection.OpenAsync();
+        var interceptor = new PrintJobQueryInterceptor();
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection).AddInterceptors(interceptor).Options;
+        DateTime origin = new(2031, 4, 5, 6, 0, 0, DateTimeKind.Utc);
+        var printer = new Printer { Id = Guid.NewGuid(), Name = "alpha", ServerUrl = "http://alpha.invalid" };
+        var file = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "benchy.gcode",
+            FileName = "benchy.gcode",
+            FilePath = "/tmp",
+            FileHash = string.Empty,
+            FolderId = Guid.NewGuid(),
+            CalibrationManifestJson = "{\"wide\":true}",
+        };
+        int sequence = 0;
+        PrintJob Job(PrintJobStatus status, GcodeFile? gcode = null, Guid? gcodeId = null, Printer? assigned = null,
+            Guid? printerId = null, TimeSpan? actual = null, TimeSpan? estimated = null, DateTime? start = null,
+            DateTime? end = null, DateTime? queuedAt = null)
+        {
+            PrintJob job = CreateJob(status);
+            sequence++;
+            job.Name = $"job-{sequence}";
+            job.QueuePosition = sequence;
+            job.CreatedAt = origin.AddMinutes(sequence).AddTicks(sequence);
+            job.QueuedAt = queuedAt ?? origin.AddHours(sequence);
+            job.GcodeFileId = gcode?.Id ?? gcodeId;
+            job.AssignedPrinterId = assigned?.Id ?? printerId;
+            job.ActualPrintTime = actual;
+            job.EstimatedPrintTime = estimated;
+            job.ActualStartTime = start;
+            job.ActualEndTime = end;
+            return job;
+        }
+
+        await using (AppDbContext seed = new(options))
+        {
+            await seed.Database.EnsureCreatedAsync();
+            seed.Printers.Add(printer);
+            seed.GcodeFiles.Add(file);
+            seed.PrintJobs.AddRange(
+                Job(PrintJobStatus.Queued, file, assigned: printer, estimated: TimeSpan.FromSeconds(90.9)),
+                Job(PrintJobStatus.Printing, start: origin.AddHours(3), estimated: TimeSpan.Zero),
+                Job(PrintJobStatus.Completed, file, assigned: printer, actual: TimeSpan.FromMilliseconds(1500.7),
+                    estimated: TimeSpan.FromSeconds(1), start: origin.AddHours(4), end: origin.AddHours(5)),
+                Job(PrintJobStatus.Failed, gcodeId: Guid.NewGuid(), printerId: Guid.NewGuid(),
+                    actual: TimeSpan.FromTicks(1), end: origin.AddHours(6)),
+                Job(PrintJobStatus.Cancelled, assigned: printer, actual: TimeSpan.Zero,
+                    estimated: TimeSpan.FromHours(2), start: origin.AddHours(7)),
+                Job(PrintJobStatus.Completed, file, start: origin.AddDays(-2), end: origin.AddHours(-1),
+                    queuedAt: origin.AddDays(-3)),
+                Job(PrintJobStatus.Assigned, assigned: printer, start: origin.AddHours(2)));
+            await seed.SaveChangesAsync();
+        }
+
+        (DateTime? From, DateTime? To, Guid? PrinterId, PrintJobStatus? Status, int Limit)[] cases =
+        [
+            (null, null, null, null, 100),
+            (null, null, null, null, 3),
+            (origin.AddHours(2), null, null, null, 100),
+            (null, origin.AddHours(4), null, null, 100),
+            (origin.AddHours(1), origin.AddHours(5), printer.Id, null, 100),
+            (null, null, null, PrintJobStatus.Completed, 100),
+            (null, null, printer.Id, PrintJobStatus.Queued, 0),
+        ];
+
+        await using AppDbContext db = new(options);
+        var repository = new EfPrintJobManagementRepository(db);
+        foreach (var c in cases)
+        {
+            IQueryable<PrintJob> legacy = db.PrintJobs.AsNoTracking()
+                .Include(pj => pj.GcodeFile).Include(pj => pj.AssignedPrinter);
+            if (c.From.HasValue)
+            {
+                legacy = legacy.Where(pj => pj.QueuedAt >= c.From.Value || pj.ActualStartTime >= c.From.Value);
+            }
+
+            if (c.To.HasValue)
+            {
+                legacy = legacy.Where(pj => pj.QueuedAt <= c.To.Value || pj.ActualEndTime <= c.To.Value);
+            }
+
+            if (c.PrinterId.HasValue)
+            {
+                legacy = legacy.Where(pj => pj.AssignedPrinterId == c.PrinterId.Value);
+            }
+
+            if (c.Status.HasValue)
+            {
+                legacy = legacy.Where(pj => pj.Status == c.Status.Value);
+            }
+
+            List<PrintJobTimelineRow> expected = (await legacy.OrderByDescending(pj => pj.QueuedAt).Take(c.Limit).ToListAsync())
+                .Select(pj => new PrintJobTimelineRow(pj.Id, pj.Name, pj.GcodeFile?.Name, pj.AssignedPrinter?.Name,
+                    pj.Status, pj.CreatedAt, pj.ActualStartTime, pj.ActualEndTime, pj.ActualPrintTime, pj.EstimatedPrintTime))
+                .ToList();
+
+            interceptor.Reset();
+            List<PrintJobTimelineRow> actual = await repository.GetTimelineJobsAsync(
+                c.From, c.To, c.PrinterId, c.Status, c.Limit);
+
+            Assert.Equal(expected, actual);
+            string sql = Assert.Single(interceptor.PrintJobCommands);
+            Assert.DoesNotContain("CalibrationManifestJson", sql, StringComparison.Ordinal);
+            Assert.DoesNotContain("ServerUrl", sql, StringComparison.Ordinal);
+            Assert.DoesNotContain("FilePath", sql, StringComparison.Ordinal);
+            Assert.Empty(db.ChangeTracker.Entries());
+        }
+
+        List<PrintJobTimelineRow> all = await repository.GetTimelineJobsAsync();
+        Assert.Equal(7, all.Count);
+        Assert.Contains(all, row => row.GcodeFileName is null && row.AssignedPrinterName is null && row.Status == PrintJobStatus.Failed);
+        Assert.Contains(all, row => row.GcodeFileName == "benchy.gcode" && row.AssignedPrinterName == "alpha"
+            && row.ActualPrintTime == TimeSpan.FromMilliseconds(1500.7));
+    }
+
+    [Theory]
+    [InlineData("sqlite")]
+    [InlineData("postgres")]
+    [InlineData("sqlserver")]
+    public void BuildTimelineQuery_SupportedProvider_SelectsOnlyTimelineInputs(string provider)
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>();
+        _ = provider switch
+        {
+            "sqlite" => options.UseSqlite("Data Source=:memory:"),
+            "postgres" => options.UseNpgsql("Host=localhost;Database=printfarmer"),
+            "sqlserver" => options.UseSqlServer("Server=(localdb)\\MSSQLLocalDB;Database=printfarmer"),
+            _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, "Unsupported provider test case."),
+        };
+        using var db = new AppDbContext(options.Options);
+        DateTime from = new(2031, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        string sql = EfPrintJobManagementRepository.BuildTimelineQuery(
+            db.PrintJobs, from, from.AddDays(1), Guid.NewGuid(), PrintJobStatus.Completed, 500).ToQueryString();
+
+        Assert.Equal(2, sql.Split("LEFT JOIN").Length - 1);
+        Assert.Contains("ORDER BY", sql, StringComparison.Ordinal);
+        Assert.Contains("QueuedAt", sql, StringComparison.Ordinal);
+        Assert.Contains("ActualPrintTime", sql, StringComparison.Ordinal);
+        Assert.Contains("EstimatedPrintTime", sql, StringComparison.Ordinal);
+        Assert.Contains("AssignedPrinterId", sql, StringComparison.Ordinal);
+        foreach (string unused in new[] { "CalibrationManifestJson", "FilePath", "ServerUrl", "ApiKey", "FailureReason", "RequiredMaterialType" })
+        {
+            Assert.DoesNotContain(unused, sql, StringComparison.Ordinal);
+        }
+    }
+
     private static PrintJob CreateJob(PrintJobStatus status)
     {
         PrintJob job = new PrintJobBuilder()

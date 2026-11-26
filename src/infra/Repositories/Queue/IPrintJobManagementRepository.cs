@@ -169,9 +169,9 @@ public interface IPrintJobManagementRepository
     // ============= TIMELINE & HISTORY =============
 
     /// <summary>
-    /// Get timeline events for visualization.
+    /// Get untracked scalar timeline inputs for visualization.
     /// </summary>
-    Task<List<PrintJob>> GetTimelineJobsAsync(
+    Task<List<PrintJobTimelineRow>> GetTimelineJobsAsync(
         DateTime? dateFrom = null,
         DateTime? dateTo = null,
         Guid? printerId = null,

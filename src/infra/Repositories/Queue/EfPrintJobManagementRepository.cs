@@ -526,7 +526,7 @@ public class EfPrintJobManagementRepository(AppDbContext context, TimeProvider? 
     }
 
     // ============= TIMELINE & HISTORY =============
-    public async Task<List<PrintJob>> GetTimelineJobsAsync(
+    public async Task<List<PrintJobTimelineRow>> GetTimelineJobsAsync(
         DateTime? dateFrom = null,
         DateTime? dateTo = null,
         Guid? printerId = null,
@@ -534,11 +534,19 @@ public class EfPrintJobManagementRepository(AppDbContext context, TimeProvider? 
         int limit = 100,
         CancellationToken ct = default)
     {
-        IQueryable<PrintJob> query = _context.PrintJobs
-            .AsNoTracking()
-            .Include(pj => pj.GcodeFile)
-            .Include(pj => pj.AssignedPrinter)
-            .AsQueryable();
+        return await BuildTimelineQuery(_context.PrintJobs, dateFrom, dateTo, printerId, filterStatus, limit)
+            .ToListAsync(ct);
+    }
+
+    internal static IQueryable<PrintJobTimelineRow> BuildTimelineQuery(
+        IQueryable<PrintJob> jobs,
+        DateTime? dateFrom,
+        DateTime? dateTo,
+        Guid? printerId,
+        PrintJobStatus? filterStatus,
+        int limit)
+    {
+        IQueryable<PrintJob> query = jobs.AsNoTracking();
 
         if (dateFrom.HasValue)
         {
@@ -560,10 +568,20 @@ public class EfPrintJobManagementRepository(AppDbContext context, TimeProvider? 
             query = query.Where(pj => pj.Status == filterStatus.Value);
         }
 
-        return await query
+        return query
             .OrderByDescending(pj => pj.QueuedAt)
             .Take(limit)
-            .ToListAsync(ct);
+            .Select(pj => new PrintJobTimelineRow(
+                pj.Id,
+                pj.Name,
+                pj.GcodeFile != null ? pj.GcodeFile.Name : null,
+                pj.AssignedPrinter != null ? pj.AssignedPrinter.Name : null,
+                pj.Status,
+                pj.CreatedAt,
+                pj.ActualStartTime,
+                pj.ActualEndTime,
+                pj.ActualPrintTime,
+                pj.EstimatedPrintTime));
     }
 
     public async Task<PrintJob?> GetJobWithStateHistoryAsync(Guid jobId, CancellationToken ct = default)
