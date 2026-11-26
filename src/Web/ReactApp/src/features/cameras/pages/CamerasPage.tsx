@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { RotateCw } from 'lucide-react';
 import { toast } from 'sonner';
@@ -36,8 +36,17 @@ import {
   type CameraGroup,
   type CameraView,
 } from '@/features/cameras/utils/cameraGrouping';
+import {
+  orderCamerasForDisplay,
+  type CameraPreviewDelivery,
+  type CameraPreviewDeliveryById,
+} from '@/features/cameras/utils/cameraDisplayOrder';
+import { usePrinterSummary } from '@/common/hooks/useApi';
 
 const CAMERA_SNAPSHOT_REFRESH_MS = 4_000;
+// A visible failure must persist this long before ranking demotes the card, so stream
+// reconnects and on-demand snapshot fallbacks do not make cards jump.
+const CAMERA_PREVIEW_FAILURE_SETTLE_MS = 5_000;
 
 const CAMERA_VIEW_OPTIONS: ViewModeOption<CameraView>[] = [
   { mode: 'all', kind: 'cards', title: 'All cameras' },
@@ -78,11 +87,26 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
     },
   });
   const cameras = useMemo(() => camerasQuery.data ?? [], [camerasQuery.data]);
+  // Ranking uses only what visible cards have already observed plus printer status; it never
+  // starts a stream or snapshot request of its own.
+  const [previewDeliveryById, setPreviewDeliveryById] = useState<CameraPreviewDeliveryById>({});
+  const handlePreviewDeliveryChange = useCallback((cameraId: string, delivery: CameraPreviewDelivery) => {
+    setPreviewDeliveryById((current) => (current[cameraId] === delivery ? current : { ...current, [cameraId]: delivery }));
+  }, []);
+  const { data: printerSummaries } = usePrinterSummary();
+  const printerOnlineById = useMemo(
+    () => (printerSummaries ? new Map(printerSummaries.map((printer) => [printer.id, printer.isOnline])) : null),
+    [printerSummaries],
+  );
+  const orderedCameras = useMemo(
+    () => orderCamerasForDisplay(cameras, previewDeliveryById, printerOnlineById),
+    [cameras, previewDeliveryById, printerOnlineById],
+  );
   const cameraGroups = useMemo<CameraGroup[] | null>(() => {
-    if (activeView === 'location') return groupCamerasByLocation(cameras);
-    if (activeView === 'printer') return groupCamerasByPrinter(cameras);
+    if (activeView === 'location') return groupCamerasByLocation(orderedCameras);
+    if (activeView === 'printer') return groupCamerasByPrinter(orderedCameras);
     return null;
-  }, [activeView, cameras]);
+  }, [activeView, orderedCameras]);
   const loading = camerasQuery.isPending;
   const loadError = camerasQuery.error
     ? camerasQuery.error instanceof Error ? camerasQuery.error.message : 'Failed to load cameras'
@@ -119,6 +143,7 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
           canManage={canManageCameras}
           onEdit={setCameraToEdit}
           onDelete={setCameraToDelete}
+          onPreviewDeliveryChange={handlePreviewDeliveryChange}
         />
       ))}
     </div>
@@ -233,7 +258,7 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
               })}
             </div>
           ) : (
-            renderCameraGrid(cameras)
+            renderCameraGrid(orderedCameras)
           )}
 
           <EditCameraModal
@@ -264,13 +289,21 @@ interface CameraViewCardProps {
   canManage: boolean;
   onEdit: (camera: DisplayCameraDto) => void;
   onDelete: (camera: DisplayCameraDto) => void;
+  onPreviewDeliveryChange: (cameraId: string, delivery: CameraPreviewDelivery) => void;
 }
 
 /**
  * CameraViewCard - Individual camera feed card
  */
-function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardProps) {
+function CameraViewCard({ camera, canManage, onEdit, onDelete, onPreviewDeliveryChange }: CameraViewCardProps) {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const reportedDeliveryRef = useRef<CameraPreviewDelivery | null>(null);
+  // Reports transitions only, so stream frames do not re-render the page.
+  const reportDelivery = useCallback((delivery: CameraPreviewDelivery) => {
+    if (reportedDeliveryRef.current === delivery) return;
+    reportedDeliveryRef.current = delivery;
+    onPreviewDeliveryChange(camera.id, delivery);
+  }, [camera.id, onPreviewDeliveryChange]);
 
   const previewContract = {
     accessMode: camera.accessMode,
@@ -344,6 +377,17 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
     imageError: imageError || snapshotFailed || streamFailed,
     cameraMode,
   });
+  const showingPreviewImage = !!activeUrl && !imageError;
+  const previewErrored = imageError || snapshotFailed || streamUnsupported || streamFailed || streamImageFailed
+    || unsupportedPreview || (!hasStream && !hasSnapshot);
+  // Paused (offscreen/hidden) cards keep their last observed delivery instead of being treated as failed.
+  const visiblePreviewFailure = isPreviewVisible && !showingPreviewImage && previewErrored;
+
+  useEffect(() => {
+    if (!visiblePreviewFailure) return;
+    const timeoutId = window.setTimeout(() => reportDelivery('failed'), CAMERA_PREVIEW_FAILURE_SETTLE_MS);
+    return () => window.clearTimeout(timeoutId);
+  }, [reportDelivery, visiblePreviewFailure]);
 
   return (
     <article
@@ -352,12 +396,13 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
     >
       {/* Camera feed */}
       <div ref={previewContainerRef} className="relative w-full aspect-video bg-pf-bg-2">
-        {activeUrl && !imageError ? (
+        {showingPreviewImage ? (
           <img
-            src={activeUrl}
+            src={activeUrl ?? undefined}
             alt={showingLiveStream ? `${camera.name} live camera feed` : `${camera.name} camera preview`}
             className={`object-contain bg-black ${mediaClassName}`}
             loading="lazy"
+            onLoad={() => reportDelivery('delivering')}
             onError={() => setFailedUrl(activeUrl ?? '')}
           />
         ) : unsupportedPreview ? (
