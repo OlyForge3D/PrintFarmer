@@ -12,7 +12,9 @@ function getIsDocumentVisible(): boolean {
 
 /**
  * Tracks whether a camera preview container is on screen in a visible tab, so snapshot
- * polling and authenticated streams can share one demand signal.
+ * polling and authenticated streams can share one demand signal. Attach
+ * `previewContainerRef` to an element rendered unconditionally on mount; the observer
+ * is created once.
  */
 export function useCameraPreviewVisibility(): CameraPreviewVisibility {
   const previewContainerRef = useRef<HTMLDivElement | null>(null);
@@ -33,7 +35,8 @@ export function useCameraPreviewVisibility(): CameraPreviewVisibility {
     const element = previewContainerRef.current;
     if (!element) return;
     const observer = new IntersectionObserver((entries) => {
-      setIsIntersectingViewport(entries.some((entry) => entry.isIntersecting));
+      // Batched entries are chronological; the last one is the element's current state.
+      setIsIntersectingViewport(entries.at(-1)?.isIntersecting ?? false);
     });
     observer.observe(element);
     return () => observer.disconnect();

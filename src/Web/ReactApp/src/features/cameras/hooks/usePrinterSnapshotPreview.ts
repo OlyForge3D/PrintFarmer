@@ -17,6 +17,7 @@ interface SnapshotPreviewState {
 
 interface DirectSnapshotState {
   sourceUrl: string;
+  demandSession: number;
   src: string | null;
 }
 
@@ -48,6 +49,7 @@ export function usePrinterSnapshotPreview(
   const [snapshotState, setSnapshotState] = useState<SnapshotPreviewState>(EMPTY_SNAPSHOT_STATE);
   const [directSnapshotState, setDirectSnapshotState] = useState<DirectSnapshotState>({
     sourceUrl: '',
+    demandSession: 0,
     src: null,
   });
   // Each inactive-to-active transition starts a new session so frames cached before the pause are never shown.
@@ -146,7 +148,7 @@ export function usePrinterSnapshotPreview(
     let timeoutId: number | undefined;
     const refreshDirectSnapshot = () => {
       if (cancelled) return;
-      setDirectSnapshotState({ sourceUrl, src: getCacheBustedSnapshotUrl(sourceUrl) });
+      setDirectSnapshotState({ sourceUrl, demandSession, src: getCacheBustedSnapshotUrl(sourceUrl) });
       timeoutId = window.setTimeout(refreshDirectSnapshot, refreshIntervalMs);
     };
     timeoutId = window.setTimeout(refreshDirectSnapshot, 0);
@@ -154,13 +156,16 @@ export function usePrinterSnapshotPreview(
       cancelled = true;
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
-  }, [active, directEnabled, effectiveDirectSnapshotUrl, isPreviewVisible, refreshIntervalMs]);
+  }, [active, demandSession, directEnabled, effectiveDirectSnapshotUrl, isPreviewVisible, refreshIntervalMs]);
 
   const hasCurrentProxySnapshot = active
     && !!effectiveProxyRoute
     && snapshotState.sourceKey === effectiveProxyRoute
     && snapshotState.demandSession === demandSession;
-  const hasCurrentDirectSnapshot = active && directEnabled && directSnapshotState.sourceUrl === effectiveDirectSnapshotUrl;
+  const hasCurrentDirectSnapshot = active
+    && directEnabled
+    && directSnapshotState.sourceUrl === effectiveDirectSnapshotUrl
+    && directSnapshotState.demandSession === demandSession;
   return {
     previewContainerRef,
     snapshotSrc: hasCurrentProxySnapshot

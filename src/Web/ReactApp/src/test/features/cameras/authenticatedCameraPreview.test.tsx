@@ -96,6 +96,39 @@ describe('authenticated camera previews', () => {
     unmount();
   });
 
+  it('never resurfaces a pre-pause direct snapshot URL when the fallback is demanded again', async () => {
+    vi.useFakeTimers();
+    try {
+      const { result, rerender } = renderHook(
+        ({ active }) => usePrinterSnapshotPreview(
+          undefined,
+          false,
+          10_000,
+          'http://printer.local/snapshot.jpg',
+          true,
+          null,
+          { active },
+        ),
+        { initialProps: { active: true } },
+      );
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      const firstSrc = result.current.snapshotSrc;
+      expect(firstSrc).toMatch(/^http:\/\/printer\.local\/snapshot\.jpg\?_=/);
+
+      rerender({ active: false });
+      expect(result.current.snapshotSrc).toBeNull();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(5); });
+      rerender({ active: true });
+      expect(result.current.snapshotSrc).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(result.current.snapshotSrc).toMatch(/^http:\/\/printer\.local\/snapshot\.jpg\?_=/);
+      expect(result.current.snapshotSrc).not.toBe(firstSrc);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('sends the current bearer token to a validated stream proxy and aborts/revokes on unmount', async () => {
     let fetchSignal: AbortSignal | undefined;
     const body = new ReadableStream<Uint8Array>({
