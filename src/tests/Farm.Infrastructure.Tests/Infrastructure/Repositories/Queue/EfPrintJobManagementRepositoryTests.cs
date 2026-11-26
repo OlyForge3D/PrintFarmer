@@ -972,7 +972,7 @@ public class EfPrintJobManagementRepositoryTests
         {
             Id = Guid.NewGuid(),
             Name = "benchy.gcode",
-            FileName = "benchy.gcode",
+            FileName = "upload-0001.gcode",
             FilePath = "/tmp",
             FileHash = string.Empty,
             FolderId = Guid.NewGuid(),
