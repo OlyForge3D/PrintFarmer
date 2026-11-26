@@ -11,6 +11,7 @@ import {
 vi.mock('@/services/api', () => ({
   apiClient: {
     getPrinterSnapshot: vi.fn(),
+    getSnapshotPreview: vi.fn(),
   },
 }));
 
@@ -189,6 +190,54 @@ describe('PrinterCameraPreview', () => {
 
     expect(getPrinterSnapshotMock).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
+  });
+
+  it('pauses a protected stream offscreen, reconnects once when visible, and stops snapshot demand while it is healthy', async () => {
+    const getSnapshotPreviewMock = vi.mocked(apiClient.getSnapshotPreview);
+    getSnapshotPreviewMock.mockReturnValue(new Promise(() => {}));
+    const frame = new Uint8Array([
+      ...new TextEncoder().encode('--frame\r\nContent-Type: image/jpeg\r\nContent-Length: 4\r\n\r\n'),
+      0xff, 0xd8, 0xff, 0xd9,
+      ...new TextEncoder().encode('\r\n--frame\r\n'),
+    ]);
+    const signals: AbortSignal[] = [];
+    const fetchMock = vi.fn(async (_url: string, options: RequestInit) => {
+      signals.push(options.signal as AbortSignal);
+      const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(frame); } });
+      return new Response(body, { status: 200, headers: { 'Content-Type': 'multipart/x-mixed-replace; boundary=frame' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <PrinterCameraPreview
+        printerId="printer-protected"
+        printerName="Protected Cam"
+        cameraStreamUrl="/api/cameras/camera-1/stream"
+        cameraSnapshotUrl="/api/cameras/camera-1/snapshot"
+        cameraAccessMode={CameraAccessMode.StreamAndSnapshot}
+        cameraStreamFormat={CameraStreamFormat.Mjpeg}
+        cameraSnapshotStrategy={CameraSnapshotStrategy.DirectUrl}
+      />
+    );
+    await act(async () => {});
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(getSnapshotPreviewMock).not.toHaveBeenCalled();
+
+    setPreviewIntersecting(true);
+    await screen.findByAltText('Protected Cam live camera feed');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // At most one on-demand fallback request while connecting; it is cancelled once frames arrive.
+    expect(getSnapshotPreviewMock.mock.calls.length).toBeLessThanOrEqual(1);
+    for (const [, signal] of getSnapshotPreviewMock.mock.calls) expect((signal as AbortSignal).aborted).toBe(true);
+
+    setPreviewIntersecting(false);
+    expect(signals[0].aborted).toBe(true);
+    await act(async () => {});
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    setPreviewIntersecting(true);
+    await screen.findByAltText('Protected Cam live camera feed');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('renders SnapshotOnly DirectUrl snapshots directly without polling the backend proxy', async () => {

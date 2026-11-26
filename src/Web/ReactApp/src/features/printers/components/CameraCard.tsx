@@ -11,6 +11,7 @@ import {
   useCameraViewPreferences,
 } from '@/features/cameras/hooks/useCameraViewPreferences';
 import { usePrinterSnapshotPreview } from '@/features/cameras/hooks/usePrinterSnapshotPreview';
+import { useCameraPreviewVisibility } from '@/features/cameras/hooks/useCameraPreviewVisibility';
 import { useAuthenticatedMjpegStream } from '@/features/cameras/hooks/useAuthenticatedMjpegStream';
 import { getAuthenticatedCameraProxyRoute } from '@/common/auth/authenticatedCameraRoutes';
 import {
@@ -53,14 +54,6 @@ export function CameraCard({
   const hasStream = !!cameraStreamUrl && canUseMjpegStream(previewContract);
   const refreshIntervalMs = isPrinting ? ACTIVE_PREVIEW_REFRESH_MS : IDLE_PREVIEW_REFRESH_MS;
   const directSnapshotUrl = pollSnapshotPreview ? null : cameraSnapshotUrl;
-  const { previewContainerRef, snapshotSrc, snapshotFailed } = usePrinterSnapshotPreview(
-    p.id,
-    pollSnapshotPreview,
-    refreshIntervalMs,
-    directSnapshotUrl,
-    !!directSnapshotUrl,
-    getAuthenticatedCameraProxyRoute(cameraSnapshotUrl)
-  );
   const hasCameraUrls = unsupportedPreview || hasStream || pollSnapshotPreview || !!directSnapshotUrl;
   const hasSnapshot = pollSnapshotPreview || !!directSnapshotUrl;
   const {
@@ -80,14 +73,26 @@ export function CameraCard({
   const primaryCamera = printerCameras?.[0];
   const cameraCount = printerCameras?.length ?? 0;
 
+  const visibility = useCameraPreviewVisibility();
+  const { previewContainerRef, isPreviewVisible } = visibility;
   const { streamSrc, streamUnsupported, streamFailed } = useAuthenticatedMjpegStream(
     cameraStreamUrl,
-    cameraMode === 'stream' && hasStream,
+    cameraMode === 'stream' && hasStream && isPreviewVisible,
   );
   const safeStreamRoute = getAuthenticatedCameraProxyRoute(cameraStreamUrl);
   const liveStreamSrc = safeStreamRoute ? streamSrc : cameraStreamUrl;
-  const snapshotPreviewUrl = snapshotSrc ?? directSnapshotUrl;
   const streamImageFailed = !!liveStreamSrc && failedUrl === liveStreamSrc;
+  const snapshotDemanded = !(cameraMode === 'stream' && hasStream) || streamUnsupported || streamFailed || streamImageFailed;
+  const { snapshotSrc, snapshotFailed } = usePrinterSnapshotPreview(
+    p.id,
+    pollSnapshotPreview,
+    refreshIntervalMs,
+    directSnapshotUrl,
+    !!directSnapshotUrl,
+    getAuthenticatedCameraProxyRoute(cameraSnapshotUrl),
+    { active: snapshotDemanded, visibility },
+  );
+  const snapshotPreviewUrl = snapshotSrc ?? directSnapshotUrl;
   const streamFallsBackToSnapshot = cameraMode === 'stream' && (streamUnsupported || streamFailed || streamImageFailed) && !!snapshotPreviewUrl;
   const streamIssue = cameraMode === 'stream'
     ? streamUnsupported

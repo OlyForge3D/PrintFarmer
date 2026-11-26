@@ -1,23 +1,34 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiClient } from '@/services/api';
 import { getAuthenticatedCameraProxyRoute } from '@/common/auth/authenticatedCameraRoutes';
+import {
+  useCameraPreviewVisibility,
+  type CameraPreviewVisibility,
+} from '@/features/cameras/hooks/useCameraPreviewVisibility';
 
 const SNAPSHOT_ERROR_BACKOFF_MULTIPLIER = 3;
 
 interface SnapshotPreviewState {
   sourceKey: string;
+  demandSession: number;
   src: string | null;
   failed: boolean;
 }
 
 interface DirectSnapshotState {
   sourceUrl: string;
+  demandSession: number;
   src: string | null;
 }
 
-function getIsDocumentVisible(): boolean {
-  return typeof document === 'undefined' || document.visibilityState === 'visible';
+interface SnapshotPreviewOptions {
+  /** False when the snapshot would not be displayed, e.g. while a healthy live stream is shown. */
+  active?: boolean;
+  /** Shared visibility so the stream and snapshot pause on the same signal. */
+  visibility?: CameraPreviewVisibility;
 }
+
+const EMPTY_SNAPSHOT_STATE: SnapshotPreviewState = { sourceKey: '', demandSession: 0, src: null, failed: false };
 
 function getCacheBustedSnapshotUrl(snapshotUrl: string): string {
   const separator = snapshotUrl.includes('?') ? '&' : '?';
@@ -31,21 +42,23 @@ export function usePrinterSnapshotPreview(
   directSnapshotUrl?: string | null,
   directEnabled = false,
   proxySnapshotRoute?: string | null,
+  { active = true, visibility }: SnapshotPreviewOptions = {},
 ) {
-  const previewContainerRef = useRef<HTMLDivElement | null>(null);
-  const [snapshotState, setSnapshotState] = useState<SnapshotPreviewState>({
-    sourceKey: '',
-    src: null,
-    failed: false,
-  });
+  const ownVisibility = useCameraPreviewVisibility();
+  const { previewContainerRef, isPreviewVisible } = visibility ?? ownVisibility;
+  const [snapshotState, setSnapshotState] = useState<SnapshotPreviewState>(EMPTY_SNAPSHOT_STATE);
   const [directSnapshotState, setDirectSnapshotState] = useState<DirectSnapshotState>({
     sourceUrl: '',
+    demandSession: 0,
     src: null,
   });
-  const [isDocumentVisible, setIsDocumentVisible] = useState(getIsDocumentVisible);
-  const [isIntersectingViewport, setIsIntersectingViewport] = useState(
-    () => typeof IntersectionObserver === 'undefined'
-  );
+  // Each inactive-to-active transition starts a new session so frames cached before the pause are never shown.
+  const [demandSession, setDemandSession] = useState(0);
+  const [wasActive, setWasActive] = useState(active);
+  if (wasActive !== active) {
+    setWasActive(active);
+    if (active) setDemandSession((session) => session + 1);
+  }
   const objectUrlRef = useRef<string | null>(null);
   const [authRevision, setAuthRevision] = useState(0);
 
@@ -53,7 +66,6 @@ export function usePrinterSnapshotPreview(
   const selectedProxyRoute = proxySnapshotRoute ?? getAuthenticatedCameraProxyRoute(effectiveDirectSnapshotUrl);
   const effectiveProxyRoute = selectedProxyRoute
     ?? (proxyEnabled && printerId ? `/api/printers/${printerId}/snapshot` : null);
-  const isPreviewVisible = isDocumentVisible && isIntersectingViewport;
 
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
@@ -61,24 +73,6 @@ export function usePrinterSnapshotPreview(
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
-  }, []);
-
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const handleVisibilityChange = () => setIsDocumentVisible(getIsDocumentVisible());
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, []);
-
-  useEffect(() => {
-    if (typeof IntersectionObserver === 'undefined') return;
-    const element = previewContainerRef.current;
-    if (!element) return;
-    const observer = new IntersectionObserver((entries) => {
-      setIsIntersectingViewport(entries.some((entry) => entry.isIntersecting));
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -96,10 +90,11 @@ export function usePrinterSnapshotPreview(
     };
 
     const useProxy = !!effectiveProxyRoute && (proxyEnabled || directEnabled || !!proxySnapshotRoute || !!selectedProxyRoute);
-    if (!useProxy || !effectiveProxyRoute || !isPreviewVisible) {
-      if (!useProxy) revokeCurrentObjectUrl();
+    if (!useProxy || !active || !effectiveProxyRoute) {
+      revokeCurrentObjectUrl();
       return;
     }
+    if (!isPreviewVisible) return;
 
     const sourceKey = effectiveProxyRoute;
     const controller = new AbortController();
@@ -119,14 +114,15 @@ export function usePrinterSnapshotPreview(
         const nextObjectUrl = URL.createObjectURL(blob);
         revokeCurrentObjectUrl();
         objectUrlRef.current = nextObjectUrl;
-        setSnapshotState({ sourceKey, src: nextObjectUrl, failed: false });
+        setSnapshotState({ sourceKey, demandSession, src: nextObjectUrl, failed: false });
         scheduleNextLoad(refreshIntervalMs);
       } catch {
         if (cancelled) return;
         if (!controller.signal.aborted) {
           setSnapshotState((current) => ({
             sourceKey,
-            src: current.sourceKey === sourceKey ? current.src : null,
+            demandSession,
+            src: current.sourceKey === sourceKey && current.demandSession === demandSession ? current.src : null,
             failed: true,
           }));
           scheduleNextLoad(refreshIntervalMs * SNAPSHOT_ERROR_BACKOFF_MULTIPLIER);
@@ -140,19 +136,19 @@ export function usePrinterSnapshotPreview(
       controller.abort();
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
-  }, [authRevision, directEnabled, effectiveProxyRoute, isPreviewVisible, proxyEnabled, proxySnapshotRoute, refreshIntervalMs, selectedProxyRoute, printerId]);
+  }, [active, authRevision, demandSession, directEnabled, effectiveProxyRoute, isPreviewVisible, proxyEnabled, proxySnapshotRoute, refreshIntervalMs, selectedProxyRoute, printerId]);
 
   useEffect(() => {
     if (!directEnabled || !effectiveDirectSnapshotUrl || getAuthenticatedCameraProxyRoute(effectiveDirectSnapshotUrl)) {
       return;
     }
-    if (!isPreviewVisible) return;
+    if (!active || !isPreviewVisible) return;
     const sourceUrl = effectiveDirectSnapshotUrl;
     let cancelled = false;
     let timeoutId: number | undefined;
     const refreshDirectSnapshot = () => {
       if (cancelled) return;
-      setDirectSnapshotState({ sourceUrl, src: getCacheBustedSnapshotUrl(sourceUrl) });
+      setDirectSnapshotState({ sourceUrl, demandSession, src: getCacheBustedSnapshotUrl(sourceUrl) });
       timeoutId = window.setTimeout(refreshDirectSnapshot, refreshIntervalMs);
     };
     timeoutId = window.setTimeout(refreshDirectSnapshot, 0);
@@ -160,10 +156,16 @@ export function usePrinterSnapshotPreview(
       cancelled = true;
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
-  }, [directEnabled, effectiveDirectSnapshotUrl, isPreviewVisible, refreshIntervalMs]);
+  }, [active, demandSession, directEnabled, effectiveDirectSnapshotUrl, isPreviewVisible, refreshIntervalMs]);
 
-  const hasCurrentProxySnapshot = !!effectiveProxyRoute && snapshotState.sourceKey === effectiveProxyRoute;
-  const hasCurrentDirectSnapshot = directEnabled && directSnapshotState.sourceUrl === effectiveDirectSnapshotUrl;
+  const hasCurrentProxySnapshot = active
+    && !!effectiveProxyRoute
+    && snapshotState.sourceKey === effectiveProxyRoute
+    && snapshotState.demandSession === demandSession;
+  const hasCurrentDirectSnapshot = active
+    && directEnabled
+    && directSnapshotState.sourceUrl === effectiveDirectSnapshotUrl
+    && directSnapshotState.demandSession === demandSession;
   return {
     previewContainerRef,
     snapshotSrc: hasCurrentProxySnapshot
@@ -173,5 +175,6 @@ export function usePrinterSnapshotPreview(
         : null,
     snapshotFailed: hasCurrentProxySnapshot ? snapshotState.failed : false,
     isPollingPaused: (proxyEnabled || directEnabled || !!proxySnapshotRoute) && !isPreviewVisible,
+    isPreviewVisible,
   };
 }
