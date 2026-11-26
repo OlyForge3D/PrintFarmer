@@ -5455,7 +5455,7 @@ public class PrintJobManagementService(
                 statusFilter = status;
             }
 
-            List<PrintJob> jobs = await _repository.GetTimelineJobsAsync(
+            List<PrintJobTimelineRow> jobs = await _repository.GetTimelineJobsAsync(
                 dateFrom,
                 dateTo,
                 printerGuid,
@@ -5466,8 +5466,8 @@ public class PrintJobManagementService(
             var events = jobs.Select(job => new TimelineEventDto
             {
                 JobId = job.Id.ToString(),
-                JobName = job.GcodeFile?.Name ?? job.Name,
-                PrinterName = job.AssignedPrinter?.Name ?? "Unassigned",
+                JobName = job.GcodeFileName ?? job.Name,
+                PrinterName = job.AssignedPrinterName ?? "Unassigned",
                 State = job.Status.ToString(),
                 EnteredAtUtc = job.Status == PrintJobStatus.Queued ? job.CreatedAt : job.ActualStartTime ?? job.CreatedAt,
                 ExitedAtUtc = job.Status == PrintJobStatus.Completed || job.Status == PrintJobStatus.Failed || job.Status == PrintJobStatus.Cancelled

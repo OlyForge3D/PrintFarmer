@@ -711,6 +711,42 @@ public class PrintJobManagementServiceQueueMappingTests
         repository.VerifyAll();
     }
 
+    [Fact]
+    public async Task GetTimelineAsync_ProjectedRows_PreserveDtoFallbacksTimestampsAndDurations()
+    {
+        DateTime created = new(2031, 4, 5, 6, 0, 0, DateTimeKind.Utc);
+        Guid printerId = Guid.NewGuid();
+        PrintJobTimelineRow queued = new(Guid.NewGuid(), "queued-job", "file.gcode", "alpha", PrintJobStatus.Queued,
+            created, created.AddMinutes(1), created.AddMinutes(2), null, TimeSpan.FromSeconds(90.9));
+        PrintJobTimelineRow completed = new(Guid.NewGuid(), "completed-job", null, null, PrintJobStatus.Completed,
+            created, created.AddMinutes(3), created.AddMinutes(4), TimeSpan.FromSeconds(3.9), TimeSpan.FromSeconds(2.5));
+        PrintJobTimelineRow printing = new(Guid.NewGuid(), "printing-job", null, "beta", PrintJobStatus.Printing,
+            created.AddTicks(1), null, created.AddMinutes(5), TimeSpan.FromSeconds(10), TimeSpan.Zero);
+        DateTime from = created.AddDays(-1);
+        DateTime to = created.AddDays(1);
+        Mock<IPrintJobManagementRepository> repository = new(MockBehavior.Strict);
+        repository.Setup(r => r.GetTimelineJobsAsync(from, to, printerId, PrintJobStatus.Completed, 42, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([queued, completed, printing]);
+        PrintJobManagementService service = CreateService(repository);
+
+        List<TimelineEventDto> events = (await service.GetTimelineAsync(from, to, printerId.ToString(), "completed", 42)).ToList();
+
+        Assert.Equal(3, events.Count);
+        TimelineEventDto first = events[0];
+        Assert.Equal((queued.Id.ToString(), "file.gcode", "alpha", "Queued"), (first.JobId, first.JobName, first.PrinterName, first.State));
+        Assert.Equal((created, (DateTime?)null), (first.EnteredAtUtc, first.ExitedAtUtc));
+        Assert.Equal(((int?)null, (int?)90, (decimal?)null), (first.DurationSeconds, first.EstimatedDurationSeconds, first.VariancePercent));
+        TimelineEventDto second = events[1];
+        Assert.Equal(("completed-job", "Unassigned", "Completed"), (second.JobName, second.PrinterName, second.State));
+        Assert.Equal((created.AddMinutes(3), (DateTime?)created.AddMinutes(4)), (second.EnteredAtUtc, second.ExitedAtUtc));
+        Assert.Equal(((int?)3, (int?)2, (decimal?)50m), (second.DurationSeconds, second.EstimatedDurationSeconds, second.VariancePercent));
+        TimelineEventDto third = events[2];
+        Assert.Equal(("printing-job", "beta", "Printing"), (third.JobName, third.PrinterName, third.State));
+        Assert.Equal((created.AddTicks(1), (DateTime?)null), (third.EnteredAtUtc, third.ExitedAtUtc));
+        Assert.Equal(((int?)10, (int?)0, (decimal?)null), (third.DurationSeconds, third.EstimatedDurationSeconds, third.VariancePercent));
+        repository.VerifyAll();
+    }
+
     private static PrintJobManagementService CreateService(
         Mock<IPrintJobManagementRepository> repository,
         IPartOutputSnapshotService? snapshots = null,
