@@ -44,9 +44,11 @@ import {
 import { usePrinterSummary } from '@/common/hooks/useApi';
 
 const CAMERA_SNAPSHOT_REFRESH_MS = 4_000;
-// A visible failure must persist this long before ranking demotes the card, so stream
-// reconnects and on-demand snapshot fallbacks do not make cards jump.
+// A visible failure must persist this long before the next re-rank demotes the card, so stream
+// reconnects and on-demand snapshot fallbacks are not mistaken for failures.
 const CAMERA_PREVIEW_FAILURE_SETTLE_MS = 5_000;
+// Time for the first visible previews to load before the one automatic re-rank after page load.
+const CAMERA_ORDER_SETTLE_MS = 4_000;
 
 const CAMERA_VIEW_OPTIONS: ViewModeOption<CameraView>[] = [
   { mode: 'all', kind: 'cards', title: 'All cameras' },
@@ -98,10 +100,28 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
     () => (printerSummaries ? new Map(printerSummaries.map((printer) => [printer.id, printer.isOnline])) : null),
     [printerSummaries],
   );
-  const orderedCameras = useMemo(
-    () => orderCamerasForDisplay(cameras, previewDeliveryById, printerOnlineById),
-    [cameras, previewDeliveryById, printerOnlineById],
-  );
+  // The displayed order is frozen between explicit re-rank points (initial settle, camera list
+  // change, Refresh) so cards never move under the user as images load or fail while scrolling.
+  const [rankRequest, setRankRequest] = useState(0);
+  const [ranking, setRanking] = useState<{ request: number; cameras: DisplayCameraDto[]; ids: string[] } | null>(null);
+  if (!ranking || ranking.request !== rankRequest || ranking.cameras !== cameras) {
+    setRanking({
+      request: rankRequest,
+      cameras,
+      ids: orderCamerasForDisplay(cameras, previewDeliveryById, printerOnlineById).map((camera) => camera.id),
+    });
+  }
+  const hasCameras = cameras.length > 0;
+  useEffect(() => {
+    if (!hasCameras) return;
+    const timeoutId = window.setTimeout(() => setRankRequest((request) => request + 1), CAMERA_ORDER_SETTLE_MS);
+    return () => window.clearTimeout(timeoutId);
+  }, [hasCameras]);
+  const orderedCameras = useMemo(() => {
+    if (!ranking || ranking.cameras !== cameras) return cameras;
+    const byId = new Map(cameras.map((camera) => [camera.id, camera]));
+    return ranking.ids.flatMap((id) => byId.get(id) ?? []);
+  }, [cameras, ranking]);
   const cameraGroups = useMemo<CameraGroup[] | null>(() => {
     if (activeView === 'location') return groupCamerasByLocation(orderedCameras);
     if (activeView === 'printer') return groupCamerasByPrinter(orderedCameras);
@@ -116,6 +136,7 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
   const loadCameras = async () => {
     setError(null);
     await camerasQuery.refetch();
+    setRankRequest((request) => request + 1);
   };
 
   const setTab = (nextTab: 'view' | 'manage') => {

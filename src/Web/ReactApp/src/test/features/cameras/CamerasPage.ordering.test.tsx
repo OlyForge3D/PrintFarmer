@@ -111,44 +111,71 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+async function refresh() {
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /refresh/i })); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+}
+
+async function settleInitialRanking() {
+  await act(async () => { await vi.advanceTimersByTimeAsync(4_000); });
+}
+
 describe('CamerasPage camera ordering', () => {
-  it('orders online cameras that delivered an image first, then online cameras without one, then offline cameras', async () => {
+  it('ranks delivering online cameras first, then online cameras without an image, then offline cameras', async () => {
     await renderSettledPage();
     expect(order()).toEqual(['Failing', 'Working', 'Unloaded', 'Standalone', 'Offline']);
 
     deliverFrame('Working');
     deliverFrame('Offline');
     deliverFrame('Standalone');
-    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    await settleInitialRanking();
 
     expect(order()).toEqual(['Working', 'Standalone', 'Failing', 'Unloaded', 'Offline']);
     expect(apiMock.getSnapshotPreview).not.toHaveBeenCalled();
   });
 
-  it('demotes a delivering camera only after a visible failure persists, and not on later frames', async () => {
+  it('does not move cards as images load after the initial ranking, and keeps focus in place', async () => {
+    await renderSettledPage();
+    await settleInitialRanking();
+    expect(order()).toEqual(['Failing', 'Working', 'Unloaded', 'Standalone', 'Offline']);
+
+    const rotate = within(screen.getByRole('article', { name: 'Standalone camera' })).getAllByRole('button')[0];
+    rotate.focus();
+    deliverFrame('Standalone');
+    deliverFrame('Working');
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+
+    expect(order()).toEqual(['Failing', 'Working', 'Unloaded', 'Standalone', 'Offline']);
+    expect(document.activeElement).toBe(rotate);
+
+    await refresh();
+    expect(order()).toEqual(['Working', 'Standalone', 'Failing', 'Unloaded', 'Offline']);
+  });
+
+  it('demotes a delivering camera on refresh only after a visible failure persists', async () => {
     await renderSettledPage();
     deliverFrame('Working');
     deliverFrame('Standalone');
-    expect(order()).toEqual(['Working', 'Standalone', 'Failing', 'Unloaded', 'Offline']);
-
-    streams[streamUrl(2)] = { streamSrc: 'blob:working-2', streamUnsupported: false, streamFailed: false };
-    cameraServiceMock.getDisplayCameras.mockResolvedValue([...cameras]);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /refresh/i })); });
-    deliverFrame('Working');
+    await settleInitialRanking();
     expect(order()).toEqual(['Working', 'Standalone', 'Failing', 'Unloaded', 'Offline']);
 
     streams[streamUrl(2)] = { streamSrc: null, streamUnsupported: false, streamFailed: true };
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /refresh/i })); });
+    await refresh();
     await act(async () => { await vi.advanceTimersByTimeAsync(4_000); });
+    await refresh();
     expect(order()[0]).toBe('Working');
 
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(order()[0]).toBe('Working');
+    await refresh();
     expect(order()).toEqual(['Standalone', 'Failing', 'Working', 'Unloaded', 'Offline']);
   });
 
   it('keeps a delivering camera first while its preview is paused because the tab is hidden', async () => {
     await renderSettledPage();
     deliverFrame('Standalone');
+    await settleInitialRanking();
+    expect(order()[0]).toBe('Standalone');
 
     // Even if a paused card still reports a stale failure, it must not be demoted while hidden.
     streamMock.useAuthenticatedMjpegStream.mockImplementation((url: string) => streams[url]);
@@ -156,6 +183,7 @@ describe('CamerasPage camera ordering', () => {
     documentVisibility = 'hidden';
     act(() => { document.dispatchEvent(new Event('visibilitychange')); });
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    await refresh();
 
     expect(order()[0]).toBe('Standalone');
   });
@@ -164,7 +192,7 @@ describe('CamerasPage camera ordering', () => {
     await renderSettledPage('/cameras?view=location');
     const workshop = screen.getByRole('region', { name: /Workshop/ });
     deliverFrame('Standalone');
-    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    await settleInitialRanking();
 
     expect(order(workshop)).toEqual(['Standalone', 'Failing', 'Working', 'Unloaded', 'Offline']);
   });
@@ -173,6 +201,7 @@ describe('CamerasPage camera ordering', () => {
     apiMock.getPrinterSummary.mockRejectedValue(new Error('forbidden'));
     await renderSettledPage();
     deliverFrame('Offline');
+    await settleInitialRanking();
 
     expect(order()).toEqual(['Offline', 'Failing', 'Working', 'Unloaded', 'Standalone']);
   });
