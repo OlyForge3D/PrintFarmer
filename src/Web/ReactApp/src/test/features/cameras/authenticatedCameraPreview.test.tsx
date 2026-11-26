@@ -62,6 +62,40 @@ describe('authenticated camera previews', () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:camera-frame');
   });
 
+  it('does not poll an explicit proxy snapshot until it is demanded and never resurfaces a pre-pause frame', async () => {
+    const { result, rerender, unmount } = renderHook(
+      ({ active }) => usePrinterSnapshotPreview(
+        undefined,
+        false,
+        10_000,
+        null,
+        false,
+        '/api/cameras/camera-1/snapshot',
+        { active },
+      ),
+      { initialProps: { active: false } },
+    );
+    await act(async () => {});
+    expect(apiMock.getSnapshotPreview).not.toHaveBeenCalled();
+    expect(result.current.snapshotSrc).toBeNull();
+
+    rerender({ active: true });
+    await waitFor(() => expect(result.current.snapshotSrc).toBe('blob:camera-frame'));
+    expect(apiMock.getSnapshotPreview).toHaveBeenCalledOnce();
+
+    rerender({ active: false });
+    expect(result.current.snapshotSrc).toBeNull();
+    expect((apiMock.getSnapshotPreview.mock.calls[0][1] as AbortSignal).aborted).toBe(true);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:camera-frame');
+
+    apiMock.getSnapshotPreview.mockReturnValueOnce(new Promise(() => {}));
+    rerender({ active: true });
+    await act(async () => {});
+    expect(apiMock.getSnapshotPreview).toHaveBeenCalledTimes(2);
+    expect(result.current.snapshotSrc).toBeNull();
+    unmount();
+  });
+
   it('sends the current bearer token to a validated stream proxy and aborts/revokes on unmount', async () => {
     let fetchSignal: AbortSignal | undefined;
     const body = new ReadableStream<Uint8Array>({

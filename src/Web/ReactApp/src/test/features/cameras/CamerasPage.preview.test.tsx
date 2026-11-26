@@ -161,6 +161,27 @@ describe('CamerasPage camera previews', () => {
     expect(screen.getByText('Preview failed')).toHaveClass('sr-only');
   });
 
+  it('does not request the protected snapshot while a healthy live stream is displayed', async () => {
+    cameraServiceMock.getDisplayCameras.mockResolvedValue([
+      createCamera({
+        streamUrl: `/api/cameras/${cameraId}/stream`,
+        accessMode: CameraAccessMode.StreamAndSnapshot,
+        streamFormat: CameraStreamFormat.Mjpeg,
+      }),
+    ]);
+    streamMock.useAuthenticatedMjpegStream.mockImplementation((_url, enabled) => ({
+      streamSrc: enabled ? 'blob:live-frame' : null,
+      streamUnsupported: false,
+      streamFailed: false,
+    }));
+
+    renderPage();
+
+    expect(await screen.findByRole('img', { name: 'x400 Camera live camera feed' })).toHaveAttribute('src', 'blob:live-frame');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(apiMock.getSnapshotPreview).not.toHaveBeenCalled();
+  });
+
   it('does not fall back to an unauthenticated image request when proxy loading fails', async () => {
     apiMock.getSnapshotPreview.mockRejectedValue(new Error('HTTP 502'));
 
