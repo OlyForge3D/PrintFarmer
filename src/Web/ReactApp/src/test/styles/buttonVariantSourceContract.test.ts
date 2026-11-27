@@ -909,12 +909,9 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
    * That still passes AA, but the margin is 0.15 rather than the 0.49 an earlier
    * revision of this comment claimed from a surface those sites do not sit on.
    *
-   * The count is 6 sites / 7 tokens lexically, of which 5 are reachable at
-   * runtime: `TagInput.tsx:291` is a ternary whose accent branch is gated on
-   * the same condition that selects `variant='primary'`, so its accent spelling
-   * never coexists with the bare variant. Two reviewers reported 6 and 5 and
-   * both were right about different populations; the difference is recorded
-   * rather than resolved because a future edit to that ternary makes 6 correct.
+   * The count is 5 sites / 6 tokens lexically; all five are reachable at
+   * runtime. The unreferenced TagInput component that contained a sixth,
+   * unreachable accent branch has been removed.
    *
    * Matching is per token via `bareUtility`, not by regex over the raw string:
    * that is what makes it see `!text-pf-error`, `text-pf-error!` and a token
